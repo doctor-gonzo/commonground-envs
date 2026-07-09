@@ -76,8 +76,6 @@ def load_snapshots(
 ) -> list[dict[str, Any]]:
     """Load JSONL snapshots and apply deterministic difficulty filters."""
 
-    if masked_vote_count is not None and masked_vote_count < 0:
-        raise ValueError("masked_vote_count must be non-negative")
     snapshots = []
     for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
         if not line.strip():
@@ -97,7 +95,7 @@ def apply_masked_vote_count(
     snapshot: dict[str, Any],
     masked_vote_count: int | None,
 ) -> dict[str, Any]:
-    """Return a copy of a snapshot with exactly ``masked_vote_count`` masked cells."""
+    """Return a copy of a snapshot with capped ``masked_vote_count`` masked cells."""
 
     prepared = copy.deepcopy(snapshot)
     if masked_vote_count is None:
@@ -110,10 +108,7 @@ def apply_masked_vote_count(
         for statement_index, vote in enumerate(row)
         if vote in VALID_VOTES
     ]
-    if masked_vote_count > len(candidates):
-        raise ValueError(
-            f"masked_vote_count={masked_vote_count} exceeds known vote count {len(candidates)}"
-        )
+    target_count = min(max(masked_vote_count, 0), len(candidates))
 
     selected: list[tuple[int, int]] = []
     original_masked = [
@@ -121,12 +116,12 @@ def apply_masked_vote_count(
         for participant_index, statement_index in prepared.get("masked_cells", [])
     ]
     for cell in original_masked:
+        if len(selected) == target_count:
+            break
         if cell in candidates and cell not in selected:
             selected.append(cell)
-        if len(selected) == masked_vote_count:
-            break
     for cell in sorted(candidates):
-        if len(selected) == masked_vote_count:
+        if len(selected) == target_count:
             break
         if cell not in selected:
             selected.append(cell)

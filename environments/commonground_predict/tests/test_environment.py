@@ -8,7 +8,7 @@ from typing import Any
 import verifiers as vf
 
 from commonground_predict import PredictionJsonParser, load_environment
-from commonground_predict.environment import brier
+from commonground_predict.environment import apply_masked_vote_count, brier
 
 
 def test_load_environment_builds_bundled_split() -> None:
@@ -90,6 +90,38 @@ def test_masked_vote_count_knob_changes_held_out_count() -> None:
     assert len(json.loads(row["held_out"])) == 3
 
 
+def test_masked_vote_count_zero_masks_no_cells_and_scores() -> None:
+    env = load_environment(masked_vote_count=0, min_cluster_count=2)
+    assert_env_rows_have_no_masks(env)
+
+    row = dict(env.get_eval_dataset()[0])
+    state = score_row(env, row, {})
+
+    assert state["reward"] == 0.0
+    assert state["metrics"]["vote_accuracy"] == 0.0
+    assert state["metrics"]["brier"] == 0.0
+
+
+def test_masked_vote_count_negative_masks_no_cells() -> None:
+    env = load_environment(masked_vote_count=-10, min_cluster_count=2)
+
+    assert_env_rows_have_no_masks(env)
+
+
+def test_masked_vote_count_huge_caps_at_candidate_pool() -> None:
+    masked = apply_masked_vote_count(mask_count_snapshot(), 1_000)
+
+    assert len(masked["held_out"]) == 4
+    assert set(masked["held_out"]) == {"0,0", "0,1", "1,0", "1,1"}
+    assert {tuple(cell) for cell in masked["masked_cells"]} == {
+        (0, 0),
+        (0, 1),
+        (1, 0),
+        (1, 1),
+    }
+    assert all(vote is None for row in masked["votes"] for vote in row)
+
+
 def score_row(
     env: vf.SingleTurnEnv,
     row: dict[str, Any],
@@ -118,6 +150,36 @@ def score_brier_prediction(prediction: dict[Any, float]) -> float:
         }
     ]
     return asyncio.run(brier(completion, {"0,1": 1}, PredictionJsonParser()))
+
+
+def assert_env_rows_have_no_masks(env: vf.SingleTurnEnv) -> None:
+    for row in env.get_eval_dataset():
+        row = dict(row)
+        snapshot = json.loads(row["snapshot"])
+        info = json.loads(row["info"])
+
+        assert json.loads(row["held_out"]) == {}
+        assert snapshot["held_out"] == {}
+        assert snapshot["masked_cells"] == []
+        assert info["masked_vote_count"] == 0
+
+
+def mask_count_snapshot() -> dict[str, Any]:
+    return {
+        "session_id": "mask-count-test",
+        "statements": [
+            {"index": 0, "text": "Statement A"},
+            {"index": 1, "text": "Statement B"},
+        ],
+        "votes": [
+            [1, None],
+            [0, -1],
+        ],
+        "masked_cells": [[0, 1]],
+        "held_out": {"0,1": -1},
+        "clusters": [0, 1],
+        "meta": {"synthetic": True},
+    }
 
 
 def wrong_vote(vote: int) -> int:

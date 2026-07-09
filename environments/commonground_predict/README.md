@@ -42,8 +42,9 @@ Environment variable:
 Difficulty knobs passed to `load_environment(**kwargs)`:
 
 - `masked_vote_count`: deterministically remasks each snapshot to this many
-  held-out votes. If omitted, each snapshot uses the masks already present in
-  the data.
+  held-out votes. Non-positive values mask no votes; values larger than the
+  known-vote pool mask every known vote. If omitted, each snapshot uses the
+  masks already present in the data.
 - `min_cluster_count`: filters snapshots to those with at least this many
   participant clusters.
 
