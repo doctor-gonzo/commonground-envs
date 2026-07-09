@@ -1,0 +1,28 @@
+[project]
+name = "commonground-predict"
+version = "0.0.0"
+description = "Common Ground masked-vote prediction environment for Verifiers."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "commonground-score",
+    "verifiers==0.1.14",
+]
+
+[build-system]
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build]
+include = [
+    "commonground_predict/**",
+    "data/**",
+    "pyproject.toml",
+]
+
+[tool.verifiers.eval]
+num_examples = 20
+rollouts_per_example = 1
+
+[tool.uv.sources]
+commonground-score = { workspace = true }

@@ -1,0 +1,9 @@
+/.codex/*
+/.vscode/
+.venv/
+.uv-cache/
+__pycache__/
+*.pyc
+.pytest_cache/
+dist/
+*.egg-info/

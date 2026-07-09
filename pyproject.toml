@@ -1,0 +1,24 @@
+[project]
+name = "commonground-envs"
+version = "0.0.0"
+description = "Workspace for Common Ground deliberation evaluation environments."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4.0",
+]
+
+[tool.uv.workspace]
+members = [
+    "packages/commonground-score",
+    "environments/commonground_predict",
+]
+
+[tool.pytest.ini_options]
+testpaths = [
+    "packages/commonground-score/tests",
+    "environments/commonground_predict/tests",
+]
