@@ -14,8 +14,9 @@ using the Verifiers environment interface.
 
 ## Data Provenance
 
-The intended real-data source is snapshots exported from Context Engine
-sessions, limited to plaintext/public content only. Participant identifiers are
+The intended real-data source is snapshots exported from the public
+[Context Engine](https://github.com/AgalmicSoftware/context-engine) project,
+limited to plaintext/public content only. Participant identifiers are
 pseudonymized before export, and published real-data splits must preserve a
 k-anonymity floor of `k=5`.
 

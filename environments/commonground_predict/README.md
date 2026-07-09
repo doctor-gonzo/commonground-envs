@@ -21,9 +21,10 @@ Each source line is a JSON session snapshot:
 
 The bundled split at `data/eval_synthetic.jsonl` contains 20 seeded synthetic
 snapshots with coherent planted clusters plus noise. It is a SYNTHETIC
-placeholder until real Context Engine exports land. Real exported splits should
-use plaintext/public content only, pseudonymized participants, and a
-k-anonymity floor of `k=5`.
+placeholder until real exports from the public
+[Context Engine](https://github.com/AgalmicSoftware/context-engine) project
+land. Real exported splits should use plaintext/public content only,
+pseudonymized participants, and a k-anonymity floor of `k=5`.
 
 ## Methodology Attribution
 
