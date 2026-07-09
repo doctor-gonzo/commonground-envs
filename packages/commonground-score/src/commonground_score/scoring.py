@@ -91,10 +91,10 @@ def brier_score(
 
     Probabilistic predictions are dictionaries keyed by ``agree``, ``disagree``,
     and ``pass``. Valid non-negative finite mappings are normalized to sum to
-    one. Invalid mappings fall back to a one-hot argmax when they contain at
-    least one finite class score. Point predictions using ``1``, ``-1``, or
-    ``0`` are converted to one-hot probabilities. Missing predictions use an
-    all-zero vector.
+    one. Invalid or non-normalizable mappings score as the uniform
+    distribution, representing no information. Point predictions using ``1``,
+    ``-1``, or ``0`` are converted to one-hot probabilities. Missing
+    predictions use an all-zero vector.
     """
 
     if not held_out:
@@ -138,14 +138,11 @@ def _mapping_prediction_probs(prediction: Mapping[object, object]) -> dict[str, 
     total = sum(scores.get(label, 0.0) for label in _LABELS)
     if scores and not invalid and total > 0:
         return {label: scores.get(label, 0.0) / total for label in _LABELS}
-    return _one_hot_argmax(scores)
+    return _uniform_probs()
 
 
-def _one_hot_argmax(scores: Mapping[str, float]) -> dict[str, float]:
-    if not scores:
-        return {label: 0.0 for label in _LABELS}
-    best_label = max(scores.items(), key=lambda item: item[1])[0]
-    return {label: float(label == best_label) for label in _LABELS}
+def _uniform_probs() -> dict[str, float]:
+    return {label: 1 / len(_LABELS) for label in _LABELS}
 
 
 def _coerce_class_label(key: object) -> str | None:

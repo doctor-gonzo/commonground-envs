@@ -77,10 +77,10 @@ def test_brier_scores_uniform_probability_vector() -> None:
     assert isclose(score, 2 / 3, abs_tol=1e-12)
 
 
-def test_brier_invalid_probability_mapping_falls_back_to_one_hot_argmax() -> None:
+def test_brier_invalid_probability_mapping_scores_as_uniform() -> None:
     score = score_brier_prediction({"agree": 0.8, "disagree": -0.1, "pass": 0.3})
 
-    assert score == 0.0
+    assert isclose(score, 2 / 3, abs_tol=1e-12)
 
 
 def test_masked_vote_count_knob_changes_held_out_count() -> None:

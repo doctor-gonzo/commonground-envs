@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from math import isclose
+from math import isclose, nan
 
 from commonground_score import (
     brier_score,
@@ -68,15 +68,31 @@ def test_brier_score_normalizes_probabilistic_mapping_predictions() -> None:
     )
 
 
-def test_brier_score_invalid_probability_mappings_fall_back_to_one_hot_argmax() -> None:
-    assert (
-        brier_score({"0,1": {"agree": 0, "disagree": 0, "pass": 0}}, {"0,1": 1})
-        == 0.0
+def test_brier_score_all_zero_probability_mapping_scores_as_uniform() -> None:
+    assert isclose(
+        brier_score({"0,1": {"agree": 0, "disagree": 0, "pass": 0}}, {"0,1": 1}),
+        2 / 3,
+        abs_tol=1e-12,
     )
-    assert (
+
+
+def test_brier_score_negative_probability_mapping_scores_as_uniform() -> None:
+    assert isclose(
         brier_score(
             {"0,1": {"agree": 0.4, "disagree": 0.9, "pass": -0.1}},
             {"0,1": -1},
-        )
-        == 0.0
+        ),
+        2 / 3,
+        abs_tol=1e-12,
+    )
+
+
+def test_brier_score_nan_probability_mapping_scores_as_uniform() -> None:
+    assert isclose(
+        brier_score(
+            {"0,1": {"agree": nan, "disagree": 0.2, "pass": 0.1}},
+            {"0,1": 1},
+        ),
+        2 / 3,
+        abs_tol=1e-12,
     )

@@ -221,7 +221,7 @@ async def brier(
     held_out: Mapping[str, int] | str,
     parser: PredictionJsonParser,
 ) -> float:
-    """Metric: multiclass Brier score over masked cells."""
+    """Metric: delegated Brier score; invalid probability mappings score uniform."""
 
     parsed = parse_completion_predictions(completion, parser)
     brier_predictions = coerce_brier_predictions(parsed)
