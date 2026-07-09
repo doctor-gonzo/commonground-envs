@@ -58,3 +58,25 @@ def test_brier_score_accepts_point_and_probabilistic_predictions() -> None:
         0.06,
         abs_tol=1e-12,
     )
+
+
+def test_brier_score_normalizes_probabilistic_mapping_predictions() -> None:
+    assert isclose(
+        brier_score({"0,1": {"agree": 8, "disagree": 1, "pass": 1}}, {"0,1": 1}),
+        0.06,
+        abs_tol=1e-12,
+    )
+
+
+def test_brier_score_invalid_probability_mappings_fall_back_to_one_hot_argmax() -> None:
+    assert (
+        brier_score({"0,1": {"agree": 0, "disagree": 0, "pass": 0}}, {"0,1": 1})
+        == 0.0
+    )
+    assert (
+        brier_score(
+            {"0,1": {"agree": 0.4, "disagree": 0.9, "pass": -0.1}},
+            {"0,1": -1},
+        )
+        == 0.0
+    )

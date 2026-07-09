@@ -263,38 +263,16 @@ def coerce_point_predictions(predictions: Mapping[str, Any]) -> dict[str, int]:
     return coerced
 
 
-def coerce_brier_predictions(predictions: Mapping[str, Any]) -> dict[str, int | dict[str, float]]:
-    coerced: dict[str, int | dict[str, float]] = {}
+def coerce_brier_predictions(predictions: Mapping[str, Any]) -> dict[str, int | dict[Any, Any]]:
+    coerced: dict[str, int | dict[Any, Any]] = {}
     for cell_id, prediction in predictions.items():
         if isinstance(prediction, Mapping):
-            probs = coerce_probability_prediction(prediction)
-            if probs is not None:
-                coerced[str(cell_id)] = probs
-                continue
+            coerced[str(cell_id)] = dict(prediction)
+            continue
         vote = coerce_vote(prediction)
         if vote is not None:
             coerced[str(cell_id)] = vote
     return coerced
-
-
-def coerce_probability_prediction(prediction: Mapping[str, Any]) -> dict[str, float] | None:
-    probs: dict[str, float] = {}
-    for key, value in prediction.items():
-        label = coerce_class_label(key)
-        if label is None:
-            continue
-        try:
-            probability = float(value)
-        except (TypeError, ValueError):
-            return None
-        if not isfinite(probability) or probability < 0:
-            return None
-        probs[label] = probability
-
-    total = sum(probs.values())
-    if not probs or total == 0:
-        return None
-    return {label: probs.get(label, 0.0) / total for label in LABEL_TO_VOTE}
 
 
 def coerce_vote(prediction: Any) -> int | None:

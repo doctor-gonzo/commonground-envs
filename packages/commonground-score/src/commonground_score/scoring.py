@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from math import sqrt
+from math import isfinite, sqrt
 from typing import Mapping
 
 Vote = int | None
 PointPrediction = int
-ProbPrediction = Mapping[str, float]
+ProbPrediction = Mapping[object, object]
 Prediction = PointPrediction | ProbPrediction
 
 _LABEL_TO_VOTE = {"agree": 1, "disagree": -1, "pass": 0}
@@ -90,8 +90,11 @@ def brier_score(
     """Return mean multiclass Brier score for agree/disagree/pass predictions.
 
     Probabilistic predictions are dictionaries keyed by ``agree``, ``disagree``,
-    and ``pass``. Point predictions using ``1``, ``-1``, or ``0`` are converted
-    to one-hot probabilities. Missing predictions use an all-zero vector.
+    and ``pass``. Valid non-negative finite mappings are normalized to sum to
+    one. Invalid mappings fall back to a one-hot argmax when they contain at
+    least one finite class score. Point predictions using ``1``, ``-1``, or
+    ``0`` are converted to one-hot probabilities. Missing predictions use an
+    all-zero vector.
     """
 
     if not held_out:
@@ -106,8 +109,53 @@ def brier_score(
 
 def _prediction_probs(prediction: Prediction | None) -> dict[str, float]:
     if isinstance(prediction, Mapping):
-        return {label: float(prediction.get(label, 0.0)) for label in _LABELS}
+        return _mapping_prediction_probs(prediction)
     if prediction in _VOTE_TO_LABEL:
         label = _VOTE_TO_LABEL[prediction]
         return {candidate: float(candidate == label) for candidate in _LABELS}
     return {label: 0.0 for label in _LABELS}
+
+
+def _mapping_prediction_probs(prediction: Mapping[object, object]) -> dict[str, float]:
+    scores: dict[str, float] = {}
+    invalid = False
+    for key, value in prediction.items():
+        label = _coerce_class_label(key)
+        if label is None:
+            continue
+        try:
+            score = float(value)
+        except (TypeError, ValueError):
+            invalid = True
+            continue
+        if not isfinite(score):
+            invalid = True
+            continue
+        scores[label] = score
+        if score < 0:
+            invalid = True
+
+    total = sum(scores.get(label, 0.0) for label in _LABELS)
+    if scores and not invalid and total > 0:
+        return {label: scores.get(label, 0.0) / total for label in _LABELS}
+    return _one_hot_argmax(scores)
+
+
+def _one_hot_argmax(scores: Mapping[str, float]) -> dict[str, float]:
+    if not scores:
+        return {label: 0.0 for label in _LABELS}
+    best_label = max(scores.items(), key=lambda item: item[1])[0]
+    return {label: float(label == best_label) for label in _LABELS}
+
+
+def _coerce_class_label(key: object) -> str | None:
+    if isinstance(key, bool):
+        return None
+    if isinstance(key, int) and key in _VOTE_TO_LABEL:
+        return _VOTE_TO_LABEL[key]
+    if isinstance(key, str):
+        if key in _LABEL_TO_VOTE:
+            return key
+        if key in {"-1", "0", "1"}:
+            return _VOTE_TO_LABEL[int(key)]
+    return None
