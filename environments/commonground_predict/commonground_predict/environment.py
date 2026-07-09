@@ -6,6 +6,7 @@ import copy
 import json
 import os
 from collections.abc import Mapping
+from math import isfinite
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +20,7 @@ DATA_ENV_VAR = "COMMONGROUND_DATA_PATH"
 BUNDLED_EVAL_PATH = Path(__file__).resolve().parents[1] / "data" / "eval_synthetic.jsonl"
 VALID_VOTES = {-1, 0, 1}
 LABEL_TO_VOTE = {"agree": 1, "disagree": -1, "pass": 0}
+VOTE_TO_LABEL = {vote: label for label, vote in LABEL_TO_VOTE.items()}
 
 
 class PredictionJsonParser(vf.Parser):
@@ -264,18 +266,35 @@ def coerce_point_predictions(predictions: Mapping[str, Any]) -> dict[str, int]:
 def coerce_brier_predictions(predictions: Mapping[str, Any]) -> dict[str, int | dict[str, float]]:
     coerced: dict[str, int | dict[str, float]] = {}
     for cell_id, prediction in predictions.items():
+        if isinstance(prediction, Mapping):
+            probs = coerce_probability_prediction(prediction)
+            if probs is not None:
+                coerced[str(cell_id)] = probs
+                continue
         vote = coerce_vote(prediction)
         if vote is not None:
             coerced[str(cell_id)] = vote
-            continue
-        if isinstance(prediction, Mapping):
-            probs = {}
-            for label in LABEL_TO_VOTE:
-                if label in prediction:
-                    probs[label] = float(prediction[label])
-            if probs:
-                coerced[str(cell_id)] = probs
     return coerced
+
+
+def coerce_probability_prediction(prediction: Mapping[str, Any]) -> dict[str, float] | None:
+    probs: dict[str, float] = {}
+    for key, value in prediction.items():
+        label = coerce_class_label(key)
+        if label is None:
+            continue
+        try:
+            probability = float(value)
+        except (TypeError, ValueError):
+            return None
+        if not isfinite(probability) or probability < 0:
+            return None
+        probs[label] = probability
+
+    total = sum(probs.values())
+    if not probs or total == 0:
+        return None
+    return {label: probs.get(label, 0.0) / total for label in LABEL_TO_VOTE}
 
 
 def coerce_vote(prediction: Any) -> int | None:
@@ -288,13 +307,37 @@ def coerce_vote(prediction: Any) -> int | None:
     if isinstance(prediction, str) and prediction in {"-1", "0", "1"}:
         return int(prediction)
     if isinstance(prediction, Mapping):
-        vote_scores = {
-            LABEL_TO_VOTE[label]: float(prediction[label])
-            for label in LABEL_TO_VOTE
-            if label in prediction
-        }
+        vote_scores = coerce_vote_scores(prediction)
         if vote_scores:
             return max(vote_scores.items(), key=lambda item: item[1])[0]
+    return None
+
+
+def coerce_vote_scores(prediction: Mapping[str, Any]) -> dict[int, float]:
+    vote_scores: dict[int, float] = {}
+    for key, value in prediction.items():
+        label = coerce_class_label(key)
+        if label is None:
+            continue
+        try:
+            score = float(value)
+        except (TypeError, ValueError):
+            continue
+        if isfinite(score):
+            vote_scores[LABEL_TO_VOTE[label]] = score
+    return vote_scores
+
+
+def coerce_class_label(key: Any) -> str | None:
+    if isinstance(key, bool):
+        return None
+    if isinstance(key, int) and key in VALID_VOTES:
+        return VOTE_TO_LABEL[key]
+    if isinstance(key, str):
+        if key in LABEL_TO_VOTE:
+            return key
+        if key in {"-1", "0", "1"}:
+            return VOTE_TO_LABEL[int(key)]
     return None
 
 
