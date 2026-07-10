@@ -67,8 +67,8 @@ masked cells. Models must return strict JSON:
 {"predictions":{"<participant_idx>,<statement_idx>":1}}
 ```
 
-Values must be `1`, `-1`, or `0`. The parser tolerates fenced JSON and extracts
-the first JSON object from the completion.
+Values must be `1`, `-1`, or `0`. The parser tolerates fenced JSON and uses the
+last decodable JSON object containing a `predictions` object.
 
 ## Scoring
 

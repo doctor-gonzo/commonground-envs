@@ -25,7 +25,7 @@ VOTE_TO_LABEL = {vote: label for label, vote in LABEL_TO_VOTE.items()}
 
 
 class PredictionJsonParser(vf.Parser):
-    """Extract the first JSON object from plain text or fenced completions."""
+    """Extract the last predictions JSON object from a completion."""
 
     def parse(self, text: str) -> dict[str, Any]:
         try:
@@ -377,19 +377,20 @@ def coerce_point_predictions(predictions: Mapping[str, Any]) -> dict[str, int]:
     for cell_id, prediction in predictions.items():
         vote = coerce_vote(prediction)
         if vote is not None:
-            coerced[str(cell_id)] = vote
+            coerced["".join(str(cell_id).split())] = vote
     return coerced
 
 
 def coerce_brier_predictions(predictions: Mapping[str, Any]) -> dict[str, int | dict[Any, Any]]:
     coerced: dict[str, int | dict[Any, Any]] = {}
     for cell_id, prediction in predictions.items():
+        normalized_cell_id = "".join(str(cell_id).split())
         if isinstance(prediction, Mapping):
-            coerced[str(cell_id)] = dict(prediction)
+            coerced[normalized_cell_id] = dict(prediction)
             continue
         vote = coerce_vote(prediction)
         if vote is not None:
-            coerced[str(cell_id)] = vote
+            coerced[normalized_cell_id] = vote
     return coerced
 
 
@@ -439,6 +440,9 @@ def coerce_class_label(key: Any) -> str | None:
 
 def extract_json_object(text: str) -> Any:
     decoder = json.JSONDecoder()
+    last_decodable: Any = None
+    last_with_predictions: dict[str, Any] | None = None
+    found_decodable = False
     for index, character in enumerate(text):
         if character != "{":
             continue
@@ -446,7 +450,14 @@ def extract_json_object(text: str) -> Any:
             parsed, _ = decoder.raw_decode(text[index:])
         except json.JSONDecodeError:
             continue
-        return parsed
+        found_decodable = True
+        last_decodable = parsed
+        if isinstance(parsed, dict) and isinstance(parsed.get("predictions"), dict):
+            last_with_predictions = parsed
+    if last_with_predictions is not None:
+        return last_with_predictions
+    if found_decodable:
+        return last_decodable
     raise ValueError("no JSON object found")
 
 

@@ -10,7 +10,12 @@ import pytest
 import verifiers as vf
 
 from commonground_predict import PredictionJsonParser, load_environment
-from commonground_predict.environment import DATA_ENV_VAR, apply_masked_vote_count, brier
+from commonground_predict.environment import (
+    DATA_ENV_VAR,
+    apply_masked_vote_count,
+    brier,
+    vote_accuracy,
+)
 
 
 def test_load_environment_builds_bundled_split() -> None:
@@ -95,6 +100,46 @@ def test_parser_handles_fenced_json() -> None:
     )
 
     assert parsed == {"predictions": {"0,1": 1, "2,3": 0}}
+
+
+def test_parser_prefers_last_object_with_predictions() -> None:
+    parser = PredictionJsonParser()
+
+    parsed = parser.parse(
+        'I considered {} first. Final answer: {"predictions":{"0,1":1}}'
+    )
+
+    assert parsed == {"predictions": {"0,1": 1}}
+
+
+def test_parser_falls_back_to_last_decodable_object() -> None:
+    parser = PredictionJsonParser()
+
+    parsed = parser.parse('{"draft":true} then {"final":true}')
+
+    assert parsed == {"final": True}
+
+
+def test_cell_keys_ignore_whitespace_for_point_and_brier_scores() -> None:
+    parser = PredictionJsonParser()
+    completion = [
+        {
+            "role": "assistant",
+            "content": json.dumps(
+                {
+                    "predictions": {
+                        "0, 5": {"agree": 1.0, "disagree": 0.0, "pass": 0.0}
+                    }
+                }
+            ),
+        }
+    ]
+
+    accuracy = asyncio.run(vote_accuracy(completion, {"0,5": 1}, parser))
+    brier_score = asyncio.run(brier(completion, {"0,5": 1}, parser))
+
+    assert accuracy == 1.0
+    assert brier_score == 0.0
 
 
 def test_rubric_scores_perfect_completion_at_one() -> None:
