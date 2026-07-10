@@ -3,12 +3,13 @@ from __future__ import annotations
 import asyncio
 import json
 from math import isclose
+from pathlib import Path
 from typing import Any
 
 import verifiers as vf
 
 from commonground_predict import PredictionJsonParser, load_environment
-from commonground_predict.environment import apply_masked_vote_count, brier
+from commonground_predict.environment import DATA_ENV_VAR, apply_masked_vote_count, brier
 
 
 def test_load_environment_builds_bundled_split() -> None:
@@ -17,6 +18,24 @@ def test_load_environment_builds_bundled_split() -> None:
     assert isinstance(env, vf.SingleTurnEnv)
     assert env.env_id == "commonground-predict"
     assert len(env.get_eval_dataset()) == 20
+
+
+def test_load_environment_builds_ce_demo_split_from_env(monkeypatch: Any) -> None:
+    data_path = Path(__file__).resolve().parents[1] / "data" / "eval_ce_demo.jsonl"
+    monkeypatch.setenv(DATA_ENV_VAR, str(data_path))
+
+    env = load_environment(masked_vote_count=3)
+    row = dict(env.get_eval_dataset()[0])
+    held_out = json.loads(row["held_out"])
+    info = json.loads(row["info"])
+
+    assert len(env.get_eval_dataset()) == 1
+    assert info["synthetic"] is False
+    assert info["cluster_count"] == 2
+    assert len(held_out) == 3
+    state = score_row(env, row, held_out)
+    assert state["reward"] == 1.0
+    assert state["metrics"]["vote_accuracy"] == 1.0
 
 
 def test_parser_handles_fenced_json() -> None:

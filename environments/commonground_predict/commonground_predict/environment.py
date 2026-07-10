@@ -82,7 +82,7 @@ def load_snapshots(
             continue
         snapshot = json.loads(line)
         if min_cluster_count is not None:
-            cluster_count = len(set(snapshot.get("clusters", [])))
+            cluster_count = snapshot_cluster_count(snapshot)
             if cluster_count < min_cluster_count:
                 continue
         snapshots.append(apply_masked_vote_count(snapshot, masked_vote_count))
@@ -151,12 +151,26 @@ def reconstruct_known_votes(snapshot: Mapping[str, Any]) -> list[list[int | None
     return votes
 
 
+def snapshot_cluster_count(snapshot: Mapping[str, Any]) -> int:
+    """Return cluster count for synthetic ID lists or exported cluster objects."""
+
+    cluster_ids: set[Any] = set()
+    for index, cluster in enumerate(snapshot.get("clusters", [])):
+        if isinstance(cluster, Mapping):
+            cluster = cluster.get("id", index)
+        try:
+            cluster_ids.add(cluster)
+        except TypeError:
+            cluster_ids.add(json.dumps(cluster, sort_keys=True))
+    return len(cluster_ids)
+
+
 def snapshot_to_row(snapshot: Mapping[str, Any]) -> dict[str, Any]:
     held_out = {str(cell_id): int(vote) for cell_id, vote in snapshot["held_out"].items()}
     info = {
         "session_id": snapshot["session_id"],
         "masked_vote_count": len(held_out),
-        "cluster_count": len(set(snapshot["clusters"])),
+        "cluster_count": snapshot_cluster_count(snapshot),
         "synthetic": bool(snapshot["meta"].get("synthetic")),
     }
     return {

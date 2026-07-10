@@ -16,15 +16,21 @@ Each source line is a JSON session snapshot:
 - `masked_cells`: `[participant_idx, statement_idx]` cells hidden from the
   prompt.
 - `held_out`: true labels for masked cells keyed as `"<p>,<s>"`.
-- `clusters`: planted or inferred participant cluster IDs.
+- `clusters`: planted participant cluster IDs or exported cluster objects.
 - `meta`: includes `k_anonymity`, `source`, and `synthetic`.
 
-The bundled split at `data/eval_synthetic.jsonl` contains 20 seeded synthetic
-snapshots with coherent planted clusters plus noise. It is a SYNTHETIC
-placeholder until real exports from the public
-[Context Engine](https://github.com/AgalmicSoftware/context-engine) project
-land. Real exported splits should use plaintext/public content only,
-pseudonymized participants, and a k-anonymity floor of `k=5`.
+Bundled splits:
+
+- `data/eval_synthetic.jsonl`: 20 seeded synthetic snapshots with coherent
+  planted clusters plus noise (`meta.synthetic: true`).
+- `data/eval_ce_demo.jsonl`: one real
+  [Context Engine](https://github.com/AgalmicSoftware/context-engine)
+  demo-corpus snapshot with `meta.source: "ce-demo"` and
+  `meta.synthetic: false`. It was exported via the CE snapshot exporter with
+  redaction and k-anonymity tests, and remains demonstration-corpus data.
+
+Real exported splits should use plaintext/public content only, pseudonymized
+participants, and a k-anonymity floor of `k=5`.
 
 ## Methodology Attribution
 
@@ -37,7 +43,8 @@ open-source community.
 Environment variable:
 
 - `COMMONGROUND_DATA_PATH`: optional path to a JSONL file of session snapshots.
-  If unset, the bundled synthetic eval split is used.
+  If unset, the bundled synthetic eval split is used. Set it to
+  `data/eval_ce_demo.jsonl` to run against the bundled CE demo split.
 
 Difficulty knobs passed to `load_environment(**kwargs)`:
 
@@ -67,7 +74,7 @@ The rubric uses:
 - `vote_accuracy`, weight `1.0`: exact-match fraction over held-out cells.
 - `brier`, weight `0.0`: logged multiclass Brier metric only.
 
-Baseline numbers are TBD.
+Baseline numbers are TBD for both bundled splits.
 
 ## Evaluation
 
