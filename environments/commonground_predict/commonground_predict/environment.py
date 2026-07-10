@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import os
 from collections.abc import Mapping
@@ -221,7 +222,14 @@ def apply_masked_vote_count(
             break
         if cell in candidates and cell not in selected:
             selected.append(cell)
-    for cell in sorted(candidates):
+    session_id = prepared["session_id"]
+    ordered_candidates = sorted(
+        candidates,
+        key=lambda cell: hashlib.sha256(
+            f"{session_id}:{cell[0]},{cell[1]}".encode()
+        ).hexdigest(),
+    )
+    for cell in ordered_candidates:
         if len(selected) == target_count:
             break
         if cell not in selected:

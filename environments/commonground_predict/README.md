@@ -54,6 +54,7 @@ Difficulty knobs passed to `load_environment(**kwargs)`:
   held-out votes. Non-positive values mask no votes; values larger than the
   known-vote pool mask every known vote. If omitted, each snapshot uses the
   masks already present in the data; entirely unmasked data is rejected.
+  New masks use a reproducible SHA-256 ordering to spread selections.
 - `min_cluster_count`: filters snapshots to those with at least this many
   participant clusters.
 

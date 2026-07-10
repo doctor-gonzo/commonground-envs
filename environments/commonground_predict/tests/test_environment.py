@@ -158,6 +158,35 @@ def test_masked_vote_count_knob_changes_held_out_count() -> None:
     assert len(json.loads(row["held_out"])) == 3
 
 
+def test_masked_vote_selection_is_repeatable() -> None:
+    data_path = Path(__file__).resolve().parents[1] / "data" / "eval_ce_demo.jsonl"
+
+    first = load_environment(data_path=data_path, masked_vote_count=8)
+    second = load_environment(data_path=data_path, masked_vote_count=8)
+
+    first_snapshot = json.loads(dict(first.get_eval_dataset()[0])["snapshot"])
+    second_snapshot = json.loads(dict(second.get_eval_dataset()[0])["snapshot"])
+    assert first_snapshot["masked_cells"] == second_snapshot["masked_cells"]
+
+
+def test_masked_vote_selection_spreads_across_participants() -> None:
+    data_path = Path(__file__).resolve().parents[1] / "data" / "eval_ce_demo.jsonl"
+    source = json.loads(data_path.read_text(encoding="utf-8").splitlines()[0])
+    first_eight_sorted = [
+        [participant_index, statement_index]
+        for participant_index, row in enumerate(source["votes"])
+        for statement_index, vote in enumerate(row)
+        if vote in {-1, 0, 1}
+    ][:8]
+
+    env = load_environment(data_path=data_path, masked_vote_count=8)
+    snapshot = json.loads(dict(env.get_eval_dataset()[0])["snapshot"])
+    selected = snapshot["masked_cells"]
+
+    assert len({participant_index for participant_index, _ in selected}) > 1
+    assert selected != first_eight_sorted
+
+
 def test_masked_vote_count_zero_masks_no_cells_and_scores() -> None:
     env = load_environment(masked_vote_count=0, min_cluster_count=2)
     assert_env_rows_have_no_masks(env)
@@ -188,6 +217,13 @@ def test_masked_vote_count_huge_caps_at_candidate_pool() -> None:
         (1, 1),
     }
     assert all(vote is None for row in masked["votes"] for vote in row)
+
+
+def test_file_masked_cells_keep_selection_precedence() -> None:
+    masked = apply_masked_vote_count(mask_count_snapshot(), 1)
+
+    assert masked["masked_cells"] == [[0, 1]]
+    assert masked["held_out"] == {"0,1": -1}
 
 
 def score_row(
