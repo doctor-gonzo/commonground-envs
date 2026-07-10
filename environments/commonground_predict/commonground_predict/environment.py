@@ -18,7 +18,7 @@ from datasets import Dataset
 
 ENV_ID = "commonground-predict"
 DATA_ENV_VAR = "COMMONGROUND_DATA_PATH"
-BUNDLED_EVAL_PATH = Path(__file__).resolve().parents[1] / "data" / "eval_synthetic.jsonl"
+BUNDLED_EVAL_PATH = Path(__file__).resolve().parent / "data" / "eval_synthetic.jsonl"
 VALID_VOTES = {-1, 0, 1}
 LABEL_TO_VOTE = {"agree": 1, "disagree": -1, "pass": 0}
 VOTE_TO_LABEL = {vote: label for label, vote in LABEL_TO_VOTE.items()}

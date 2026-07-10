@@ -21,9 +21,9 @@ Each source line is a JSON session snapshot:
 
 Bundled splits:
 
-- `data/eval_synthetic.jsonl`: 20 seeded synthetic snapshots with coherent
+- `commonground_predict/data/eval_synthetic.jsonl`: 20 seeded synthetic snapshots with coherent
   planted clusters plus noise (`meta.synthetic: true`).
-- `data/eval_ce_demo.jsonl`: one real
+- `commonground_predict/data/eval_ce_demo.jsonl`: one real
   [Context Engine](https://github.com/AgalmicSoftware/context-engine)
   demo-corpus snapshot with `meta.source: "ce-demo"` and
   `meta.synthetic: false`. It was exported via the CE snapshot exporter with
@@ -46,7 +46,8 @@ Environment variable:
 
 - `COMMONGROUND_DATA_PATH`: optional path to a JSONL file of session snapshots.
   If unset, the bundled synthetic eval split is used. Set it to
-  `data/eval_ce_demo.jsonl` to run against the bundled CE demo split.
+  `commonground_predict/data/eval_ce_demo.jsonl` to run against the bundled CE
+  demo split.
 
 Difficulty knobs passed to `load_environment(**kwargs)`:
 

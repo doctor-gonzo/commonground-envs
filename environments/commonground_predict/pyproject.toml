@@ -16,7 +16,6 @@ build-backend = "hatchling.build"
 [tool.hatch.build]
 include = [
     "commonground_predict/**",
-    "data/**",
     "pyproject.toml",
 ]
 

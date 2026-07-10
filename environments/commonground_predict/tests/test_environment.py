@@ -11,11 +11,14 @@ import verifiers as vf
 
 from commonground_predict import PredictionJsonParser, load_environment
 from commonground_predict.environment import (
+    BUNDLED_EVAL_PATH,
     DATA_ENV_VAR,
     apply_masked_vote_count,
     brier,
     vote_accuracy,
 )
+
+DATA_DIR = Path(__file__).resolve().parents[1] / "commonground_predict" / "data"
 
 
 def test_load_environment_builds_bundled_split() -> None:
@@ -26,8 +29,21 @@ def test_load_environment_builds_bundled_split() -> None:
     assert len(env.get_eval_dataset()) == 20
 
 
+def test_bundled_eval_path_is_inside_import_package() -> None:
+    import commonground_predict.environment as environment_module
+
+    expected = (
+        Path(environment_module.__file__).resolve().parent
+        / "data"
+        / "eval_synthetic.jsonl"
+    )
+
+    assert BUNDLED_EVAL_PATH == expected
+    assert BUNDLED_EVAL_PATH.is_file()
+
+
 def test_load_environment_builds_ce_demo_split_from_env(monkeypatch: Any) -> None:
-    data_path = Path(__file__).resolve().parents[1] / "data" / "eval_ce_demo.jsonl"
+    data_path = DATA_DIR / "eval_ce_demo.jsonl"
     monkeypatch.setenv(DATA_ENV_VAR, str(data_path))
 
     env = load_environment(masked_vote_count=3)
@@ -50,7 +66,7 @@ def test_load_environment_builds_ce_demo_split_from_env(monkeypatch: Any) -> Non
 
 
 def test_load_environment_rejects_unmasked_ce_demo_by_default() -> None:
-    data_path = Path(__file__).resolve().parents[1] / "data" / "eval_ce_demo.jsonl"
+    data_path = DATA_DIR / "eval_ce_demo.jsonl"
 
     with pytest.raises(ValueError) as exc_info:
         load_environment(data_path=data_path)
@@ -204,7 +220,7 @@ def test_masked_vote_count_knob_changes_held_out_count() -> None:
 
 
 def test_masked_vote_selection_is_repeatable() -> None:
-    data_path = Path(__file__).resolve().parents[1] / "data" / "eval_ce_demo.jsonl"
+    data_path = DATA_DIR / "eval_ce_demo.jsonl"
 
     first = load_environment(data_path=data_path, masked_vote_count=8)
     second = load_environment(data_path=data_path, masked_vote_count=8)
@@ -215,7 +231,7 @@ def test_masked_vote_selection_is_repeatable() -> None:
 
 
 def test_masked_vote_selection_spreads_across_participants() -> None:
-    data_path = Path(__file__).resolve().parents[1] / "data" / "eval_ce_demo.jsonl"
+    data_path = DATA_DIR / "eval_ce_demo.jsonl"
     source = json.loads(data_path.read_text(encoding="utf-8").splitlines()[0])
     first_eight_sorted = [
         [participant_index, statement_index]

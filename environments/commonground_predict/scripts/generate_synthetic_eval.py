@@ -37,7 +37,12 @@ STATEMENT_BANK = [
 
 def main() -> None:
     rng = random.Random(SEED)
-    output_path = Path(__file__).parents[1] / "data" / "eval_synthetic.jsonl"
+    output_path = (
+        Path(__file__).parents[1]
+        / "commonground_predict"
+        / "data"
+        / "eval_synthetic.jsonl"
+    )
     output_path.parent.mkdir(parents=True, exist_ok=True)
     snapshots = [make_snapshot(rng, index) for index in range(SNAPSHOT_COUNT)]
     output_path.write_text(
