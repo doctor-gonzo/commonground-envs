@@ -81,6 +81,7 @@ def load_snapshots(
         if not line.strip():
             continue
         snapshot = json.loads(line)
+        validate_snapshot_dimensions(snapshot, path, line_number)
         if min_cluster_count is not None:
             cluster_count = snapshot_cluster_count(snapshot)
             if cluster_count < min_cluster_count:
@@ -89,6 +90,99 @@ def load_snapshots(
     if not snapshots:
         raise ValueError(f"no snapshots loaded from {path}")
     return snapshots
+
+
+def validate_snapshot_dimensions(
+    snapshot: Mapping[str, Any],
+    path: Path,
+    line_number: int,
+) -> None:
+    """Reject snapshots whose participant-major dimensions are inconsistent."""
+
+    participants = snapshot["participants"]
+    statements = snapshot["statements"]
+    votes = snapshot["votes"]
+    clusters = snapshot.get("clusters", [])
+
+    participant_count = len(participants)
+    statement_count = len(statements)
+    errors = []
+
+    if len(votes) != participant_count:
+        errors.append(f"votes rows={len(votes)} participants={participant_count}")
+
+    bad_vote_rows = [
+        f"{row_index}:{len(row)}"
+        for row_index, row in enumerate(votes)
+        if len(row) != statement_count
+    ]
+    if bad_vote_rows:
+        errors.append(
+            "votes row_lengths="
+            f"{','.join(bad_vote_rows[:5])} statements={statement_count}"
+        )
+
+    cluster_error = snapshot_cluster_dimension_error(clusters, participants)
+    if cluster_error is not None:
+        errors.append(cluster_error)
+
+    if errors:
+        session_id = snapshot.get("session_id", "<unknown>")
+        joined_errors = "; ".join(errors)
+        raise ValueError(
+            f"invalid snapshot dimensions at {path}:{line_number} "
+            f"session_id={session_id}: {joined_errors}"
+        )
+
+
+def snapshot_cluster_dimension_error(
+    clusters: Any,
+    participants: Any,
+) -> str | None:
+    """Return a dimension error for supported cluster encodings, if any."""
+
+    participant_count = len(participants)
+    if (
+        isinstance(clusters, list)
+        and clusters
+        and all(isinstance(cluster, Mapping) for cluster in clusters)
+    ):
+        member_indices = [
+            int(member_index)
+            for cluster in clusters
+            for member_index in cluster.get("member_indices", [])
+        ]
+        if member_indices:
+            expected_indices = set(range(participant_count))
+            unique_indices = set(member_indices)
+            if (
+                unique_indices != expected_indices
+                or len(member_indices) != len(unique_indices)
+            ):
+                return (
+                    f"clusters member_indices={len(unique_indices)} unique/{len(member_indices)} total "
+                    f"participants={participant_count}"
+                )
+            return None
+
+        member_ids = [
+            str(member_id)
+            for cluster in clusters
+            for member_id in cluster.get("members", [])
+        ]
+        if member_ids:
+            expected_ids = {str(participant_id) for participant_id in participants}
+            unique_ids = set(member_ids)
+            if unique_ids != expected_ids or len(member_ids) != len(unique_ids):
+                return (
+                    f"clusters members={len(unique_ids)} unique/{len(member_ids)} total "
+                    f"participants={participant_count}"
+                )
+            return None
+
+    if len(clusters) != participant_count:
+        return f"clusters={len(clusters)} participants={participant_count}"
+    return None
 
 
 def apply_masked_vote_count(

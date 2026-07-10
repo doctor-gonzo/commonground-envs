@@ -6,6 +6,7 @@ from math import isclose
 from pathlib import Path
 from typing import Any
 
+import pytest
 import verifiers as vf
 
 from commonground_predict import PredictionJsonParser, load_environment
@@ -28,14 +29,50 @@ def test_load_environment_builds_ce_demo_split_from_env(monkeypatch: Any) -> Non
     row = dict(env.get_eval_dataset()[0])
     held_out = json.loads(row["held_out"])
     info = json.loads(row["info"])
+    snapshot = json.loads(row["snapshot"])
 
     assert len(env.get_eval_dataset()) == 1
     assert info["synthetic"] is False
     assert info["cluster_count"] == 2
+    assert len(snapshot["participants"]) == 62
+    assert len(snapshot["statements"]) == 30
+    assert len(snapshot["votes"]) == 62
+    assert {len(row) for row in snapshot["votes"]} == {30}
     assert len(held_out) == 3
     state = score_row(env, row, held_out)
     assert state["reward"] == 1.0
     assert state["metrics"]["vote_accuracy"] == 1.0
+
+
+def test_load_environment_rejects_transposed_votes(tmp_path: Path) -> None:
+    snapshot = orientation_snapshot()
+    snapshot["votes"] = [
+        list(statement_votes)
+        for statement_votes in zip(*snapshot["votes"], strict=True)
+    ]
+    data_path = write_snapshot_jsonl(tmp_path, snapshot)
+
+    with pytest.raises(ValueError) as exc_info:
+        load_environment(data_path=data_path)
+
+    message = str(exc_info.value)
+    assert "invalid snapshot dimensions" in message
+    assert "session_id=orientation-test" in message
+    assert "votes rows=3 participants=2" in message
+    assert "votes row_lengths=0:2,1:2,2:2 statements=3" in message
+
+
+def test_load_environment_rejects_cluster_assignment_length_mismatch(
+    tmp_path: Path,
+) -> None:
+    snapshot = orientation_snapshot()
+    snapshot["clusters"] = [0]
+    data_path = write_snapshot_jsonl(tmp_path, snapshot)
+
+    with pytest.raises(ValueError) as exc_info:
+        load_environment(data_path=data_path)
+
+    assert "clusters=1 participants=2" in str(exc_info.value)
 
 
 def test_parser_handles_fenced_json() -> None:
@@ -199,6 +236,32 @@ def mask_count_snapshot() -> dict[str, Any]:
         "clusters": [0, 1],
         "meta": {"synthetic": True},
     }
+
+
+def orientation_snapshot() -> dict[str, Any]:
+    return {
+        "session_id": "orientation-test",
+        "statements": [
+            {"index": 0, "text": "Statement A"},
+            {"index": 1, "text": "Statement B"},
+            {"index": 2, "text": "Statement C"},
+        ],
+        "participants": ["p0", "p1"],
+        "votes": [
+            [1, 0, -1],
+            [-1, 1, 0],
+        ],
+        "masked_cells": [[0, 1]],
+        "held_out": {"0,1": 0},
+        "clusters": [0, 1],
+        "meta": {"synthetic": True},
+    }
+
+
+def write_snapshot_jsonl(tmp_path: Path, snapshot: dict[str, Any]) -> Path:
+    data_path = tmp_path / "snapshot.jsonl"
+    data_path.write_text(json.dumps(snapshot, sort_keys=True) + "\n", encoding="utf-8")
+    return data_path
 
 
 def wrong_vote(vote: int) -> int:
