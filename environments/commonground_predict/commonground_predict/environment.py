@@ -130,6 +130,21 @@ def validate_snapshot_dimensions(
             f"{','.join(bad_vote_rows[:5])} statements={statement_count}"
         )
 
+    bad_statement_indices = []
+    for statement_position, statement in enumerate(statements):
+        actual_index = (
+            statement.get("index", "<missing>")
+            if isinstance(statement, Mapping)
+            else "<invalid>"
+        )
+        if actual_index != statement_position:
+            bad_statement_indices.append(f"{statement_position}:{actual_index}")
+    if bad_statement_indices:
+        errors.append(
+            "statements indices="
+            f"{','.join(bad_statement_indices[:5])} expected positional"
+        )
+
     cluster_error = snapshot_cluster_dimension_error(clusters, participants)
     if cluster_error is not None:
         errors.append(cluster_error)

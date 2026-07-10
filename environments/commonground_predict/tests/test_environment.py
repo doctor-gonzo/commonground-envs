@@ -95,6 +95,23 @@ def test_load_environment_rejects_transposed_votes(tmp_path: Path) -> None:
     assert "votes row_lengths=0:2,1:2,2:2 statements=3" in message
 
 
+def test_load_environment_rejects_nonpositional_statement_indices(
+    tmp_path: Path,
+) -> None:
+    snapshot = orientation_snapshot()
+    snapshot["statements"][1]["index"] = 2
+    snapshot["statements"][2]["index"] = 1
+    data_path = write_snapshot_jsonl(tmp_path, snapshot)
+
+    with pytest.raises(ValueError) as exc_info:
+        load_environment(data_path=data_path)
+
+    message = str(exc_info.value)
+    assert f"{data_path}:1" in message
+    assert "session_id=orientation-test" in message
+    assert "statements indices=1:2,2:1 expected positional" in message
+
+
 def test_load_environment_rejects_cluster_assignment_length_mismatch(
     tmp_path: Path,
 ) -> None:
