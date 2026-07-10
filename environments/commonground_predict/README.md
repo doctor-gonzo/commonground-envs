@@ -78,7 +78,10 @@ The rubric uses:
 - `vote_accuracy`, weight `1.0`: exact-match fraction over held-out cells.
 - `brier`, weight `0.0`: logged multiclass Brier metric only.
 
-Baseline numbers are TBD for both bundled splits.
+For the bundled synthetic split with its pre-baked masks, naive floors are
+always-agree `0.425`, per-statement visible-majority `0.494`, and per-row
+best-constant oracle `0.525`. A real model should exceed these floors; model
+baseline runs remain future work.
 
 ## Evaluation
 
