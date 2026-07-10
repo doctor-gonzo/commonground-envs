@@ -34,12 +34,14 @@ def test_comment_stats_hand_computed_values() -> None:
 
 
 def test_rating_to_vote_uses_canonical_signed_mapping() -> None:
+    assert rating_to_vote(-1) == 0
     assert rating_to_vote(0) == -1
-    assert rating_to_vote(4.999) == -1
+    assert isclose(rating_to_vote(4.999), -0.00019999999999988916, abs_tol=1e-12)
     assert rating_to_vote(5) == 0
-    assert rating_to_vote(5.001) == 1
+    assert isclose(rating_to_vote(5.001), 0.00019999999999988916, abs_tol=1e-12)
     assert rating_to_vote(10) == 1
-    assert rating_to_vote(11) == 1
+    assert rating_to_vote(11) == 0
+    assert rating_to_vote(nan) == 0
 
 
 def test_vote_accuracy_counts_missing_predictions_wrong() -> None:

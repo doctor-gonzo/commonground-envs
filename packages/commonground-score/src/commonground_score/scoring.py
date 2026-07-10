@@ -13,6 +13,8 @@ Prediction = PointPrediction | ProbPrediction
 _LABEL_TO_VOTE = {"agree": 1, "disagree": -1, "pass": 0}
 _VOTE_TO_LABEL = {vote: label for label, vote in _LABEL_TO_VOTE.items()}
 _LABELS = ("agree", "disagree", "pass")
+RATING_MIN = 0
+RATING_MAX = 10
 
 
 def prop_test(successes: int, trials: int) -> float:
@@ -55,20 +57,17 @@ def comment_stats(votes: list[Vote]) -> dict[str, float | int]:
     }
 
 
-def rating_to_vote(value: float) -> int:
-    """Map a 0-10 rating to a canonical vote.
+def rating_to_vote(value: float) -> float:
+    """Map a 0-10 rating to the canonical signed vote score.
 
-    The signed score is ``clamp((2 * (value - 5)) / 10, -1, 1)``. Its sign is
-    the vote: positive ratings become agree (``1``), negative ratings become
-    disagree (``-1``), and exactly ``5`` is neutral/pass (``0``).
+    Non-finite values and values outside ``[0, 10]`` return ``0`` (no stance).
+    In-range values return ``(2 * (value - 5)) / 10``: positive values lean
+    agree, negative values lean disagree, and exactly ``5`` is neutral/pass.
     """
 
-    signed = max(-1.0, min(1.0, (2 * (value - 5)) / 10))
-    if signed > 0:
-        return 1
-    if signed < 0:
-        return -1
-    return 0
+    if not isfinite(value) or value < RATING_MIN or value > RATING_MAX:
+        return 0
+    return (2 * (value - 5)) / 10
 
 
 def vote_accuracy(predictions: Mapping[str, int], held_out: Mapping[str, int]) -> float:
