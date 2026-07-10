@@ -1,0 +1,95 @@
+{
+  "function": "rating_to_vote",
+  "cases": [
+    {
+      "args": [
+        -1
+      ],
+      "expected": 0
+    },
+    {
+      "args": [
+        0
+      ],
+      "expected": -1
+    },
+    {
+      "args": [
+        1
+      ],
+      "expected": -0.8
+    },
+    {
+      "args": [
+        2
+      ],
+      "expected": -0.6
+    },
+    {
+      "args": [
+        3
+      ],
+      "expected": -0.4
+    },
+    {
+      "args": [
+        4
+      ],
+      "expected": -0.2
+    },
+    {
+      "args": [
+        5
+      ],
+      "expected": 0
+    },
+    {
+      "args": [
+        6
+      ],
+      "expected": 0.2
+    },
+    {
+      "args": [
+        7
+      ],
+      "expected": 0.4
+    },
+    {
+      "args": [
+        8
+      ],
+      "expected": 0.6
+    },
+    {
+      "args": [
+        9
+      ],
+      "expected": 0.8
+    },
+    {
+      "args": [
+        10
+      ],
+      "expected": 1
+    },
+    {
+      "args": [
+        11
+      ],
+      "expected": 0
+    },
+    {
+      "args": [
+        0.5
+      ],
+      "expected": -0.9
+    },
+    {
+      "args": [
+        "NaN"
+      ],
+      "expected": 0
+    }
+  ]
+}

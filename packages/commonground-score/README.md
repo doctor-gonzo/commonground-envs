@@ -23,20 +23,23 @@ Invalid or non-normalizable mappings score as the uniform distribution
 dataset parity:
 
 ```text
-signed = clamp((2 * (value - 5)) / 10, -1, 1)
-vote = sign(signed)
+signed = (2 * (value - 5)) / 10
 ```
 
-An exact rating of `5` maps to neutral/pass (`0`); values below `5` map to
-disagree (`-1`), and values above `5` map to agree (`1`).
+Values outside the inclusive `0`-`10` range, plus non-finite values, map to
+neutral/pass (`0`). In-range values below `5` return a negative score, values
+above `5` return a positive score, and exactly `5` returns `0`.
 
 ## Parity Fixtures
 
 The test suite includes a parity fixture loader for
-`tests/fixtures/parity_*.json`. Fixture files should use:
+`tests/fixtures/parity_*.json`. The harness requires fixtures for
+`prop_test`, `two_prop_test`, `comment_stats`, and `rating_to_vote`. Fixture
+files should use:
 
 ```json
 {"function":"prop_test","cases":[{"args":[2,4],"expected":0.4472135954999579}]}
 ```
 
-When no parity fixtures are present, the parity test skips cleanly.
+JSON cannot encode NaN, so NaN arguments are represented as the exact string
+`"NaN"` and decoded by the harness before invocation.

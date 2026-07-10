@@ -1,0 +1,141 @@
+{
+  "function": "comment_stats",
+  "cases": [
+    {
+      "args": [
+        [
+          1,
+          -1,
+          0,
+          null,
+          1,
+          -1,
+          0
+        ]
+      ],
+      "expected": {
+        "agree": 2,
+        "disagree": 2,
+        "pass": 2,
+        "seen": 6,
+        "pa": 0.375,
+        "pd": 0.375,
+        "pat": -0.37796447300922736,
+        "pdt": -0.37796447300922736
+      }
+    },
+    {
+      "args": [
+        []
+      ],
+      "expected": {
+        "agree": 0,
+        "disagree": 0,
+        "pass": 0,
+        "seen": 0,
+        "pa": 0.5,
+        "pd": 0.5,
+        "pat": 1,
+        "pdt": 1
+      }
+    },
+    {
+      "args": [
+        [
+          null,
+          null
+        ]
+      ],
+      "expected": {
+        "agree": 0,
+        "disagree": 0,
+        "pass": 0,
+        "seen": 0,
+        "pa": 0.5,
+        "pd": 0.5,
+        "pat": 1,
+        "pdt": 1
+      }
+    },
+    {
+      "args": [
+        [
+          1,
+          1,
+          1,
+          1
+        ]
+      ],
+      "expected": {
+        "agree": 4,
+        "disagree": 0,
+        "pass": 0,
+        "seen": 4,
+        "pa": 0.8333333333333334,
+        "pd": 0.16666666666666666,
+        "pat": 2.23606797749979,
+        "pdt": -1.3416407864998738
+      }
+    },
+    {
+      "args": [
+        [
+          -1,
+          -1,
+          -1
+        ]
+      ],
+      "expected": {
+        "agree": 0,
+        "disagree": 3,
+        "pass": 0,
+        "seen": 3,
+        "pa": 0.2,
+        "pd": 0.8,
+        "pat": -1,
+        "pdt": 2
+      }
+    },
+    {
+      "args": [
+        [
+          0,
+          0,
+          0
+        ]
+      ],
+      "expected": {
+        "agree": 0,
+        "disagree": 0,
+        "pass": 3,
+        "seen": 3,
+        "pa": 0.2,
+        "pd": 0.2,
+        "pat": -1,
+        "pdt": -1
+      }
+    },
+    {
+      "args": [
+        [
+          1,
+          null,
+          1,
+          0,
+          -1,
+          null
+        ]
+      ],
+      "expected": {
+        "agree": 2,
+        "disagree": 1,
+        "pass": 1,
+        "seen": 4,
+        "pa": 0.5,
+        "pd": 0.3333333333333333,
+        "pat": 0.44721359549995787,
+        "pdt": -0.44721359549995787
+      }
+    }
+  ]
+}
