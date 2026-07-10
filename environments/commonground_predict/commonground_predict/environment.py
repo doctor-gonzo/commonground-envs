@@ -89,6 +89,13 @@ def load_snapshots(
         snapshots.append(apply_masked_vote_count(snapshot, masked_vote_count))
     if not snapshots:
         raise ValueError(f"no snapshots loaded from {path}")
+    if masked_vote_count is None and all(
+        not snapshot.get("held_out") for snapshot in snapshots
+    ):
+        raise ValueError(
+            f"unmasked snapshots loaded from {path}; pass masked_vote_count=N "
+            "or provide pre-masked data"
+        )
     return snapshots
 
 

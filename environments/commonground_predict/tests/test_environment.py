@@ -44,6 +44,18 @@ def test_load_environment_builds_ce_demo_split_from_env(monkeypatch: Any) -> Non
     assert state["metrics"]["vote_accuracy"] == 1.0
 
 
+def test_load_environment_rejects_unmasked_ce_demo_by_default() -> None:
+    data_path = Path(__file__).resolve().parents[1] / "data" / "eval_ce_demo.jsonl"
+
+    with pytest.raises(ValueError) as exc_info:
+        load_environment(data_path=data_path)
+
+    message = str(exc_info.value)
+    assert str(data_path) in message
+    assert "masked_vote_count=N" in message
+    assert "pre-masked data" in message
+
+
 def test_load_environment_rejects_transposed_votes(tmp_path: Path) -> None:
     snapshot = orientation_snapshot()
     snapshot["votes"] = [

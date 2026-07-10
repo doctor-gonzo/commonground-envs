@@ -28,6 +28,8 @@ Bundled splits:
   demo-corpus snapshot with `meta.source: "ce-demo"` and
   `meta.synthetic: false`. It was exported via the CE snapshot exporter with
   redaction and k-anonymity tests, and remains demonstration-corpus data.
+  This demo split and raw CE exporter output are unmasked and require
+  `masked_vote_count` when loaded.
 
 Real exported splits should use plaintext/public content only, pseudonymized
 participants, and a k-anonymity floor of `k=5`.
@@ -51,7 +53,7 @@ Difficulty knobs passed to `load_environment(**kwargs)`:
 - `masked_vote_count`: deterministically remasks each snapshot to this many
   held-out votes. Non-positive values mask no votes; values larger than the
   known-vote pool mask every known vote. If omitted, each snapshot uses the
-  masks already present in the data.
+  masks already present in the data; entirely unmasked data is rejected.
 - `min_cluster_count`: filters snapshots to those with at least this many
   participant clusters.
 
