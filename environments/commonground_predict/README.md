@@ -121,8 +121,9 @@ Baselines below.
 
 ## Baselines
 
-Runs use `prime eval run commonground-predict -m <model> -n 20 -r 3` on the
-bundled synthetic split with its pre-baked masks. Naive floors for reference:
+Runs use the repository's multi-environment baseline sweep on the bundled
+synthetic split with its pre-baked masks. See the
+[operator commands](../../README.md#baseline-sweep). Naive floors for reference:
 always-agree `0.425`, visible-majority `0.494`, per-snapshot best-constant
 oracle `0.525`.
 

@@ -71,6 +71,12 @@ prints:
 See the bundled data directory's dataset card for the planting and separation
 methodology.
 
+Model baselines use the repository's multi-environment sweep with three
+rollouts per held-out example. The aggregator emits reward, `finding_f1`, and
+`question_utility` mean ± population standard deviation only after every
+expected rollout is present; see the
+[operator commands](../../README.md#baseline-sweep).
+
 ## The commonground family and human socket
 
 `commonground-elicit` and `commonground-predict` are separate Hub IDs in one

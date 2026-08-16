@@ -75,6 +75,27 @@ Common Ground vote statistics follow open-source Polis math conventions. Polis
 methodology is attributed to the Computational Democracy Project and the broader
 Polis open-source community.
 
+## Baseline Sweep
+
+The checked-in eval config runs both bundled eval splits at three rollouts per
+example. Supply the model on each invocation so results remain separated by the
+saved Prime/Verifiers run metadata:
+
+```bash
+for M in <models>; do
+  prime eval run configs/eval/baseline-sweep.toml -m "$M" --skip-upload
+done
+```
+
+After every requested run is complete, render a deterministic, README-ready
+table from the saved results. An incomplete run is an error and produces no
+partial baseline table:
+
+```bash
+uv run python scripts/aggregate_baselines.py
+uv run python scripts/aggregate_baselines.py --csv /path/to/baselines.csv
+```
+
 ## The `commonground` family
 
 `commonground` is an environment family, not a one-off. v0 ships

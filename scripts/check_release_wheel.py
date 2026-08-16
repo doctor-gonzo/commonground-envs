@@ -12,6 +12,12 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 REQUIRES_PYTHON_PARTS = frozenset({">=3.12", "<3.13"})
+REPOSITORY_TOOLING = frozenset(
+    {
+        "aggregate_baselines.py",
+        "baseline-sweep.toml",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -129,6 +135,14 @@ def _inspect_wheel(target: WheelTarget, wheel_path: Path) -> int:
             name.endswith(".jsonl") for name in target.bundled_files
         ):
             raise AssertionError(f"{target.name}: source package has no JSONL data")
+        shipped_tooling = sorted(
+            name for name in names if Path(name).name in REPOSITORY_TOOLING
+        )
+        if shipped_tooling:
+            raise AssertionError(
+                f"{target.name}: release wheel contains repository tooling: "
+                f"{shipped_tooling!r}"
+            )
         return len(target.bundled_files)
 
 
@@ -160,7 +174,10 @@ def main() -> None:
                 f"{wheels[0].name} ({bundled_count} required bundled files)"
             )
 
-    print("release wheel check passed: " + "; ".join(summaries))
+    print(
+        "release wheel check passed (repository tooling excluded): "
+        + "; ".join(summaries)
+    )
 
 
 if __name__ == "__main__":

@@ -21,6 +21,7 @@ members = [
 
 [tool.pytest.ini_options]
 testpaths = [
+    "tests",
     "packages/commonground-score/tests",
     "packages/commonground-scenarios/tests",
     "environments/commonground_elicit/tests",
