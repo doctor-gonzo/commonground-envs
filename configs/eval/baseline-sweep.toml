@@ -1,5 +1,6 @@
 # Model is supplied by the operator with `prime eval run ... -m MODEL`.
 rollouts_per_example = 3
+save_results = true
 
 [[eval]]
 id = "commonground-predict"

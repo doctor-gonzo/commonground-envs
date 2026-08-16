@@ -1,6 +1,0 @@
-{"example_id":0,"reward":0.0,"metrics":{"finding_f1":0.0,"question_utility":0.0}}
-{"example_id":0,"reward":0.5,"metrics":{"finding_f1":0.5,"question_utility":0.25}}
-{"example_id":0,"reward":1.0,"metrics":{"finding_f1":1.0,"question_utility":0.5}}
-{"example_id":1,"reward":0.0,"metrics":{"finding_f1":0.0,"question_utility":0.0}}
-{"example_id":1,"reward":0.5,"metrics":{"finding_f1":0.5,"question_utility":0.25}}
-{"example_id":1,"reward":1.0,"metrics":{"finding_f1":1.0,"question_utility":0.5}}

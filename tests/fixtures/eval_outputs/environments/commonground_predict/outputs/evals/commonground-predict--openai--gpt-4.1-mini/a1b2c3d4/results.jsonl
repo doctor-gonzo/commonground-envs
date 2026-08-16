@@ -1,6 +1,0 @@
-{"example_id":0,"reward":0.25,"metrics":{"vote_accuracy":0.25,"brier":1.0}}
-{"example_id":0,"reward":0.5,"metrics":{"vote_accuracy":0.5,"brier":0.5}}
-{"example_id":0,"reward":0.75,"metrics":{"vote_accuracy":0.75,"brier":0.0}}
-{"example_id":1,"reward":0.25,"metrics":{"vote_accuracy":0.25,"brier":1.0}}
-{"example_id":1,"reward":0.5,"metrics":{"vote_accuracy":0.5,"brier":0.5}}
-{"example_id":1,"reward":0.75,"metrics":{"vote_accuracy":0.75,"brier":0.0}}
