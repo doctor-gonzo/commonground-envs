@@ -305,7 +305,6 @@ def snapshot_to_row(snapshot: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "prompt": [{"role": "user", "content": render_prompt(snapshot)}],
         "answer": json.dumps(held_out, sort_keys=True),
-        "held_out": json.dumps(held_out, sort_keys=True),
         "info": json.dumps(info, sort_keys=True),
         "snapshot": json.dumps(snapshot, sort_keys=True),
     }
@@ -349,26 +348,26 @@ def render_prompt(snapshot: Mapping[str, Any]) -> str:
 
 async def vote_accuracy(
     completion: list[dict[str, Any]],
-    held_out: Mapping[str, int] | str,
+    answer: Mapping[str, int] | str,
     parser: PredictionJsonParser,
 ) -> float:
     """Reward: exact point-prediction accuracy over masked cells."""
 
     parsed = parse_completion_predictions(completion, parser)
     point_predictions = coerce_point_predictions(parsed)
-    return score_vote_accuracy(point_predictions, parse_held_out(held_out))
+    return score_vote_accuracy(point_predictions, parse_held_out(answer))
 
 
 async def brier(
     completion: list[dict[str, Any]],
-    held_out: Mapping[str, int] | str,
+    answer: Mapping[str, int] | str,
     parser: PredictionJsonParser,
 ) -> float:
     """Metric: delegated Brier score; invalid probability mappings score uniform."""
 
     parsed = parse_completion_predictions(completion, parser)
     brier_predictions = coerce_brier_predictions(parsed)
-    return score_brier_score(brier_predictions, parse_held_out(held_out))
+    return score_brier_score(brier_predictions, parse_held_out(answer))
 
 
 def parse_completion_predictions(

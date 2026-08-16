@@ -48,7 +48,7 @@ def test_load_environment_builds_ce_demo_split_from_env(monkeypatch: Any) -> Non
 
     env = load_environment(masked_vote_count=3)
     row = dict(env.get_eval_dataset()[0])
-    held_out = json.loads(row["held_out"])
+    held_out = json.loads(row["answer"])
     info = json.loads(row["info"])
     snapshot = json.loads(row["snapshot"])
 
@@ -179,7 +179,7 @@ def test_cell_keys_ignore_whitespace_for_point_and_brier_scores() -> None:
 def test_rubric_scores_perfect_completion_at_one() -> None:
     env = load_environment()
     row = dict(env.get_eval_dataset()[0])
-    held_out = json.loads(row["held_out"])
+    held_out = json.loads(row["answer"])
 
     state = score_row(env, row, held_out)
 
@@ -191,7 +191,7 @@ def test_rubric_scores_perfect_completion_at_one() -> None:
 def test_rubric_scores_all_wrong_completion_at_zero() -> None:
     env = load_environment()
     row = dict(env.get_eval_dataset()[0])
-    held_out = json.loads(row["held_out"])
+    held_out = json.loads(row["answer"])
     wrong_predictions = {
         cell_id: wrong_vote(vote)
         for cell_id, vote in held_out.items()
@@ -234,7 +234,7 @@ def test_masked_vote_count_knob_changes_held_out_count() -> None:
     env = load_environment(masked_vote_count=3, min_cluster_count=2)
     row = dict(env.get_eval_dataset()[0])
 
-    assert len(json.loads(row["held_out"])) == 3
+    assert len(json.loads(row["answer"])) == 3
 
 
 def test_masked_vote_selection_is_repeatable() -> None:
@@ -319,7 +319,10 @@ def score_row(
     state = {
         "prompt": row["prompt"],
         "completion": completion,
+        "answer": row["answer"],
+        "info": row["info"],
         "input": row,
+        "trajectory": [],
     }
     asyncio.run(env.rubric.score_rollout(state))
     return state
@@ -341,7 +344,7 @@ def assert_env_rows_have_no_masks(env: vf.SingleTurnEnv) -> None:
         snapshot = json.loads(row["snapshot"])
         info = json.loads(row["info"])
 
-        assert json.loads(row["held_out"]) == {}
+        assert json.loads(row["answer"]) == {}
         assert snapshot["held_out"] == {}
         assert snapshot["masked_cells"] == []
         assert info["masked_vote_count"] == 0
