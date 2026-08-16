@@ -1,0 +1,30 @@
+[project]
+name = "commonground-elicit"
+version = "0.1.0"
+description = "Common Ground document-grounded ambiguity elicitation environment for Verifiers."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+keywords = ["social-reasoning", "elicitation", "deterministic", "single-turn"]
+dependencies = [
+    "commonground-scenarios>=0.1.0,<0.2",
+    "commonground-score>=0.1.0,<0.2",
+    "verifiers==0.1.14",
+]
+
+[build-system]
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build]
+include = [
+    "commonground_elicit/**",
+    "pyproject.toml",
+]
+
+[tool.verifiers.eval]
+num_examples = 4
+rollouts_per_example = 1
+
+[tool.uv.sources]
+commonground-scenarios = { workspace = true }
+commonground-score = { workspace = true }

@@ -15,6 +15,7 @@ dev = [
 members = [
     "packages/commonground-score",
     "packages/commonground-scenarios",
+    "environments/commonground_elicit",
     "environments/commonground_predict",
 ]
 
@@ -22,5 +23,6 @@ members = [
 testpaths = [
     "packages/commonground-score/tests",
     "packages/commonground-scenarios/tests",
+    "environments/commonground_elicit/tests",
     "environments/commonground_predict/tests",
 ]
