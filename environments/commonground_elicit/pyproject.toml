@@ -2,14 +2,27 @@
 name = "commonground-elicit"
 version = "0.1.0"
 description = "Common Ground document-grounded ambiguity elicitation environment for Verifiers."
+authors = [{ name = "Common Ground contributors" }]
+license = "Apache-2.0"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 keywords = ["social-reasoning", "elicitation", "deterministic", "single-turn"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 dependencies = [
     "commonground-scenarios>=0.1.0,<0.2",
     "commonground-score>=0.1.0,<0.2",
     "verifiers==0.1.14",
 ]
+
+[project.urls]
+Repository = "https://github.com/<OWNER>/commonground-envs"
 
 [build-system]
 requires = ["hatchling>=1.27.0"]

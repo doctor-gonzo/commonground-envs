@@ -119,3 +119,7 @@ real-human data only after its provenance has been verified.
 
 Live data source: [contextengine.sh](https://contextengine.sh) ·
 [Context Engine repository](https://github.com/AgalmicSoftware/context-engine)
+
+## License
+
+Licensed under the [Apache License 2.0](LICENSE).

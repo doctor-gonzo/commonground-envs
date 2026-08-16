@@ -11,6 +11,19 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 REQUIRES_PYTHON_PARTS = frozenset({">=3.12", "<3.13"})
+EXPECTED_AUTHOR = "Common Ground contributors"
+EXPECTED_LICENSE = "Apache-2.0"
+EXPECTED_REPOSITORY_URL = "https://github.com/<OWNER>/commonground-envs"
+REQUIRED_CLASSIFIERS = frozenset(
+    {
+        "Development Status :: 3 - Alpha",
+        "Intended Audience :: Developers",
+        "Intended Audience :: Science/Research",
+        "Programming Language :: Python :: 3",
+        "Programming Language :: Python :: 3.12",
+        "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    }
+)
 REPOSITORY_TOOLING = frozenset(
     {
         "aggregate_baselines.py",
@@ -93,6 +106,33 @@ def _inspect_wheel(target: WheelTarget, wheel_path: Path) -> int:
         if metadata["Name"] != target.name:
             raise AssertionError(
                 f"expected wheel for {target.name}, found {metadata['Name']!r}"
+            )
+        if not metadata["Summary"] or metadata["Summary"] == "UNKNOWN":
+            raise AssertionError(f"{target.name}: wheel metadata has no description")
+        if metadata["Author"] != EXPECTED_AUTHOR:
+            raise AssertionError(
+                f"{target.name}: expected author {EXPECTED_AUTHOR!r}; "
+                f"found {metadata['Author']!r}"
+            )
+        license_value = metadata["License-Expression"] or metadata["License"]
+        if license_value != EXPECTED_LICENSE:
+            raise AssertionError(
+                f"{target.name}: expected license {EXPECTED_LICENSE!r}; "
+                f"found {license_value!r}"
+            )
+        classifiers = frozenset(metadata.get_all("Classifier", []))
+        missing_classifiers = sorted(REQUIRED_CLASSIFIERS - classifiers)
+        if missing_classifiers:
+            raise AssertionError(
+                f"{target.name}: wheel metadata is missing classifiers: "
+                f"{missing_classifiers!r}"
+            )
+        project_urls = metadata.get_all("Project-URL", [])
+        repository_entry = f"Repository, {EXPECTED_REPOSITORY_URL}"
+        if repository_entry not in project_urls:
+            raise AssertionError(
+                f"{target.name}: expected project URL {repository_entry!r}; "
+                f"found {project_urls!r}"
             )
         python_parts = frozenset(
             part.strip() for part in metadata["Requires-Python"].split(",")
