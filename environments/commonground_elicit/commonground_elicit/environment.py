@@ -258,7 +258,7 @@ def scenario_to_row(
         "scenario_id": scenario["scenario_id"],
         "document_count": len(documents),
         "plant_count": len(findings_answer),
-        "task": task,
+        "task_label": task,
         "synthetic": bool(scenario["provenance"]["synthetic"]),
         "template_set": scenario["provenance"]["template_set"],
     }
