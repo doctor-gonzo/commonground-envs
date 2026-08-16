@@ -211,6 +211,7 @@ def snapshot_cluster_dimension_error(
 def apply_masked_vote_count(
     snapshot: dict[str, Any],
     masked_vote_count: int | None,
+    seed: str | None = None,
 ) -> dict[str, Any]:
     """Return a copy of a snapshot with capped ``masked_vote_count`` masked cells."""
 
@@ -241,7 +242,11 @@ def apply_masked_vote_count(
     ordered_candidates = sorted(
         candidates,
         key=lambda cell: hashlib.sha256(
-            f"{session_id}:{cell[0]},{cell[1]}".encode()
+            (
+                f"{session_id}:{cell[0]},{cell[1]}"
+                if seed is None
+                else f"{seed}:{session_id}:{cell[0]},{cell[1]}"
+            ).encode()
         ).hexdigest(),
     )
     for cell in ordered_candidates:
