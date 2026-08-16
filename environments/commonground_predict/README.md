@@ -127,11 +127,13 @@ oracle `0.525`.
 
 ## The commonground Family
 
-`commonground-predict` is v0 of a planned environment family (`-bridge`,
-`-facilitate`, `-calibration`, `-elicit`, `-route`) built on the same exporter
-and scoring stack; see the [repository README](../../README.md) for the
-roadmap. A future human-data socket accepts verified, consented session exports
-from [Context Engine](https://contextengine.sh)
+`commonground-predict` and `commonground-elicit` are the two shipped v0 Hub IDs.
+Predict tests inference over held-out deliberation votes; elicit tests whether a
+model can find policy problems and ask faction-splitting questions. They share
+the score package and provenance conventions while keeping their incompatible
+rubrics separate. See the [repository README](../../README.md) for the program
+and roadmap. The family human-data socket accepts verified, consented session
+exports from [Context Engine](https://contextengine.sh)
 ([source](https://github.com/AgalmicSoftware/context-engine)); v0 contains no
 real-human split.
 

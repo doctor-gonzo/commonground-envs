@@ -1,21 +1,35 @@
 # commonground-envs
 
 Standalone workspace for Common Ground deliberation and collective-preference
-evaluation environments. Version 0 packages `commonground-predict`, a
-deterministic masked-vote prediction task for Prime Intellect's Environments Hub
-using the Verifiers environment interface.
+evaluation environments. The initial release packages two independent Prime
+Intellect Environments Hub IDs through the Verifiers interface:
+`commonground-predict` estimates held-out deliberation votes, while
+`commonground-elicit` finds planted policy problems and raises the questions
+that expose latent faction disagreement. They are one program with shared data
+and scoring packages, but separate environments because their rubrics are not
+interchangeable.
 
 ## Packages
 
 | Path | Package | Purpose |
 | --- | --- | --- |
 | `packages/commonground-score` | `commonground-score` | Pure-Python Polis-style vote statistics and reward helpers. |
+| `packages/commonground-scenarios` | `commonground-scenarios` | Seeded offline policy-scenario generation, schema, and validation. |
 | `environments/commonground_predict` | `commonground-predict` | Verifiers `SingleTurnEnv` for predicting held-out deliberation votes. |
+| `environments/commonground_elicit` | `commonground-elicit` | Verifiers `SingleTurnEnv` for document-grounded finding and question raising. |
 
 ## Data Provenance
 
-v0 ships synthetic data only. The intended future real-data source is verified,
-consented session snapshots exported from the public
+v0 ships synthetic data only. `commonground-predict` uses seeded synthetic vote
+snapshots and an operator-authored synthetic Context Engine demo corpus.
+`commonground-elicit` is synthetic by design: committed templates plant known
+ambiguities, contradictions, and gaps in fictional policy documents so the
+environment has deterministic ground truth for both finding and question
+utility. Its training and held-out splits use disjoint template families and
+carry explicit synthetic provenance.
+
+The intended future real-data source is verified, consented session snapshots
+exported from the public
 [Context Engine](https://github.com/AgalmicSoftware/context-engine) project,
 limited to plaintext/public content. Participant identifiers are pseudonymized
 before export, and published real-data splits must preserve a k-anonymity floor
@@ -30,6 +44,12 @@ an operator-authored synthetic demo-corpus split with
 `meta.source: "ce-demo-authored"` and `meta.synthetic: true`. Verified real
 session exports can be added through the snapshot-intake workflow without
 changing either bundled synthetic split.
+
+The elicit scenario schema also defines the family's human-data socket. A
+verified non-synthetic scenario replaces the seeded persona panel with a
+validated Context Engine feedback snapshot and marks its provenance as human.
+No bundled elicit row uses that path today, and no split may be described as
+real-human data until the feedback and provenance fields pass validation.
 
 ## Real Snapshot Intake
 
@@ -55,10 +75,11 @@ Common Ground vote statistics follow open-source Polis math conventions. Polis
 methodology is attributed to the Computational Democracy Project and the broader
 Polis open-source community.
 
-## Roadmap — the `commonground` family
+## The `commonground` family
 
 `commonground` is an environment family, not a one-off. v0 ships
-`commonground-predict`; planned follow-ons under a shared `EnvGroup`:
+`commonground-predict` and `commonground-elicit` as separate Hub IDs backed by
+the shared score and scenario packages. Planned follow-ons are:
 
 - `commonground-bridge` — bridging-statement generation scored by a frozen
   vote-predictor plus a cross-cluster diversity bonus; eval splits scored
@@ -68,8 +89,6 @@ Polis open-source community.
   delta in group-informed consensus versus a no-facilitator baseline.
 - `commonground-calibration` — predict vote *distributions* rather than
   majorities, Brier-scored, with fresh eval splits from live sessions.
-- `commonground-elicit` — active elicitation: select or write the next
-  question to uncover hidden opinion clusters under a question budget.
 - `commonground-route` — statement dedup/routing scored as F1/ARI against
   ground-truth duplicate clusters from real session data.
 

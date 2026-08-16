@@ -63,3 +63,29 @@ prints:
 
 See the bundled data directory's dataset card for the planting and separation
 methodology.
+
+## The commonground family and human socket
+
+`commonground-elicit` and `commonground-predict` are separate Hub IDs in one
+program. Predict scores masked-vote inference; elicit scores document-grounded
+finding and question raising. They share `commonground-score` and the same
+synthetic-versus-human provenance boundary without combining incompatible
+rubrics behind a mode flag.
+
+The scenario schema reserves `human_feedback` for a validated, consented
+Context Engine snapshot. On that future path, real votes replace the persona
+panel and provenance must be marked human and non-synthetic. The bundled elicit
+release uses planted synthetic scenarios only; it makes no real-human-data
+claim.
+
+## Evaluation
+
+After installing the locked workspace dependencies, run a local Verifiers
+evaluation with:
+
+```bash
+uv run vf-eval commonground-elicit
+```
+
+The test suite, split generator, rewards, and floor baselines are hermetic and
+require no API key.
