@@ -37,8 +37,8 @@ def test_load_environment_builds_default_heldout_rows() -> None:
 
     assert isinstance(env, vf.SingleTurnEnv)
     assert env.env_id == "commonground-elicit"
-    assert len(env.get_dataset()) == 8
-    assert len(env.get_eval_dataset()) == 4
+    assert len(env.get_dataset()) == 40
+    assert len(env.get_eval_dataset()) == 20
     assert {json.loads(row["info"])["template_set"] for row in env.get_dataset()} == {
         "train"
     }
@@ -985,10 +985,24 @@ def test_one_composite_question_cannot_claim_two_plants() -> None:
 
 def test_composite_detection_ignores_claimed_grounding_and_stance_vector() -> None:
     env = load_environment(task="elicit-ask", question_count=1)
-    plants = planted_questions_from_row(dict(env.get_eval_dataset()[2]))
-    first, second = plants[:2]
-    assert first["doc_id"] != second["doc_id"]
-    assert first["target_stances"] != second["target_stances"]
+    pair = None
+    plants = []
+    for row in env.get_eval_dataset():
+        plants = planted_questions_from_row(dict(row))
+        pair = next(
+            (
+                (first, second)
+                for first_index, first in enumerate(plants)
+                for second in plants[first_index + 1 :]
+                if first["doc_id"] != second["doc_id"]
+                and first["target_stances"] != second["target_stances"]
+            ),
+            None,
+        )
+        if pair is not None:
+            break
+    assert pair is not None
+    first, second = pair
     composite = {
         "doc_id": first["doc_id"],
         "quote": first["quote"],
@@ -1450,7 +1464,7 @@ def test_loader_rejects_difficulty_view_with_no_planted_items() -> None:
 def test_loader_filters_individual_plant_free_rows() -> None:
     env = load_environment(docs_count=1)
 
-    assert 0 < len(env.get_eval_dataset()) <= 4
+    assert 0 < len(env.get_eval_dataset()) <= 20
     assert all(json.loads(row["answer"])["findings"] for row in env.get_eval_dataset())
 
 

@@ -7,4 +7,4 @@ num_examples = 20
 
 [[eval]]
 id = "commonground-elicit"
-num_examples = 4
+num_examples = 20

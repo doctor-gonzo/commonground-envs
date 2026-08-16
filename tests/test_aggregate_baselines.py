@@ -35,7 +35,7 @@ def test_baseline_sweep_uses_installed_multi_eval_toml_schema() -> None:
 
     assert [(config["env_id"], config["num_examples"]) for config in configs] == [
         ("commonground-predict", 20),
-        ("commonground-elicit", 4),
+        ("commonground-elicit", 20),
     ]
     assert {config["rollouts_per_example"] for config in configs} == {3}
     assert all("model" not in config for config in configs)
