@@ -3,7 +3,8 @@
 Standalone workspace for Common Ground deliberation and collective-preference
 evaluation environments. The initial release packages two independent Prime
 Intellect Environments Hub IDs through the Verifiers interface:
-`commonground-predict` estimates held-out deliberation votes, while
+`commonground-predict` estimates held-out stakeholder votes on company
+AI-deployment policies, while
 `commonground-elicit` finds planted policy problems and raises the questions
 that expose latent faction disagreement. They are one program with shared data
 and scoring packages, but separate environments because their rubrics are not
@@ -20,8 +21,9 @@ interchangeable.
 
 ## Data Provenance
 
-v0 ships synthetic data only. `commonground-predict` uses seeded synthetic vote
-snapshots and an operator-authored synthetic Context Engine demo corpus.
+v0 ships synthetic data only. `commonground-predict` uses seeded synthetic
+enterprise AI-policy vote snapshots and an operator-authored synthetic Context
+Engine demo corpus.
 `commonground-elicit` is synthetic by design: committed templates plant known
 ambiguities, contradictions, and gaps in fictional policy documents so the
 environment has deterministic ground truth for both finding and question

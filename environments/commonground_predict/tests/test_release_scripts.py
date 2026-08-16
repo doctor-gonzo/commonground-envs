@@ -4,6 +4,7 @@ import copy
 import hashlib
 import importlib.util
 import json
+import random
 from pathlib import Path
 from typing import Any
 
@@ -12,29 +13,121 @@ import pytest
 ROOT = Path(__file__).resolve().parents[3]
 DATA_DIR = Path(__file__).resolve().parents[1] / "commonground_predict" / "data"
 SYNTHETIC_SPLIT = DATA_DIR / "eval_synthetic.jsonl"
+TRAIN_SPLIT = DATA_DIR / "train_synthetic.jsonl"
 
 
-def load_script(module_name: str, filename: str) -> Any:
-    spec = importlib.util.spec_from_file_location(
-        module_name, ROOT / "scripts" / filename
-    )
+def load_module(module_name: str, path: Path) -> Any:
+    spec = importlib.util.spec_from_file_location(module_name, path)
     if spec is None or spec.loader is None:
-        raise RuntimeError(f"unable to load {filename}")
+        raise RuntimeError(f"unable to load {path}")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
-compute_floors_module = load_script("commonground_compute_floors", "compute_floors.py")
-ingest_snapshots_module = load_script(
-    "commonground_ingest_snapshots", "ingest_snapshots.py"
+compute_floors_module = load_module(
+    "commonground_compute_floors", ROOT / "scripts" / "compute_floors.py"
+)
+ingest_snapshots_module = load_module(
+    "commonground_ingest_snapshots", ROOT / "scripts" / "ingest_snapshots.py"
+)
+eval_generator_module = load_module(
+    "commonground_predict_eval_generator",
+    ROOT
+    / "environments"
+    / "commonground_predict"
+    / "scripts"
+    / "generate_synthetic_eval.py",
+)
+train_generator_module = load_module(
+    "commonground_predict_train_generator",
+    ROOT
+    / "environments"
+    / "commonground_predict"
+    / "scripts"
+    / "generate_synthetic_train.py",
 )
 compute_floors = compute_floors_module.compute_floors
 render_markdown = compute_floors_module.render_markdown
 ingest_main = ingest_snapshots_module.main
 
 
-def test_compute_floors_reproduces_published_synthetic_values() -> None:
+def test_statement_bank_is_enterprise_ai_policy() -> None:
+    statements = eval_generator_module.STATEMENT_BANK
+
+    assert len(statements) == 20
+    assert len(set(statements)) == 20
+    assert all("assistant" in statement.casefold() for statement in statements)
+    workplace_markers = {
+        "support",
+        "coding",
+        "communications",
+        "hr",
+        "sales",
+        "finance",
+        "contract",
+        "operations",
+        "data classification",
+        "customer fields",
+        "analytics",
+        "customer-facing",
+    }
+    assert all(
+        any(marker in statement.casefold() for marker in workplace_markers)
+        for statement in statements[:15]
+    )
+    governance_markers = (
+        "business owner",
+        "risk review",
+        "contest",
+        "evaluations",
+        "audit period",
+    )
+    assert all(
+        marker in statement.casefold()
+        for marker, statement in zip(governance_markers, statements[15:], strict=True)
+    )
+
+
+def test_bundled_eval_split_matches_seeded_policy_generator() -> None:
+    expected = render_generated_split(
+        seed=eval_generator_module.SEED,
+        snapshot_count=eval_generator_module.SNAPSHOT_COUNT,
+        session_index_offset=0,
+    )
+
+    assert SYNTHETIC_SPLIT.read_bytes() == expected
+
+
+def test_bundled_train_split_matches_seeded_policy_generator() -> None:
+    expected = render_generated_split(
+        seed=train_generator_module.TRAIN_SEED,
+        snapshot_count=train_generator_module.TRAIN_SNAPSHOT_COUNT,
+        session_index_offset=train_generator_module.SESSION_INDEX_OFFSET,
+    )
+
+    assert TRAIN_SPLIT.read_bytes() == expected
+
+
+def render_generated_split(
+    *, seed: int, snapshot_count: int, session_index_offset: int
+) -> bytes:
+    original_seed = eval_generator_module.SEED
+    eval_generator_module.SEED = seed
+    try:
+        rng = random.Random(seed)
+        snapshots = [
+            eval_generator_module.make_snapshot(rng, session_index_offset + index)
+            for index in range(snapshot_count)
+        ]
+    finally:
+        eval_generator_module.SEED = original_seed
+    return "".join(
+        json.dumps(snapshot, separators=(",", ":")) + "\n" for snapshot in snapshots
+    ).encode()
+
+
+def test_compute_floors_reproduces_rethemed_synthetic_values() -> None:
     floors = compute_floors(SYNTHETIC_SPLIT, masked_vote_count=8, seed="42")
 
     assert floors == {

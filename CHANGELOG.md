@@ -5,8 +5,9 @@ All notable changes to this project are documented in this file.
 ## 0.1.0 - 2026-08-16
 
 - Release `commonground-predict`, a deterministic masked-vote prediction
-  environment, and `commonground-elicit`, a document-grounded policy-problem
-  finding and question-raising environment.
+  environment for fictional enterprise AI-deployment policies, and
+  `commonground-elicit`, a document-grounded policy-problem finding and
+  question-raising environment.
 - Include reproducible model-free floor tooling, synthetic train/eval splits,
   shared scoring utilities, and seeded planted-scenario generation.
 - Label every bundled data split as synthetic; v0 contains no verified
