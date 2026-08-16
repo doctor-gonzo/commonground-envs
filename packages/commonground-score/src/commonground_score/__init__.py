@@ -2,10 +2,12 @@
 
 from commonground_score.scoring import (
     brier_score,
+    cluster_separation,
     comment_stats,
     prop_test,
     rating_to_vote,
     two_prop_test,
+    vote_entropy,
     vote_accuracy,
 )
 
@@ -13,9 +15,11 @@ __version__ = "0.1.0"
 
 __all__ = [
     "brier_score",
+    "cluster_separation",
     "comment_stats",
     "prop_test",
     "rating_to_vote",
     "two_prop_test",
+    "vote_entropy",
     "vote_accuracy",
 ]

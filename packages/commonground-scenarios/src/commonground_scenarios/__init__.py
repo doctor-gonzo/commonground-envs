@@ -9,7 +9,9 @@ from commonground_scenarios.templates import (
 )
 from commonground_scenarios.validation import (
     ScenarioValidationError,
+    is_yes_no_question,
     load_scenario_schema,
+    question_fingerprint,
     validate_scenario,
 )
 
@@ -22,7 +24,9 @@ __all__ = [
     "TRAIN_TEMPLATES",
     "generate_scenario",
     "get_template",
+    "is_yes_no_question",
     "load_scenario_schema",
+    "question_fingerprint",
     "scenario_to_bytes",
     "validate_scenario",
 ]

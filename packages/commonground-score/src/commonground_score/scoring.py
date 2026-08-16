@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from math import isfinite, sqrt
+from math import isfinite, log, sqrt
 from typing import Mapping
 
 Vote = int | None
@@ -15,6 +15,7 @@ _VOTE_TO_LABEL = {vote: label for label, vote in _LABEL_TO_VOTE.items()}
 _LABELS = ("agree", "disagree", "pass")
 RATING_MIN = 0
 RATING_MAX = 10
+VALID_VOTES = (-1, 0, 1)
 
 
 def prop_test(successes: int, trials: int) -> float:
@@ -55,6 +56,36 @@ def comment_stats(votes: list[Vote]) -> dict[str, float | int]:
         "pat": prop_test(agree, seen),
         "pdt": prop_test(disagree, seen),
     }
+
+
+def vote_entropy(votes: list[Vote]) -> float:
+    """Return normalized agree/disagree/pass entropy over seen valid votes."""
+
+    seen = [vote for vote in votes if vote in VALID_VOTES]
+    if not seen:
+        return 0.0
+    entropy = 0.0
+    for vote in VALID_VOTES:
+        count = seen.count(vote)
+        if count:
+            probability = count / len(seen)
+            entropy -= probability * log(probability)
+    return entropy / log(len(VALID_VOTES))
+
+
+def cluster_separation(votes: list[Vote]) -> float:
+    """Return the fraction of seen faction pairs taking different stances."""
+
+    seen = [vote for vote in votes if vote in VALID_VOTES]
+    pair_count = len(seen) * (len(seen) - 1) // 2
+    if pair_count == 0:
+        return 0.0
+    separated_pairs = sum(
+        left_vote != right_vote
+        for left_index, left_vote in enumerate(seen)
+        for right_vote in seen[left_index + 1 :]
+    )
+    return separated_pairs / pair_count
 
 
 def rating_to_vote(value: float) -> float:

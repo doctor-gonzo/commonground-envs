@@ -5,6 +5,12 @@ family. Each generated scenario contains a fictional organization, policy
 documents, planted ambiguities/contradictions/gaps, precise distractors, a
 seeded persona panel, and provenance.
 
+Every canonical clarifying question is phrased as a yes/no proposition. Its
+`target_stances` have an explicit interpretation: `agree` predicts yes,
+`disagree` predicts no, and `pass` means the faction takes no position.
+Templates may also author a finite `canonical_question_aliases` allowlist.
+Aliases obey the same yes/no form and are kept distinct across the answer key.
+
 The default generator uses committed templates only. An operator may inject a
 prose-polishing callback, but no model client or network path is built into the
 package, and validation requires every planted anchor to survive polishing.

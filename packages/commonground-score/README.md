@@ -9,9 +9,16 @@ Pure-Python scoring utilities for Common Ground deliberation evaluations.
 - `prop_test(successes, trials)`
 - `two_prop_test(s_in, s_out, p_in, p_out)`
 - `comment_stats(votes)`
+- `vote_entropy(votes)`
+- `cluster_separation(votes)`
 - `rating_to_vote(value)`
 - `vote_accuracy(predictions, held_out)`
 - `brier_score(predictions, held_out)`
+
+`vote_entropy` normalizes agree/disagree/pass entropy to `[0, 1]`.
+`cluster_separation` returns the fraction of faction-vote pairs taking different
+stances. Together they provide the deterministic panel-disagreement math used
+by `commonground-elicit`; missing votes are excluded from both calculations.
 
 `brier_score` accepts bare point predictions (`1`, `-1`, or `0`) and
 probability mappings keyed by `agree`, `disagree`, and `pass` or their numeric

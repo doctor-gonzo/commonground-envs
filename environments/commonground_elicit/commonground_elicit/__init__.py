@@ -6,6 +6,9 @@ from commonground_elicit.environment import (
     load_environment,
     match_findings,
     normalized_quote_overlap,
+    panel_disagreement,
+    question_utility,
+    question_utility_score,
     render_prompt,
 )
 
@@ -17,5 +20,8 @@ __all__ = [
     "load_environment",
     "match_findings",
     "normalized_quote_overlap",
+    "panel_disagreement",
+    "question_utility",
+    "question_utility_score",
     "render_prompt",
 ]

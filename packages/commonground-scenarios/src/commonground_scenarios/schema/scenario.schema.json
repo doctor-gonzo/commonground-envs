@@ -134,13 +134,24 @@
     "plantedItem": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["plant_id", "doc_id", "anchor_quote", "type", "canonical_question", "target_dimension", "target_stances"],
+      "required": ["plant_id", "doc_id", "anchor_quote", "type", "canonical_question", "canonical_question_aliases", "target_dimension", "target_stances"],
       "properties": {
         "plant_id": {"$ref": "#/$defs/identifier"},
         "doc_id": {"$ref": "#/$defs/identifier"},
         "anchor_quote": {"type": "string", "minLength": 1},
         "type": {"enum": ["ambiguity", "contradiction", "gap"]},
-        "canonical_question": {"type": "string", "minLength": 1},
+        "canonical_question": {
+          "type": "string",
+          "pattern": "^(Am|Are|Can|Could|Did|Do|Does|Had|Has|Have|Is|May|Might|Must|Shall|Should|Was|Were|Will|Would) [^\\s?]+(?: [^\\s?]+)*\\?(?![\\s\\S])"
+        },
+        "canonical_question_aliases": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^(Am|Are|Can|Could|Did|Do|Does|Had|Has|Have|Is|May|Might|Must|Shall|Should|Was|Were|Will|Would) [^\\s?]+(?: [^\\s?]+)*\\?(?![\\s\\S])"
+          }
+        },
         "target_dimension": {"$ref": "#/$defs/identifier"},
         "target_stances": {
           "type": "object",

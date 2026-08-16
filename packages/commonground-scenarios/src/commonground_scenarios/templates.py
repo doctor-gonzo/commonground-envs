@@ -16,7 +16,7 @@ class DomainTemplate:
     organization_names: tuple[str, ...]
     factions: tuple[dict[str, Any], ...]
     documents: tuple[dict[str, str], ...]
-    planted_items: tuple[dict[str, str], ...]
+    planted_items: tuple[dict[str, Any], ...]
     distractors: tuple[dict[str, str], ...]
 
 
@@ -72,7 +72,8 @@ TRAIN_TEMPLATES = (
                 "doc_id": "service-policy",
                 "anchor_quote": "Agents may issue a small goodwill credit when a customer has experienced material inconvenience.",
                 "type": "ambiguity",
-                "canonical_question": "What credit amount and evidence qualify as small and materially inconvenient?",
+                "canonical_question": "Should support agents decide the credit amount and evidence that qualify as small and materially inconvenient?",
+                "canonical_question_aliases": [],
                 "target_dimension": "credit-latitude",
             },
             {
@@ -80,7 +81,8 @@ TRAIN_TEMPLATES = (
                 "doc_id": "refund-guide",
                 "anchor_quote": "Subscription refunds are available until the end of the current billing cycle.",
                 "type": "contradiction",
-                "canonical_question": "Does the billing-cycle window or the support macro's weekly-review deadline control?",
+                "canonical_question": "Should the billing-cycle window control instead of the support macro's weekly-review deadline?",
+                "canonical_question_aliases": [],
                 "target_dimension": "refund-window",
             },
             {
@@ -88,7 +90,8 @@ TRAIN_TEMPLATES = (
                 "doc_id": "support-macro",
                 "anchor_quote": "Escalate account access failures to the security queue.",
                 "type": "gap",
-                "canonical_question": "Who may authorize recovery when the account owner cannot be reached?",
+                "canonical_question": "Should support agents authorize recovery when the account owner cannot be reached?",
+                "canonical_question_aliases": [],
                 "target_dimension": "escalation-gap",
             },
         ),
@@ -156,7 +159,8 @@ TRAIN_TEMPLATES = (
                 "doc_id": "feedback-standard",
                 "anchor_quote": "Each project receives substantive feedback before grading is final.",
                 "type": "ambiguity",
-                "canonical_question": "What evidence makes feedback substantive enough to satisfy the standard?",
+                "canonical_question": "Should instructors decide what evidence makes feedback substantive enough to satisfy the standard?",
+                "canonical_question_aliases": [],
                 "target_dimension": "feedback-depth",
             },
             {
@@ -164,7 +168,8 @@ TRAIN_TEMPLATES = (
                 "doc_id": "revision-faq",
                 "anchor_quote": "A learner may submit one revision after grading.",
                 "type": "contradiction",
-                "canonical_question": "Is revision limited after grading or allowed until the rubric is met?",
+                "canonical_question": "Should learners be allowed to revise after grading until the rubric is met?",
+                "canonical_question_aliases": [],
                 "target_dimension": "revision-limit",
             },
             {
@@ -172,7 +177,8 @@ TRAIN_TEMPLATES = (
                 "doc_id": "coach-playbook",
                 "anchor_quote": "Accessibility requests are routed to learner success.",
                 "type": "gap",
-                "canonical_question": "What accommodation applies when a live session has already started?",
+                "canonical_question": "Should learner success grant an accommodation after a live session has already started?",
+                "canonical_question_aliases": [],
                 "target_dimension": "access-gap",
             },
         ),
@@ -240,7 +246,8 @@ TRAIN_TEMPLATES = (
                 "doc_id": "triage-note",
                 "anchor_quote": "Urgent requests should be moved ahead in the queue.",
                 "type": "ambiguity",
-                "canonical_question": "Which conditions make a request urgent enough to move ahead?",
+                "canonical_question": "Should case workers decide which conditions make a request urgent enough to move ahead?",
+                "canonical_question_aliases": [],
                 "target_dimension": "urgent-triage",
             },
             {
@@ -248,7 +255,8 @@ TRAIN_TEMPLATES = (
                 "doc_id": "appeals-page",
                 "anchor_quote": "Residents submit an appeal through the digital portal.",
                 "type": "contradiction",
-                "canonical_question": "Is the digital portal mandatory or is a counter form equally official?",
+                "canonical_question": "Should a counter form be equally official as a digital portal appeal?",
+                "canonical_question_aliases": [],
                 "target_dimension": "appeal-route",
             },
             {
@@ -256,7 +264,8 @@ TRAIN_TEMPLATES = (
                 "doc_id": "counter-script",
                 "anchor_quote": "Mail notices to the verified address on file.",
                 "type": "gap",
-                "canonical_question": "How is notice delivered when a resident has no verified address?",
+                "canonical_question": "Should staff use a non-digital notice channel when a resident has no verified address?",
+                "canonical_question_aliases": [],
                 "target_dimension": "offline-gap",
             },
         ),
@@ -324,7 +333,8 @@ TRAIN_TEMPLATES = (
                 "doc_id": "leave-guide",
                 "anchor_quote": "Employees give reasonable notice before planned leave.",
                 "type": "ambiguity",
-                "canonical_question": "What notice period is reasonable for each kind of planned leave?",
+                "canonical_question": "Should teams set the reasonable notice period separately for each kind of planned leave?",
+                "canonical_question_aliases": [],
                 "target_dimension": "notice-window",
             },
             {
@@ -332,7 +342,8 @@ TRAIN_TEMPLATES = (
                 "doc_id": "stipend-policy",
                 "anchor_quote": "Only learning purchases approved before purchase are reimbursed during the active benefit cycle.",
                 "type": "contradiction",
-                "canonical_question": "Must approval precede purchase or may a manager approve after receiving a receipt?",
+                "canonical_question": "Should a manager be allowed to approve a learning purchase after receiving the receipt?",
+                "canonical_question_aliases": [],
                 "target_dimension": "stipend-approval",
             },
             {
@@ -340,7 +351,8 @@ TRAIN_TEMPLATES = (
                 "doc_id": "manager-checklist",
                 "anchor_quote": "Contractors ask their manager about benefit access.",
                 "type": "gap",
-                "canonical_question": "Which contractor categories are eligible for learning benefits?",
+                "canonical_question": "Should contractors be eligible for learning benefits?",
+                "canonical_question_aliases": [],
                 "target_dimension": "contractor-gap",
             },
         ),
@@ -412,7 +424,10 @@ HELDOUT_TEMPLATES = (
                 "doc_id": "route-card",
                 "anchor_quote": "Pause a route when conditions become unsafe.",
                 "type": "ambiguity",
-                "canonical_question": "Which observable conditions require a route pause?",
+                "canonical_question": "Should dispatchers decide which observable conditions require a route pause?",
+                "canonical_question_aliases": [
+                    "Should dispatchers choose which observable conditions warrant pausing a route?"
+                ],
                 "target_dimension": "weather-threshold",
             },
             {
@@ -420,7 +435,8 @@ HELDOUT_TEMPLATES = (
                 "doc_id": "radio-script",
                 "anchor_quote": "The duty coordinator may transfer a delayed load to an available route.",
                 "type": "contradiction",
-                "canonical_question": "May the duty coordinator transfer a load after hours without the assigned dispatcher?",
+                "canonical_question": "Should the duty coordinator transfer a load after hours without the assigned dispatcher?",
+                "canonical_question_aliases": [],
                 "target_dimension": "handoff-authority",
             },
             {
@@ -428,7 +444,8 @@ HELDOUT_TEMPLATES = (
                 "doc_id": "radio-script",
                 "anchor_quote": "Contact the assigned driver before changing the route.",
                 "type": "gap",
-                "canonical_question": "What happens when the assigned driver cannot be reached?",
+                "canonical_question": "Should the duty coordinator reassign a route when the assigned driver cannot be reached?",
+                "canonical_question_aliases": [],
                 "target_dimension": "silent-driver-gap",
             },
         ),
@@ -496,7 +513,8 @@ HELDOUT_TEMPLATES = (
                 "doc_id": "message-guide",
                 "anchor_quote": "Respond to buyer concerns in a timely way.",
                 "type": "ambiguity",
-                "canonical_question": "What response window counts as timely for each dispute class?",
+                "canonical_question": "Should creators decide what response window counts as timely for each dispute class?",
+                "canonical_question_aliases": [],
                 "target_dimension": "timely-response",
             },
             {
@@ -504,7 +522,8 @@ HELDOUT_TEMPLATES = (
                 "doc_id": "listing-rules",
                 "anchor_quote": "Trust reviewers may remove a misleading listing immediately.",
                 "type": "contradiction",
-                "canonical_question": "Does immediate trust removal override the creator's keep-active rule during review?",
+                "canonical_question": "Should immediate trust removal override the creator's keep-active rule during review?",
+                "canonical_question_aliases": [],
                 "target_dimension": "removal-authority",
             },
             {
@@ -512,7 +531,8 @@ HELDOUT_TEMPLATES = (
                 "doc_id": "creator-playbook",
                 "anchor_quote": "Appeals are submitted from the listing dashboard.",
                 "type": "gap",
-                "canonical_question": "How can a suspended creator appeal without dashboard access?",
+                "canonical_question": "Should a suspended creator be allowed to appeal without dashboard access?",
+                "canonical_question_aliases": [],
                 "target_dimension": "appeal-gap",
             },
         ),

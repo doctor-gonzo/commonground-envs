@@ -67,9 +67,202 @@ def test_generated_scenario_contains_complete_planted_structure(template: object
         {"agree", "disagree"}.issubset(set(plant["target_stances"].values()))
         for plant in scenario["planted_items"]
     )
+    assert all(
+        plant["canonical_question"].split(maxsplit=1)[0]
+        in {"Can", "Does", "Is", "May", "Must", "Should"}
+        for plant in scenario["planted_items"]
+    )
+    assert all(
+        isinstance(plant["canonical_question_aliases"], list)
+        for plant in scenario["planted_items"]
+    )
     assert scenario["human_feedback"] is None
     assert scenario["provenance"]["synthetic"] is True
     assert scenario["provenance"]["template_set"] == template.template_set
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "What conditions require a route pause?",
+        "Should dispatchers decide which conditions require a route pause",
+        "should dispatchers decide which conditions require a route pause?",
+        "Should—dispatchers decide which conditions require a route pause?",
+        " Should dispatchers decide which conditions require a route pause?",
+        "Should dispatchers decide which conditions require a route pause? ",
+        "Should dispatchers decide which conditions require a route pause?\n",
+        "Should\ndispatchers decide which conditions require a route pause?",
+        "Should\tdispatchers decide which conditions require a route pause?",
+        "Should  dispatchers decide which conditions require a route pause?",
+    ],
+)
+def test_validator_and_schema_reject_non_yes_no_canonical_questions(
+    question: str,
+) -> None:
+    scenario = generate_scenario(17, HELDOUT_TEMPLATES[0])
+    scenario["planted_items"][0]["canonical_question"] = question
+
+    with pytest.raises(ScenarioValidationError, match="yes/no question"):
+        validate_scenario(scenario)
+    assert list(
+        Draft202012Validator(
+            load_scenario_schema(), format_checker=FormatChecker()
+        ).iter_errors(scenario)
+    )
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "Are dispatchers responsible for deciding which conditions require a route pause?",
+        "Is it?",
+    ],
+)
+def test_validator_and_schema_accept_supported_yes_no_auxiliary(
+    question: str,
+) -> None:
+    scenario = generate_scenario(17, HELDOUT_TEMPLATES[0])
+    scenario["planted_items"][0]["canonical_question"] = question
+
+    validate_scenario(scenario)
+    assert list(
+        Draft202012Validator(
+            load_scenario_schema(), format_checker=FormatChecker()
+        ).iter_errors(scenario)
+    ) == []
+
+
+def test_validator_preserves_punctuation_in_question_identity() -> None:
+    scenario = generate_scenario(17, HELDOUT_TEMPLATES[0])
+    first_question = scenario["planted_items"][0]["canonical_question"]
+    scenario["planted_items"][1]["canonical_question"] = first_question.replace(
+        "dispatchers ", "dispatchers, "
+    )
+
+    validate_scenario(scenario)
+
+
+def test_validator_preserves_semantic_punctuation_in_question_fingerprints() -> None:
+    scenario = generate_scenario(17, HELDOUT_TEMPLATES[0])
+    scenario["planted_items"][0]["canonical_question"] = (
+        "Should the balance threshold be -5?"
+    )
+    scenario["planted_items"][1]["canonical_question"] = (
+        "Should the balance threshold be 5?"
+    )
+
+    validate_scenario(scenario)
+
+
+def test_validator_allows_distinct_canonical_question_substrings() -> None:
+    scenario = generate_scenario(17, HELDOUT_TEMPLATES[0])
+    scenario["planted_items"][0]["canonical_question"] = (
+        "Is offline approval allowed?"
+    )
+    scenario["planted_items"][1]["canonical_question"] = (
+        "Should managers ask, Is offline approval allowed?"
+    )
+
+    validate_scenario(scenario)
+
+
+def test_validator_allows_unlisted_semantic_paraphrases_as_distinct_identities() -> None:
+    scenario = generate_scenario(17, HELDOUT_TEMPLATES[0])
+    scenario["planted_items"][0]["canonical_question"] = (
+        "Should dispatchers decide which observable conditions require a route pause?"
+    )
+    scenario["planted_items"][1]["canonical_question"] = (
+        "Should dispatchers determine which observable conditions require pausing a route?"
+    )
+
+    validate_scenario(scenario)
+
+
+def test_validator_rejects_alias_that_duplicates_its_canonical_question() -> None:
+    scenario = generate_scenario(17, HELDOUT_TEMPLATES[0])
+    plant = scenario["planted_items"][0]
+    plant["canonical_question_aliases"] = [plant["canonical_question"]]
+
+    with pytest.raises(ScenarioValidationError, match="duplicate canonical question or alias"):
+        validate_scenario(scenario)
+
+
+def test_validator_rejects_alias_that_duplicates_another_plant_question() -> None:
+    scenario = generate_scenario(17, HELDOUT_TEMPLATES[0])
+    first, second = scenario["planted_items"][:2]
+    first["canonical_question_aliases"] = [second["canonical_question"]]
+
+    with pytest.raises(ScenarioValidationError, match="duplicate canonical_question"):
+        validate_scenario(scenario)
+
+
+def test_validator_and_schema_reject_non_yes_no_question_alias() -> None:
+    scenario = generate_scenario(17, HELDOUT_TEMPLATES[0])
+    scenario["planted_items"][0]["canonical_question_aliases"] = [
+        "Which conditions require a route pause?"
+    ]
+
+    with pytest.raises(ScenarioValidationError, match="alias must be a yes/no question"):
+        validate_scenario(scenario)
+    assert list(
+        Draft202012Validator(
+            load_scenario_schema(), format_checker=FormatChecker()
+        ).iter_errors(scenario)
+    )
+
+
+def test_validator_rejects_compatibility_equivalent_distractor_anchor() -> None:
+    scenario = generate_scenario(17, HELDOUT_TEMPLATES[0])
+    plant = scenario["planted_items"][0]
+    document = next(
+        document
+        for document in scenario["documents"]
+        if document["doc_id"] == plant["doc_id"]
+    )
+    document["text"] = document["text"].replace(
+        plant["anchor_quote"], "Set threshold to 25. Set threshold to 2⁵."
+    )
+    plant["anchor_quote"] = "Set threshold to 25."
+    scenario["distractors"].append(
+        {
+            "doc_id": plant["doc_id"],
+            "anchor_quote": "Set threshold to 2⁵.",
+            "reason": "The exponent is explicit.",
+        }
+    )
+
+    with pytest.raises(
+        ScenarioValidationError, match="distractor cannot duplicate a planted anchor"
+    ):
+        validate_scenario(scenario)
+
+
+def test_validator_rejects_duplicate_planted_anchor_in_same_document() -> None:
+    scenario = generate_scenario(17, HELDOUT_TEMPLATES[0])
+    first, second = scenario["planted_items"][:2]
+    second["doc_id"] = first["doc_id"]
+    second["anchor_quote"] = first["anchor_quote"]
+
+    with pytest.raises(ScenarioValidationError, match="duplicate planted anchor"):
+        validate_scenario(scenario)
+
+
+@pytest.mark.parametrize("item_kind", ["plant", "distractor"])
+def test_validator_rejects_noncanonical_anchor_whitespace(item_kind: str) -> None:
+    scenario = generate_scenario(17, HELDOUT_TEMPLATES[0])
+    items = scenario["planted_items"] if item_kind == "plant" else scenario["distractors"]
+    item = items[0]
+    document = next(
+        document
+        for document in scenario["documents"]
+        if document["doc_id"] == item["doc_id"]
+    )
+    spaced_anchor = item["anchor_quote"].replace(" ", "  ", 1)
+    document["text"] = document["text"].replace(item["anchor_quote"], spaced_anchor)
+    item["anchor_quote"] = spaced_anchor
+
+    with pytest.raises(ScenarioValidationError, match="canonical whitespace"):
+        validate_scenario(scenario)
 
 
 def test_different_seed_changes_canonical_scenario() -> None:

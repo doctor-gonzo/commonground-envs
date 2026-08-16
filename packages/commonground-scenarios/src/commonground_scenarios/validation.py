@@ -10,6 +10,7 @@ import json
 from math import isfinite
 import re
 from typing import Any
+import unicodedata
 
 
 SCENARIO_FIELDS = {
@@ -38,6 +39,30 @@ PLANT_TYPES = {"ambiguity", "contradiction", "gap"}
 STANCES = {"agree", "disagree", "pass"}
 ID_PATTERN = re.compile(r"^[a-z][a-z0-9-]*$")
 PASS_THRESHOLD = 0.25
+YES_NO_AUXILIARIES = frozenset(
+    {
+        "Am",
+        "Are",
+        "Can",
+        "Could",
+        "Did",
+        "Do",
+        "Does",
+        "Had",
+        "Has",
+        "Have",
+        "Is",
+        "May",
+        "Might",
+        "Must",
+        "Shall",
+        "Should",
+        "Was",
+        "Were",
+        "Will",
+        "Would",
+    }
+)
 
 
 class ScenarioValidationError(ValueError):
@@ -173,6 +198,8 @@ def _validate_plants(
     if not isinstance(value, list) or len(value) < 3:
         raise ScenarioValidationError("planted_items must contain the planted answer key")
     seen_ids: set[str] = set()
+    seen_anchor_keys: set[tuple[str, str]] = set()
+    seen_question_fingerprints: set[str] = set()
     seen_types: set[str] = set()
     for index, raw_plant in enumerate(value):
         plant = _exact_object(
@@ -183,6 +210,7 @@ def _validate_plants(
                 "anchor_quote",
                 "type",
                 "canonical_question",
+                "canonical_question_aliases",
                 "target_dimension",
                 "target_stances",
             },
@@ -199,9 +227,50 @@ def _validate_plants(
         if doc_id not in documents:
             raise ScenarioValidationError(f"plant references unknown doc_id: {doc_id}")
         anchor = _nonempty_text(plant["anchor_quote"], f"planted_items[{index}].anchor_quote")
+        if anchor != " ".join(anchor.split()):
+            raise ScenarioValidationError(
+                f"plant anchor must use canonical whitespace: {plant_id}"
+            )
         if anchor not in documents[doc_id]["text"]:
             raise ScenarioValidationError(f"plant anchor is absent from document: {plant_id}")
-        _nonempty_text(plant["canonical_question"], f"planted_items[{index}].canonical_question")
+        anchor_key = (doc_id, _anchor_identity(anchor))
+        if anchor_key in seen_anchor_keys:
+            raise ScenarioValidationError(f"duplicate planted anchor: {plant_id}")
+        seen_anchor_keys.add(anchor_key)
+        canonical_question = _nonempty_text(
+            plant["canonical_question"],
+            f"planted_items[{index}].canonical_question",
+        )
+        if not is_yes_no_question(canonical_question):
+            raise ScenarioValidationError(
+                f"canonical_question must be a yes/no question: {plant_id}"
+            )
+        question_key = question_fingerprint(canonical_question)
+        if question_key in seen_question_fingerprints:
+            raise ScenarioValidationError(
+                f"duplicate canonical_question: {plant_id}"
+            )
+        seen_question_fingerprints.add(question_key)
+        aliases = plant["canonical_question_aliases"]
+        if not isinstance(aliases, list):
+            raise ScenarioValidationError(
+                f"canonical_question_aliases must be an array: {plant_id}"
+            )
+        for alias_index, alias_value in enumerate(aliases):
+            alias = _nonempty_text(
+                alias_value,
+                f"planted_items[{index}].canonical_question_aliases[{alias_index}]",
+            )
+            if not is_yes_no_question(alias):
+                raise ScenarioValidationError(
+                    f"canonical question alias must be a yes/no question: {plant_id}"
+                )
+            alias_key = question_fingerprint(alias)
+            if alias_key in seen_question_fingerprints:
+                raise ScenarioValidationError(
+                    f"duplicate canonical question or alias: {plant_id}"
+                )
+            seen_question_fingerprints.add(alias_key)
         dimension = _identifier(
             plant["target_dimension"], f"planted_items[{index}].target_dimension"
         )
@@ -224,6 +293,28 @@ def _validate_plants(
         raise ScenarioValidationError("planted_items must include ambiguity, contradiction, and gap")
 
 
+def is_yes_no_question(text: str) -> bool:
+    """Return whether text has the canonical yes/no-question surface form."""
+
+    stripped = text.strip()
+    canonical_spacing = " ".join(text.split())
+    parts = text.split(maxsplit=1)
+    return (
+        text == stripped == canonical_spacing
+        and len(parts) == 2
+        and parts[0] in YES_NO_AUXILIARIES
+        and bool(parts[1][:-1].strip())
+        and stripped.endswith("?")
+        and "?" not in stripped[:-1]
+    )
+
+
+def question_fingerprint(text: str) -> str:
+    """Return the conservative v0 identity, preserving semantic text exactly."""
+
+    return unicodedata.normalize("NFC", text)
+
+
 def _validate_distractors(
     value: Any,
     planted_items: Any,
@@ -231,7 +322,9 @@ def _validate_distractors(
 ) -> None:
     if not isinstance(value, list) or not value:
         raise ScenarioValidationError("distractors must be a non-empty list")
-    planted_anchors = {plant["anchor_quote"] for plant in planted_items}
+    planted_anchors = {
+        _anchor_identity(plant["anchor_quote"]) for plant in planted_items
+    }
     for index, raw_distractor in enumerate(value):
         distractor = _exact_object(
             raw_distractor, {"doc_id", "anchor_quote", "reason"}, f"distractors[{index}]"
@@ -240,11 +333,19 @@ def _validate_distractors(
         if doc_id not in documents:
             raise ScenarioValidationError(f"distractor references unknown doc_id: {doc_id}")
         anchor = _nonempty_text(distractor["anchor_quote"], f"distractors[{index}].anchor_quote")
+        if anchor != " ".join(anchor.split()):
+            raise ScenarioValidationError(
+                "distractor anchor must use canonical whitespace"
+            )
         if anchor not in documents[doc_id]["text"]:
             raise ScenarioValidationError("distractor anchor is absent from its document")
-        if anchor in planted_anchors:
+        if _anchor_identity(anchor) in planted_anchors:
             raise ScenarioValidationError("distractor cannot duplicate a planted anchor")
         _nonempty_text(distractor["reason"], f"distractors[{index}].reason")
+
+
+def _anchor_identity(text: str) -> str:
+    return " ".join(unicodedata.normalize("NFKC", text).casefold().split())
 
 
 def _validate_provenance(value: Any, scenario_id: str) -> dict[str, Any]:
