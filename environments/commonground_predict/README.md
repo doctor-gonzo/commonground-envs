@@ -23,16 +23,43 @@ Bundled splits:
 
 - `commonground_predict/data/eval_synthetic.jsonl`: 20 seeded synthetic snapshots with coherent
   planted clusters plus noise (`meta.synthetic: true`).
-- `commonground_predict/data/eval_ce_demo.jsonl`: one real
-  [Context Engine](https://github.com/AgalmicSoftware/context-engine)
-  demo-corpus snapshot with `meta.source: "ce-demo"` and
-  `meta.synthetic: false`. It was exported via the CE snapshot exporter with
-  redaction and k-anonymity tests, and remains demonstration-corpus data.
+- `commonground_predict/data/eval_ce_demo.jsonl`: one operator-authored
+  synthetic [Context Engine](https://github.com/AgalmicSoftware/context-engine)
+  demo-corpus snapshot with `meta.source: "ce-demo-authored"` and
+  `meta.synthetic: true`. It was exported via the CE snapshot exporter with
+  redaction and k-anonymity tests.
   This demo split and raw CE exporter output are unmasked and require
   `masked_vote_count` when loaded.
 
-Real exported splits should use plaintext/public content only, pseudonymized
-participants, and a k-anonymity floor of `k=5`.
+v0 ships synthetic data only. Future verified real-session splits must use
+consented plaintext/public content, pseudonymized participants, and a
+k-anonymity floor of `k=5`; they enter through the snapshot-intake workflow.
+
+Real-data slot:
+
+- `eval_real.jsonl` is intentionally absent: no verified real-human split has
+  been ingested or bundled, so there is no real-snapshot count to publish.
+- Its source is verified, consented Context Engine sessions exported through
+  the multi-source snapshot exporter and accepted by `scripts/ingest_snapshots.py`.
+- Intake emits an allowlisted JSONL split plus a content-hash provenance
+  manifest. Accepted snapshots are unmasked and require `masked_vote_count` at
+  load time.
+
+Example intake:
+
+```bash
+uv run python scripts/ingest_snapshots.py /path/to/exports/*.jsonl \
+  --output /approved/data/eval_real.jsonl \
+  --manifest /approved/data/eval_real.manifest.json
+```
+
+To compute model-free floors for an approved split with the same deterministic
+remasking used by the environment:
+
+```bash
+uv run python scripts/compute_floors.py /approved/data/eval_real.jsonl \
+  --masked-vote-count MASK_COUNT --seed SEED
+```
 
 ## Methodology Attribution
 
@@ -47,7 +74,9 @@ Environment variable:
 - `COMMONGROUND_DATA_PATH`: optional path to a JSONL file of session snapshots.
   If unset, the bundled synthetic eval split is used. Set it to
   `commonground_predict/data/eval_ce_demo.jsonl` to run against the bundled CE
-  demo split.
+  demo split, or to an operator-approved `eval_real.jsonl` outside the package
+  for verified real-session evaluation. Unmasked inputs still require the
+  `masked_vote_count` loader argument.
 
 Difficulty knobs passed to `load_environment(**kwargs)`:
 
@@ -79,9 +108,32 @@ The rubric uses:
 - `brier`, weight `0.0`: logged multiclass Brier metric only.
 
 For the bundled synthetic split with its pre-baked masks, naive floors are
-always-agree `0.425`, per-statement visible-majority `0.494`, and per-row
-best-constant oracle `0.525`. A real model should exceed these floors; model
-baseline runs remain future work.
+always-agree `0.425`, per-statement visible-majority `0.494`, and per-snapshot
+best-constant oracle `0.525`. A real model should exceed these floors; see
+Baselines below.
+
+## Baselines
+
+Runs use `prime eval run commonground-predict -m <model> -n 20 -r 3` on the
+bundled synthetic split with its pre-baked masks. Naive floors for reference:
+always-agree `0.425`, visible-majority `0.494`, per-snapshot best-constant
+oracle `0.525`.
+
+| Model | vote_accuracy (mean±std) | brier (mean) |
+| --- | --- | --- |
+| _pending — populated from real eval runs only_ | — | — |
+
+<!-- Numbers in this table must come from recorded `prime eval` runs. -->
+
+## The commonground Family
+
+`commonground-predict` is v0 of a planned environment family (`-bridge`,
+`-facilitate`, `-calibration`, `-elicit`, `-route`) built on the same exporter
+and scoring stack; see the [repository README](../../README.md) for the
+roadmap. A future human-data socket accepts verified, consented session exports
+from [Context Engine](https://contextengine.sh)
+([source](https://github.com/AgalmicSoftware/context-engine)); v0 contains no
+real-human split.
 
 ## Evaluation
 
