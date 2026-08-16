@@ -8,6 +8,36 @@ permissions:
   contents: read
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@e92bafb6253dcd438e0484186d7669ea7a8ca1cc # v6.4.3
+        with:
+          python-version: "3.12"
+      - name: Sync locked workspace
+        run: uv sync --all-packages --locked
+      - name: Run Ruff lint
+        run: uv run ruff check packages environments scripts tests
+      - name: Check Ruff formatting
+        run: uv run ruff format --check packages environments scripts tests
+
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@e92bafb6253dcd438e0484186d7669ea7a8ca1cc # v6.4.3
+        with:
+          python-version: "3.12"
+      - name: Sync locked workspace
+        run: uv sync --all-packages --locked
+      - name: Run mypy
+        run: uv run mypy
+
   test:
     runs-on: ubuntu-latest
     steps:
