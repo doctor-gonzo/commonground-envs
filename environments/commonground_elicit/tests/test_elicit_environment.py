@@ -19,6 +19,7 @@ from commonground_elicit import (
 )
 from commonground_elicit.environment import (
     BUNDLED_EVAL_PATH,
+    BUNDLED_TRAIN_PATH,
     _maximum_weight_sum,
     _safe_truncation_index,
     build_document_view,
@@ -33,7 +34,11 @@ def test_load_environment_builds_default_heldout_rows() -> None:
 
     assert isinstance(env, vf.SingleTurnEnv)
     assert env.env_id == "commonground-elicit"
+    assert len(env.get_dataset()) == 8
     assert len(env.get_eval_dataset()) == 4
+    assert {json.loads(row["info"])["template_set"] for row in env.get_dataset()} == {
+        "train"
+    }
     assert {json.loads(row["info"])["template_set"] for row in env.get_eval_dataset()} == {
         "heldout"
     }
@@ -46,20 +51,30 @@ def test_loader_preserves_original_positional_docs_count_argument() -> None:
     assert env.env_args["docs_count"] == 1
 
 
-def test_default_loader_is_repeatable_before_split_is_bundled() -> None:
-    first = [dict(row) for row in load_environment().get_eval_dataset()]
-    second = [dict(row) for row in load_environment().get_eval_dataset()]
+def test_default_bundled_loader_is_repeatable() -> None:
+    first_env = load_environment()
+    second_env = load_environment()
 
-    assert first == second
-    assert not BUNDLED_EVAL_PATH.exists()
+    assert [dict(row) for row in first_env.get_dataset()] == [
+        dict(row) for row in second_env.get_dataset()
+    ]
+    assert [dict(row) for row in first_env.get_eval_dataset()] == [
+        dict(row) for row in second_env.get_eval_dataset()
+    ]
+    assert BUNDLED_TRAIN_PATH.is_file()
+    assert BUNDLED_EVAL_PATH.is_file()
 
 
-def test_prebundle_env_args_round_trip_preserves_default_fallback() -> None:
+def test_bundled_env_args_round_trip_preserves_both_splits() -> None:
     env = load_environment(docs_count=2, planted_density=0.5)
 
     reloaded = load_environment(**env.env_args)
 
-    assert env.env_args["data_path"] is None
+    assert env.env_args["data_path"] == str(BUNDLED_EVAL_PATH)
+    assert env.env_args["train_data_path"] == str(BUNDLED_TRAIN_PATH)
+    assert [dict(row) for row in reloaded.get_dataset()] == [
+        dict(row) for row in env.get_dataset()
+    ]
     assert [dict(row) for row in reloaded.get_eval_dataset()] == [
         dict(row) for row in env.get_eval_dataset()
     ]

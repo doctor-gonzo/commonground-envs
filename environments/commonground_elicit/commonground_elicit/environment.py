@@ -13,8 +13,6 @@ from typing import Any
 
 import verifiers as vf
 from commonground_scenarios import (
-    HELDOUT_TEMPLATES,
-    generate_scenario,
     is_yes_no_question,
     question_fingerprint,
     validate_scenario,
@@ -25,10 +23,12 @@ from datasets import Dataset
 
 ENV_ID = "commonground-elicit"
 DATA_ENV_VAR = "COMMONGROUND_ELICIT_DATA_PATH"
-BUNDLED_EVAL_PATH = Path(__file__).resolve().parent / "data" / "eval_synthetic_heldout.jsonl"
+TRAIN_DATA_ENV_VAR = "COMMONGROUND_ELICIT_TRAIN_DATA_PATH"
+DATA_DIR = Path(__file__).resolve().parent / "data"
+BUNDLED_TRAIN_PATH = DATA_DIR / "train_synthetic.jsonl"
+BUNDLED_EVAL_PATH = DATA_DIR / "eval_synthetic_heldout.jsonl"
 FINDING_TYPES = frozenset({"ambiguity", "contradiction", "gap"})
 QUOTE_OVERLAP_THRESHOLD = 0.5
-DEFAULT_GENERATED_AT = "2026-08-15"
 VALID_TASKS = frozenset({"find", "elicit-ask"})
 STANCE_TO_VOTE = {"agree": 1, "disagree": -1, "pass": 0}
 _TOKEN_PATTERN = re.compile(r"[^\W_]+", flags=re.UNICODE)
@@ -59,6 +59,7 @@ def load_environment(
     task: str = "find",
     panel_polarization: float = 1.0,
     question_count: int = 3,
+    train_data_path: str | os.PathLike[str] | None = None,
     **kwargs: Any,
 ) -> vf.SingleTurnEnv:
     """Build the deterministic single-turn planted-finding environment."""
@@ -72,34 +73,38 @@ def load_environment(
         question_count=question_count,
         task=task,
     )
-    configured_path = data_path or os.environ.get(DATA_ENV_VAR)
-    resolved_path = Path(configured_path) if configured_path else BUNDLED_EVAL_PATH
-    scenarios = load_scenarios(resolved_path, allow_unbundled_default=configured_path is None)
-    candidate_rows = [
-        scenario_to_row(
-            scenario,
-            docs_count=docs_count,
-            docs_length=docs_length,
-            planted_density=planted_density,
-            distractor_density=distractor_density,
-            panel_polarization=panel_polarization,
-            question_count=question_count,
-            task=task,
-        )
-        for scenario in scenarios
-    ]
-    rows = [
-        row
-        for row in candidate_rows
-        if json.loads(row["planted_items"])
-        and (
-            task != "elicit-ask"
-            or len(json.loads(row["planted_questions"])) >= question_count
-        )
-    ]
-    if not rows:
+    configured_eval_path = data_path or os.environ.get(DATA_ENV_VAR)
+    configured_train_path = train_data_path or os.environ.get(TRAIN_DATA_ENV_VAR)
+    resolved_eval_path = (
+        Path(configured_eval_path) if configured_eval_path else BUNDLED_EVAL_PATH
+    )
+    resolved_train_path = (
+        Path(configured_train_path) if configured_train_path else BUNDLED_TRAIN_PATH
+    )
+    train_rows = _scenario_rows(
+        load_scenarios(resolved_train_path),
+        docs_count=docs_count,
+        docs_length=docs_length,
+        planted_density=planted_density,
+        distractor_density=distractor_density,
+        panel_polarization=panel_polarization,
+        question_count=question_count,
+        task=task,
+    )
+    eval_rows = _scenario_rows(
+        load_scenarios(resolved_eval_path),
+        docs_count=docs_count,
+        docs_length=docs_length,
+        planted_density=planted_density,
+        distractor_density=distractor_density,
+        panel_polarization=panel_polarization,
+        question_count=question_count,
+        task=task,
+    )
+    if not train_rows or not eval_rows:
         raise ValueError("difficulty arguments remove all planted items from the dataset")
-    dataset = Dataset.from_list(rows)
+    dataset = Dataset.from_list(train_rows)
+    eval_dataset = Dataset.from_list(eval_rows)
     parser = ElicitJsonParser("questions" if task == "elicit-ask" else "findings")
     if task == "elicit-ask":
         rubric = vf.Rubric(funcs=[question_utility], weights=[1.0], parser=parser)
@@ -117,15 +122,12 @@ def load_environment(
         "distractor_density": distractor_density,
         "panel_polarization": panel_polarization,
         "question_count": question_count,
-        "data_path": (
-            str(resolved_path)
-            if configured_path is not None or resolved_path.is_file()
-            else None
-        ),
+        "data_path": str(resolved_eval_path),
+        "train_data_path": str(resolved_train_path),
     }
     return vf.SingleTurnEnv(
         dataset=dataset,
-        eval_dataset=dataset,
+        eval_dataset=eval_dataset,
         parser=parser,
         rubric=rubric,
         env_id=ENV_ID,
@@ -134,18 +136,10 @@ def load_environment(
     )
 
 
-def load_scenarios(path: Path, *, allow_unbundled_default: bool = False) -> list[dict[str, Any]]:
-    """Load and validate canonical scenario JSONL.
-
-    Slice 2 can run before the committed split is introduced in slice 4. In
-    that narrow case, the default loader generates the held-out templates from
-    fixed seeds and an explicit date. Any explicitly configured missing path is
-    still an error.
-    """
+def load_scenarios(path: Path) -> list[dict[str, Any]]:
+    """Load and validate canonical scenario JSONL."""
 
     if not path.is_file():
-        if allow_unbundled_default and path == BUNDLED_EVAL_PATH:
-            return default_heldout_scenarios()
         raise FileNotFoundError(path)
 
     scenarios: list[dict[str, Any]] = []
@@ -163,17 +157,40 @@ def load_scenarios(path: Path, *, allow_unbundled_default: bool = False) -> list
     return scenarios
 
 
-def default_heldout_scenarios() -> list[dict[str, Any]]:
-    """Generate the temporary pre-bundle held-out set deterministically."""
+def _scenario_rows(
+    scenarios: Sequence[Mapping[str, Any]],
+    *,
+    docs_count: int | None,
+    docs_length: int | None,
+    planted_density: float,
+    distractor_density: float,
+    panel_polarization: float,
+    question_count: int,
+    task: str,
+) -> list[dict[str, Any]]:
+    """Apply the same difficulty contract to one scenario split."""
 
-    return [
-        generate_scenario(
-            seed=8200 + template_index * 10 + repetition,
-            domain_template=template,
-            generated_at=DEFAULT_GENERATED_AT,
+    candidate_rows = [
+        scenario_to_row(
+            scenario,
+            docs_count=docs_count,
+            docs_length=docs_length,
+            planted_density=planted_density,
+            distractor_density=distractor_density,
+            panel_polarization=panel_polarization,
+            question_count=question_count,
+            task=task,
         )
-        for template_index, template in enumerate(HELDOUT_TEMPLATES)
-        for repetition in range(2)
+        for scenario in scenarios
+    ]
+    return [
+        row
+        for row in candidate_rows
+        if json.loads(row["planted_items"])
+        and (
+            task != "elicit-ask"
+            or len(json.loads(row["planted_questions"])) >= question_count
+        )
     ]
 
 

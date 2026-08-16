@@ -35,3 +35,31 @@ Difficulty arguments are `docs_count`, `docs_length`, `planted_density`,
 loading, and scoring do not use the network, wall clock, or a judge model. On
 the find task, a row with fewer visible plants caps its logged companion
 question count to the visible answer-key size.
+
+## Bundled splits and floors
+
+`commonground_elicit/data/train_synthetic.jsonl` uses the committed training
+template set. `commonground_elicit/data/eval_synthetic_heldout.jsonl` uses the
+disjoint held-out template set. Every scenario is explicitly labeled
+`synthetic: true`; generation uses fixed seeds, an explicit provenance date,
+and templated offline prose. Regenerate both files with:
+
+```bash
+uv run python scripts/generate_elicit_splits.py
+```
+
+The generation script is byte-reproducible. Baselines receive only the visible
+documents and public faction descriptions; the planted answer key is used only
+after generation to score their responses. Running
+`uv run python scripts/compute_elicit_floors.py` on the bundled held-out split
+prints:
+
+| Task | Baseline | mean reward |
+| --- | --- | ---: |
+| find | Random visible spans | 0.167 |
+| find | Flag vague-sounding spans | 0.500 |
+| elicit-ask | Template clarity questions | 0.000 |
+| elicit-ask | Randomly targeted questions | 0.000 |
+
+See the bundled data directory's dataset card for the planting and separation
+methodology.
