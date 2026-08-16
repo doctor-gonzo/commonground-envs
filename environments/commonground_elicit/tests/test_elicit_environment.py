@@ -4,11 +4,11 @@ import asyncio
 import json
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
 
 import pytest
 import verifiers as vf
 from commonground_scenarios import HELDOUT_TEMPLATES, generate_scenario
+from verifiers.types import State
 
 from commonground_elicit import (
     ElicitJsonParser,
@@ -30,6 +30,10 @@ from commonground_elicit.environment import (
 )
 
 
+CANONICAL_TASK_COLUMNS = ("prompt", "answer", "info", "example_id")
+QUESTION_RESPONSE_FIELDS = ("doc_id", "quote", "question", "target_stances")
+
+
 def test_load_environment_builds_default_heldout_rows() -> None:
     env = load_environment()
 
@@ -46,21 +50,22 @@ def test_load_environment_builds_default_heldout_rows() -> None:
 
 
 @pytest.mark.parametrize("task", ["find", "elicit-ask"])
-def test_verifiers_rollout_path_scores_correct_and_incorrect(task: str) -> None:
+def test_server_state_path_scores_correct_and_incorrect(task: str) -> None:
     env = load_environment(task=task)
     row = dict(env.get_eval_dataset()[0])
-    answer = json.loads(row["answer"])
     incorrect = {"questions": []} if task == "elicit-ask" else {"findings": []}
 
-    correct_state = score_initialized_row(env, row, answer)
-    incorrect_state = score_initialized_row(env, row, incorrect)
+    correct_state = score_row(env, row, correct_response_from_row(row))
+    incorrect_state = score_row(env, row, incorrect)
 
     assert correct_state["reward"] > 0.0
     assert incorrect_state["reward"] == 0.0
+    assert set(correct_state["task"]) == set(CANONICAL_TASK_COLUMNS)
+    assert "input" not in correct_state
 
 
 @pytest.mark.parametrize("task", ["find", "elicit-ask"])
-def test_all_built_rows_avoid_reserved_plain_string_task_payloads(task: str) -> None:
+def test_all_built_rows_use_only_canonical_server_columns(task: str) -> None:
     env = load_environment(task=task)
 
     for dataset in (env.get_dataset(), env.get_eval_dataset()):
@@ -68,10 +73,12 @@ def test_all_built_rows_avoid_reserved_plain_string_task_payloads(task: str) -> 
             row = dict(raw_row)
             info = json.loads(row["info"])
 
-            assert "task" not in row
+            assert set(row) == set(CANONICAL_TASK_COLUMNS)
             assert "task" not in info
             assert info["task_label"] == task
-            assert initialize_row(env, row)["prompt"] == row["prompt"]
+            assert info["panel_polarization"] == 1.0
+            assert info["question_count"] == 3
+            assert info["allow_combined_questions"] is (task == "find")
 
 
 def test_loader_preserves_original_positional_docs_count_argument() -> None:
@@ -120,21 +127,26 @@ def test_explicit_missing_data_path_is_an_error(tmp_path: Path) -> None:
 def test_prompt_does_not_leak_answer_key_or_faction_priors() -> None:
     scenario = generate_scenario(91, HELDOUT_TEMPLATES[0])
     env = load_environment()
-    prompt = dict(env.get_eval_dataset()[0])["prompt"][0]["content"]
+    row = dict(env.get_eval_dataset()[0])
+    prompt = row["prompt"][0]["content"]
+    answer = json.loads(row["answer"])
 
     assert "canonical_question" not in prompt
     assert "faction_id" not in prompt
     for plant in scenario["planted_items"]:
         assert plant["canonical_question"] not in prompt
         assert json.dumps(plant["target_stances"], sort_keys=True) not in prompt
+    for question in answer["questions"]:
+        assert question["question"] not in prompt
+        assert all(alias not in prompt for alias in question["question_aliases"])
+        assert json.dumps(question["target_stances"], sort_keys=True) not in prompt
 
 
 def test_rubric_scores_exact_answer_at_one() -> None:
     env = load_environment()
     row = dict(env.get_eval_dataset()[0])
-    answer = json.loads(row["answer"])
 
-    state = score_row(env, row, answer)
+    state = score_row(env, row, correct_response_from_row(row))
 
     assert state["reward"] == 1.0
     assert state["metrics"]["finding_f1"] == 1.0
@@ -144,7 +156,7 @@ def test_rubric_scores_exact_answer_at_one() -> None:
 def test_find_task_companion_question_metric_is_reachable_without_affecting_reward() -> None:
     env = load_environment()
     row = dict(env.get_eval_dataset()[0])
-    exact = json.loads(row["answer"])
+    exact = correct_response_from_row(row)
     without_questions = {"findings": exact["findings"]}
 
     combined_state = score_row(env, row, exact)
@@ -173,7 +185,7 @@ def test_ask_task_builds_same_env_id_with_task_specific_prompt() -> None:
     env = load_environment(task="elicit-ask")
     row = dict(env.get_eval_dataset()[0])
     prompt = row["prompt"][0]["content"]
-    planted = json.loads(row["planted_questions"])
+    planted = planted_questions_from_row(row)
 
     assert env.env_id == "commonground-elicit"
     assert env.env_args["task"] == "elicit-ask"
@@ -189,7 +201,7 @@ def test_ask_task_builds_same_env_id_with_task_specific_prompt() -> None:
 def test_ask_task_exact_planted_response_is_positive_and_deterministic() -> None:
     env = load_environment(task="elicit-ask")
     row = dict(env.get_eval_dataset()[0])
-    answer = json.loads(row["answer"])
+    answer = correct_response_from_row(row)
 
     first = score_row(env, row, answer)
     second = score_row(env, row, answer)
@@ -212,13 +224,16 @@ def test_ask_task_env_args_round_trip_preserves_task_and_rows() -> None:
     ]
 
 
-def test_question_count_knob_changes_contract_and_answer_size() -> None:
+def test_question_count_knob_changes_prompt_info_and_response_size() -> None:
     env = load_environment(task="elicit-ask", question_count=1)
     row = dict(env.get_eval_dataset()[0])
+    info = json.loads(row["info"])
+    response = correct_response_from_row(row)
 
     assert "Raise exactly 1 clarifying questions" in row["prompt"][0]["content"]
-    assert len(json.loads(row["answer"])["questions"]) == 1
-    assert score_row(env, row, json.loads(row["answer"]))["reward"] > 0
+    assert info["question_count"] == 1
+    assert len(response["questions"]) == 1
+    assert score_row(env, row, response)["reward"] > 0
 
 
 def test_ask_task_rejects_k_larger_than_available_plants() -> None:
@@ -233,7 +248,7 @@ def test_panel_polarization_scales_question_reward() -> None:
     )
     full_row = dict(full_env.get_eval_dataset()[0])
     half_row = dict(half_env.get_eval_dataset()[0])
-    answer = json.loads(full_row["answer"])
+    answer = correct_response_from_row(full_row)
 
     full_score = score_row(full_env, full_row, answer)["reward"]
     half_score = score_row(half_env, half_row, answer)["reward"]
@@ -244,7 +259,7 @@ def test_panel_polarization_scales_question_reward() -> None:
 def test_planted_specific_question_strictly_beats_generic_divisiveness() -> None:
     env = load_environment(task="elicit-ask", question_count=1)
     row = dict(env.get_eval_dataset()[0])
-    plant = json.loads(row["planted_questions"])[0]
+    plant = planted_questions_from_row(row)[0]
     targeted = {
         "doc_id": plant["doc_id"],
         "quote": plant["quote"],
@@ -307,7 +322,7 @@ def test_precise_distractor_quote_cannot_receive_planted_question_credit() -> No
         question_count=1,
         task="elicit-ask",
     )
-    planted_question = json.loads(row["planted_questions"])[0]
+    planted_question = planted_questions_from_row(row)[0]
     distractor_candidate = candidate_for_plant(
         planted_question, quote=distractor_quote
     )
@@ -339,7 +354,7 @@ def test_precise_distractor_quote_cannot_receive_planted_question_credit() -> No
         question_count=1,
         task="elicit-ask",
     )
-    truncated_plant = json.loads(truncated_row["planted_questions"])[0]
+    truncated_plant = planted_questions_from_row(truncated_row)[0]
 
     assert visible_prefix not in truncated_plant["document_text"]
     assert question_utility_score(
@@ -354,11 +369,12 @@ def test_find_task_caps_companion_k_to_visible_plants() -> None:
     env = load_environment(task="find", planted_density=0.3, question_count=3)
     row = dict(env.get_eval_dataset()[0])
     answer = json.loads(row["answer"])
+    info = json.loads(row["info"])
 
-    assert row["question_count"] == 1
+    assert info["question_count"] == 1
     assert "Return exactly 1 question objects" in row["prompt"][0]["content"]
     assert len(answer["questions"]) == 1
-    state = score_row(env, row, answer)
+    state = score_row(env, row, correct_response_from_row(row))
     assert state["reward"] == 1.0
     assert state["metrics"]["question_utility"] > 0.0
 
@@ -372,7 +388,7 @@ def test_find_task_caps_companion_k_to_visible_plants() -> None:
 )
 def test_low_specificity_questions_cannot_match_planting(question: str) -> None:
     env = load_environment(task="elicit-ask", question_count=1)
-    plant = json.loads(dict(env.get_eval_dataset()[0])["planted_questions"])[0]
+    plant = planted_questions_from_row(dict(env.get_eval_dataset()[0]))[0]
     candidate = candidate_for_plant(plant, question=question)
 
     assert question_utility_score(
@@ -382,7 +398,7 @@ def test_low_specificity_questions_cannot_match_planting(question: str) -> None:
 
 def test_negating_canonical_question_cannot_retain_lexical_credit() -> None:
     env = load_environment(task="elicit-ask", question_count=1)
-    plant = json.loads(dict(env.get_eval_dataset()[0])["planted_questions"])[0]
+    plant = planted_questions_from_row(dict(env.get_eval_dataset()[0]))[0]
     candidate = candidate_for_plant(
         plant,
         question=f"Should we not ask: {plant['question']}",
@@ -403,9 +419,12 @@ def test_negating_canonical_question_cannot_retain_lexical_credit() -> None:
 )
 def test_negation_scope_changes_cannot_match_planting(question: str) -> None:
     env = load_environment(task="elicit-ask", question_count=1)
-    plants = json.loads(dict(env.get_eval_dataset()[0])["planted_questions"])
+    plants = planted_questions_from_row(dict(env.get_eval_dataset()[0]))
     plant = next(
-        plant for plant in plants if plant["plant_id"] == "handoff-authority-conflict"
+        plant
+        for plant in plants
+        if plant["question"]
+        == "Should the duty coordinator transfer a load after hours without the assigned dispatcher?"
     )
 
     assert question_utility_score(
@@ -428,7 +447,7 @@ def test_negation_scope_changes_cannot_match_planting(question: str) -> None:
 )
 def test_word_scrambles_and_opposite_predicates_cannot_match(question: str) -> None:
     env = load_environment(task="elicit-ask", question_count=1)
-    plant = json.loads(dict(env.get_eval_dataset()[0])["planted_questions"])[0]
+    plant = planted_questions_from_row(dict(env.get_eval_dataset()[0]))[0]
     candidate = candidate_for_plant(plant, question=question)
 
     assert question_utility_score(
@@ -438,7 +457,7 @@ def test_word_scrambles_and_opposite_predicates_cannot_match(question: str) -> N
 
 def test_extra_negation_on_question_with_existing_negation_scores_zero() -> None:
     env = load_environment(task="elicit-ask", question_count=1)
-    plants = json.loads(dict(env.get_eval_dataset()[0])["planted_questions"])
+    plants = planted_questions_from_row(dict(env.get_eval_dataset()[0]))
     plant = next(plant for plant in plants if "without" in plant["question"])
     candidate = candidate_for_plant(
         plant,
@@ -452,7 +471,7 @@ def test_extra_negation_on_question_with_existing_negation_scores_zero() -> None
 
 def test_symbolic_negation_cannot_disappear_during_question_normalization() -> None:
     env = load_environment(task="elicit-ask", question_count=1)
-    plant = json.loads(dict(env.get_eval_dataset()[0])["planted_questions"])[0]
+    plant = planted_questions_from_row(dict(env.get_eval_dataset()[0]))[0]
     candidate = candidate_for_plant(
         plant,
         question=plant["question"].replace(" dispatchers ", " dispatchers ¬ ", 1),
@@ -466,7 +485,7 @@ def test_symbolic_negation_cannot_disappear_during_question_normalization() -> N
 @pytest.mark.parametrize("separator", ["\n", "\t", "  "])
 def test_noncanonical_question_whitespace_scores_zero(separator: str) -> None:
     env = load_environment(task="elicit-ask", question_count=1)
-    plant = json.loads(dict(env.get_eval_dataset()[0])["planted_questions"])[0]
+    plant = planted_questions_from_row(dict(env.get_eval_dataset()[0]))[0]
     candidate = candidate_for_plant(
         plant,
         question=plant["question"].replace(" ", separator, 1),
@@ -479,8 +498,13 @@ def test_noncanonical_question_whitespace_scores_zero(separator: str) -> None:
 
 def test_actor_reversal_with_shared_vocabulary_scores_zero() -> None:
     env = load_environment(task="elicit-ask", question_count=1)
-    plants = json.loads(dict(env.get_eval_dataset()[0])["planted_questions"])
-    plant = next(plant for plant in plants if plant["plant_id"] == "handoff-authority-conflict")
+    plants = planted_questions_from_row(dict(env.get_eval_dataset()[0]))
+    plant = next(
+        plant
+        for plant in plants
+        if plant["question"]
+        == "Should the duty coordinator transfer a load after hours without the assigned dispatcher?"
+    )
     candidate = candidate_for_plant(
         plant,
         question="Should the assigned dispatcher transfer a load after hours without the duty coordinator?",
@@ -493,7 +517,7 @@ def test_actor_reversal_with_shared_vocabulary_scores_zero() -> None:
 
 def test_fabricated_opposite_quote_cannot_claim_document_grounding() -> None:
     env = load_environment(task="elicit-ask", question_count=1)
-    plant = json.loads(dict(env.get_eval_dataset()[0])["planted_questions"])[0]
+    plant = planted_questions_from_row(dict(env.get_eval_dataset()[0]))[0]
     candidate = candidate_for_plant(
         plant,
         quote=f"Never {plant['quote'][0].lower()}{plant['quote'][1:]}",
@@ -506,7 +530,7 @@ def test_fabricated_opposite_quote_cannot_claim_document_grounding() -> None:
 
 def test_partial_word_quote_cannot_claim_document_grounding() -> None:
     env = load_environment(task="elicit-ask", question_count=1)
-    plant = json.loads(dict(env.get_eval_dataset()[0])["planted_questions"])[0]
+    plant = planted_questions_from_row(dict(env.get_eval_dataset()[0]))[0]
     candidate = candidate_for_plant(
         plant,
         quote="use a route when conditions become unsafe.",
@@ -538,7 +562,7 @@ def test_exact_raw_planted_anchor_inside_token_remains_scorable() -> None:
 
 def test_symbolic_negation_cannot_disappear_from_grounding_quote() -> None:
     env = load_environment(task="elicit-ask", question_count=1)
-    plant = json.loads(dict(env.get_eval_dataset()[0])["planted_questions"])[0]
+    plant = planted_questions_from_row(dict(env.get_eval_dataset()[0]))[0]
     candidate = candidate_for_plant(plant, quote=f"¬{plant['quote']}")
 
     assert question_utility_score(
@@ -549,7 +573,7 @@ def test_symbolic_negation_cannot_disappear_from_grounding_quote() -> None:
 def test_question_reward_requires_matching_planted_target_stances() -> None:
     env = load_environment(task="elicit-ask", question_count=1)
     row = dict(env.get_eval_dataset()[0])
-    plant = json.loads(row["planted_questions"])[0]
+    plant = planted_questions_from_row(row)[0]
     wrong_stances = {
         faction_id: {"agree": "disagree", "disagree": "agree", "pass": "agree"}[stance]
         for faction_id, stance in plant["target_stances"].items()
@@ -568,7 +592,7 @@ def test_question_reward_requires_matching_planted_target_stances() -> None:
 
 def test_uniform_or_single_error_stance_vectors_receive_no_credit() -> None:
     env = load_environment(task="elicit-ask", question_count=1)
-    plant = json.loads(dict(env.get_eval_dataset()[0])["planted_questions"])[0]
+    plant = planted_questions_from_row(dict(env.get_eval_dataset()[0]))[0]
     uniform = {faction_id: "agree" for faction_id in plant["target_stances"]}
     single_error = dict(plant["target_stances"])
     faction_id = next(iter(single_error))
@@ -586,7 +610,7 @@ def test_uniform_or_single_error_stance_vectors_receive_no_credit() -> None:
 def test_question_count_is_strict_for_missing_or_extra_outputs() -> None:
     env = load_environment(task="elicit-ask", question_count=1)
     row = dict(env.get_eval_dataset()[0])
-    plant = json.loads(row["planted_questions"])[0]
+    plant = planted_questions_from_row(row)[0]
     candidate = {
         "doc_id": plant["doc_id"],
         "quote": plant["quote"],
@@ -604,7 +628,7 @@ def test_question_count_is_strict_for_missing_or_extra_outputs() -> None:
 
 def test_valid_k_duplicate_questions_are_rejected() -> None:
     env = load_environment(task="elicit-ask", question_count=2)
-    plants = json.loads(dict(env.get_eval_dataset()[0])["planted_questions"])
+    plants = planted_questions_from_row(dict(env.get_eval_dataset()[0]))
     duplicate = candidate_for_plant(plants[0])
 
     assert question_utility_score(
@@ -614,7 +638,7 @@ def test_valid_k_duplicate_questions_are_rejected() -> None:
 
 def test_duplicate_question_variants_ignore_ids_quotes_and_stance_predictions() -> None:
     env = load_environment(task="elicit-ask", question_count=2)
-    plants = json.loads(dict(env.get_eval_dataset()[0])["planted_questions"])
+    plants = planted_questions_from_row(dict(env.get_eval_dataset()[0]))
     duplicate = candidate_for_plant(plants[0])
     altered_stances = dict(duplicate["target_stances"])
     faction_id = next(iter(altered_stances))
@@ -733,7 +757,7 @@ def test_cross_plant_quote_swaps_receive_no_question_credit() -> None:
 
 def test_appended_composite_clause_receives_no_question_credit() -> None:
     env = load_environment(task="elicit-ask", question_count=1)
-    plant = json.loads(dict(env.get_eval_dataset()[0])["planted_questions"])[0]
+    plant = planted_questions_from_row(dict(env.get_eval_dataset()[0]))[0]
     question = plant["question"].removesuffix("?") + " and abolish all rules?"
 
     assert question_utility_score(
@@ -757,7 +781,7 @@ def test_semantic_substitutions_and_composites_receive_no_question_credit(
     question: str,
 ) -> None:
     env = load_environment(task="elicit-ask", question_count=1)
-    plant = json.loads(dict(env.get_eval_dataset()[0])["planted_questions"])[0]
+    plant = planted_questions_from_row(dict(env.get_eval_dataset()[0]))[0]
 
     assert question_utility_score(
         [candidate_for_plant(plant, question=question)],
@@ -769,7 +793,7 @@ def test_semantic_substitutions_and_composites_receive_no_question_credit(
 
 def test_explicit_generator_authored_question_alias_receives_credit() -> None:
     env = load_environment(task="elicit-ask", question_count=1)
-    plant = json.loads(dict(env.get_eval_dataset()[0])["planted_questions"])[0]
+    plant = planted_questions_from_row(dict(env.get_eval_dataset()[0]))[0]
 
     assert question_utility_score(
         [candidate_for_plant(plant, question=plant["question_aliases"][0])],
@@ -788,7 +812,7 @@ def test_explicit_generator_authored_question_alias_receives_credit() -> None:
 )
 def test_unlisted_question_paraphrases_receive_zero(question: str) -> None:
     env = load_environment(task="elicit-ask", question_count=1)
-    plant = json.loads(dict(env.get_eval_dataset()[0])["planted_questions"])[0]
+    plant = planted_questions_from_row(dict(env.get_eval_dataset()[0]))[0]
 
     assert question_utility_score(
         [candidate_for_plant(plant, question=question)],
@@ -800,7 +824,7 @@ def test_unlisted_question_paraphrases_receive_zero(question: str) -> None:
 
 def test_canonical_and_authored_alias_duplicate_zero_the_whole_response() -> None:
     env = load_environment(task="elicit-ask", question_count=2)
-    plants = json.loads(dict(env.get_eval_dataset()[0])["planted_questions"])
+    plants = planted_questions_from_row(dict(env.get_eval_dataset()[0]))
     canonical = candidate_for_plant(plants[0])
     alias = candidate_for_plant(
         plants[0],
@@ -817,7 +841,7 @@ def test_canonical_and_authored_alias_duplicate_zero_the_whole_response() -> Non
 
 def test_alias_duplicate_rejection_ignores_claimed_grounding_and_stances() -> None:
     env = load_environment(task="elicit-ask", question_count=2)
-    plants = json.loads(dict(env.get_eval_dataset()[0])["planted_questions"])
+    plants = planted_questions_from_row(dict(env.get_eval_dataset()[0]))
     canonical = candidate_for_plant(plants[0])
     disguised_alias = {
         **candidate_for_plant(plants[1]),
@@ -853,7 +877,7 @@ def test_compatibility_lookalike_quote_cannot_match_planted_anchor() -> None:
 
 def test_one_composite_question_cannot_claim_two_plants() -> None:
     env = load_environment(task="elicit-ask", question_count=1)
-    plants = json.loads(dict(env.get_eval_dataset()[0])["planted_questions"])
+    plants = planted_questions_from_row(dict(env.get_eval_dataset()[0]))
     radio_plants = [plant for plant in plants if plant["doc_id"] == "radio-script"]
     assert len(radio_plants) == 2
     assert radio_plants[0]["target_stances"] == radio_plants[1]["target_stances"]
@@ -871,7 +895,7 @@ def test_one_composite_question_cannot_claim_two_plants() -> None:
 
 def test_composite_detection_ignores_claimed_grounding_and_stance_vector() -> None:
     env = load_environment(task="elicit-ask", question_count=1)
-    plants = json.loads(dict(env.get_eval_dataset()[2])["planted_questions"])
+    plants = planted_questions_from_row(dict(env.get_eval_dataset()[2]))
     first, second = plants[:2]
     assert first["doc_id"] != second["doc_id"]
     assert first["target_stances"] != second["target_stances"]
@@ -890,7 +914,7 @@ def test_composite_detection_ignores_claimed_grounding_and_stance_vector() -> No
 def test_ask_task_rejects_find_task_combined_root() -> None:
     env = load_environment(task="elicit-ask", question_count=1)
     row = dict(env.get_eval_dataset()[0])
-    answer = json.loads(row["answer"])
+    answer = correct_response_from_row(row)
     combined = {"findings": [], "questions": answer["questions"]}
 
     assert score_row(env, row, combined)["reward"] == 0.0
@@ -899,7 +923,7 @@ def test_ask_task_rejects_find_task_combined_root() -> None:
 def test_ask_parser_extracts_nested_task_object_like_predict() -> None:
     env = load_environment(task="elicit-ask", question_count=1)
     row = dict(env.get_eval_dataset()[0])
-    answer = json.loads(row["answer"])
+    answer = correct_response_from_row(row)
     wrapped = {"findings": [], "wrapper": answer}
 
     assert score_row(env, row, wrapped)["reward"] > 0.0
@@ -909,7 +933,7 @@ def test_ask_parser_extracts_nested_task_object_like_predict() -> None:
 def test_ask_parser_recovers_wrapped_task_objects_like_predict(wrapper: str) -> None:
     env = load_environment(task="elicit-ask", question_count=1)
     row = dict(env.get_eval_dataset()[0])
-    answer = json.loads(row["answer"])
+    answer = correct_response_from_row(row)
     content = (
         json.dumps([answer], sort_keys=True)
         if wrapper == "array"
@@ -920,9 +944,8 @@ def test_ask_parser_recovers_wrapped_task_objects_like_predict(wrapper: str) -> 
     score = asyncio.run(
         question_utility(
             completion,
-            json.loads(row["planted_questions"]),
-            panel_polarization=1.0,
-            question_count=1,
+            row["answer"],
+            row["info"],
             parser=ElicitJsonParser("questions"),
         )
     )
@@ -940,7 +963,7 @@ def test_configured_are_question_is_valid_and_scorable(tmp_path: Path) -> None:
     env = load_environment(task="elicit-ask", question_count=1, data_path=data_path)
     row = dict(env.get_eval_dataset()[0])
 
-    assert score_row(env, row, json.loads(row["answer"]))["reward"] > 0.0
+    assert score_row(env, row, correct_response_from_row(row))["reward"] > 0.0
 
 
 def test_configured_short_yes_no_question_and_anchor_are_scorable(
@@ -961,7 +984,7 @@ def test_configured_short_yes_no_question_and_anchor_are_scorable(
     env = load_environment(task="elicit-ask", question_count=1, data_path=data_path)
     row = dict(env.get_eval_dataset()[0])
 
-    assert score_row(env, row, json.loads(row["answer"]))["reward"] > 0.0
+    assert score_row(env, row, correct_response_from_row(row))["reward"] > 0.0
 
 
 def test_maximum_weight_question_assignment_is_global() -> None:
@@ -989,7 +1012,7 @@ def test_empty_findings_score_zero_on_a_nonempty_task() -> None:
 def test_false_positive_strictly_reduces_precision_and_f1() -> None:
     env = load_environment()
     row = dict(env.get_eval_dataset()[0])
-    answer = json.loads(row["answer"])
+    answer = correct_response_from_row(row)
     answer["findings"].append(
         {"doc_id": "not-a-document", "quote": "This is a rule.", "type": "ambiguity"}
     )
@@ -1172,9 +1195,12 @@ def test_ask_parser_or_strict_schema_failures_score_zero(content: str) -> None:
     score = asyncio.run(
         question_utility(
             completion,
-            planted,
-            panel_polarization=1.0,
-            question_count=1,
+            {"questions": planted},
+            {
+                "panel_polarization": 1.0,
+                "question_count": 1,
+                "allow_combined_questions": False,
+            },
             parser=ElicitJsonParser("questions"),
         )
     )
@@ -1196,7 +1222,9 @@ def test_parser_or_strict_schema_failures_score_zero(content: str) -> None:
     planted = [{"doc_id": "p", "quote": "q", "type": "gap"}]
     completion = [{"role": "assistant", "content": content}]
 
-    score = asyncio.run(finding_f1(completion, planted, ElicitJsonParser()))
+    score = asyncio.run(
+        finding_f1(completion, {"findings": planted}, ElicitJsonParser())
+    )
 
     assert score == 0
 
@@ -1204,7 +1232,9 @@ def test_parser_or_strict_schema_failures_score_zero(content: str) -> None:
 def test_strict_schema_failure_scores_zero_even_with_empty_answer_key() -> None:
     completion = [{"role": "assistant", "content": '{"findings":"invalid"}'}]
 
-    score = asyncio.run(finding_f1(completion, [], ElicitJsonParser()))
+    score = asyncio.run(
+        finding_f1(completion, {"findings": []}, ElicitJsonParser())
+    )
 
     assert score == 0
 
@@ -1212,7 +1242,9 @@ def test_strict_schema_failure_scores_zero_even_with_empty_answer_key() -> None:
 def test_empty_findings_and_empty_answer_key_score_zero() -> None:
     completion = [{"role": "assistant", "content": '{"findings":[]}'}]
 
-    score = asyncio.run(finding_f1(completion, [], ElicitJsonParser()))
+    score = asyncio.run(
+        finding_f1(completion, {"findings": []}, ElicitJsonParser())
+    )
 
     assert score == 0
 
@@ -1328,7 +1360,9 @@ def test_loader_filters_individual_plant_free_rows() -> None:
     env = load_environment(docs_count=1)
 
     assert 0 < len(env.get_eval_dataset()) <= 4
-    assert all(json.loads(row["planted_items"]) for row in env.get_eval_dataset())
+    assert all(
+        json.loads(row["answer"])["findings"] for row in env.get_eval_dataset()
+    )
 
 
 def test_distractor_density_removes_hidden_near_miss_passages() -> None:
@@ -1383,23 +1417,12 @@ def score_row(
     row: dict[str, Any],
     response: dict[str, Any],
 ) -> dict[str, Any]:
-    state = {
-        "prompt": row["prompt"],
-        "completion": [
-            {"role": "assistant", "content": json.dumps(response, sort_keys=True)}
-        ],
-        "input": row,
+    task = {
+        key: row[key]
+        for key in CANONICAL_TASK_COLUMNS
+        if key in row
     }
-    asyncio.run(env.rubric.score_rollout(state))
-    return state
-
-
-def score_initialized_row(
-    env: vf.SingleTurnEnv,
-    row: dict[str, Any],
-    response: dict[str, Any],
-) -> dict[str, Any]:
-    state = initialize_row(env, row)
+    state = State.for_task(task)
     state["completion"] = [
         {"role": "assistant", "content": json.dumps(response, sort_keys=True)}
     ]
@@ -1407,15 +1430,21 @@ def score_initialized_row(
     return state
 
 
-def initialize_row(
-    env: vf.SingleTurnEnv,
-    row: dict[str, Any],
-) -> dict[str, Any]:
-    async def initialize() -> dict[str, Any]:
-        with patch("verifiers.envs.environment.resolve_client", return_value=object()):
-            return await env.init_state(row, object(), "offline-stub", {})
+def planted_questions_from_row(row: dict[str, Any]) -> list[dict[str, Any]]:
+    return json.loads(row["answer"])["questions"]
 
-    return asyncio.run(initialize())
+
+def correct_response_from_row(row: dict[str, Any]) -> dict[str, Any]:
+    answer = json.loads(row["answer"])
+    info = json.loads(row["info"])
+    questions = [
+        {field: question[field] for field in QUESTION_RESPONSE_FIELDS}
+        for question in answer.get("questions", [])[: info["question_count"]]
+    ]
+    response: dict[str, Any] = {"questions": questions}
+    if info["allow_combined_questions"]:
+        response["findings"] = answer["findings"]
+    return response
 
 
 def candidate_for_plant(

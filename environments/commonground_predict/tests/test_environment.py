@@ -5,10 +5,10 @@ import json
 from math import isclose
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
 
 import pytest
 import verifiers as vf
+from verifiers.types import State
 
 from commonground_predict import PredictionJsonParser, load_environment
 from commonground_predict.environment import (
@@ -20,6 +20,7 @@ from commonground_predict.environment import (
 )
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "commonground_predict" / "data"
+CANONICAL_TASK_COLUMNS = ("prompt", "answer", "info", "example_id")
 
 
 def test_load_environment_builds_bundled_split() -> None:
@@ -30,19 +31,21 @@ def test_load_environment_builds_bundled_split() -> None:
     assert len(env.get_eval_dataset()) == 20
 
 
-def test_verifiers_rollout_path_binds_answer_for_correct_and_incorrect() -> None:
+def test_server_state_path_binds_answer_for_correct_and_incorrect() -> None:
     env = load_environment()
     row = dict(env.get_eval_dataset()[0])
     answer = json.loads(row["answer"])
     incorrect = {cell_id: wrong_vote(vote) for cell_id, vote in answer.items()}
 
-    correct_state = score_initialized_row(env, row, answer)
-    incorrect_state = score_initialized_row(env, row, incorrect)
+    correct_state = score_row(env, row, answer)
+    incorrect_state = score_row(env, row, incorrect)
 
     assert correct_state["reward"] == 1.0
     assert correct_state["metrics"]["vote_accuracy"] == 1.0
     assert incorrect_state["reward"] == 0.0
     assert incorrect_state["metrics"]["vote_accuracy"] == 0.0
+    assert set(correct_state["task"]) == set(CANONICAL_TASK_COLUMNS)
+    assert "input" not in correct_state
 
 
 def test_all_built_rows_use_standard_answer_contract() -> None:
@@ -58,7 +61,7 @@ def test_all_built_rows_use_standard_answer_contract() -> None:
             assert "held_out" not in row
             assert answer == snapshot["held_out"]
             assert info["masked_vote_count"] == len(answer)
-            assert initialize_row(env, row)["answer"] == row["answer"]
+            assert State.for_task(canonical_task(row))["answer"] == row["answer"]
 
 
 def test_bundled_eval_path_is_inside_import_package() -> None:
@@ -348,43 +351,18 @@ def score_row(
             "content": json.dumps({"predictions": predictions}, sort_keys=True),
         }
     ]
-    state = {
-        "prompt": row["prompt"],
-        "completion": completion,
-        "answer": row["answer"],
-        "info": row["info"],
-        "input": row,
-        "trajectory": [],
+    state = State.for_task(canonical_task(row))
+    state["completion"] = completion
+    asyncio.run(env.rubric.score_rollout(state))
+    return state
+
+
+def canonical_task(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: row[key]
+        for key in CANONICAL_TASK_COLUMNS
+        if key in row
     }
-    asyncio.run(env.rubric.score_rollout(state))
-    return state
-
-
-def score_initialized_row(
-    env: vf.SingleTurnEnv,
-    row: dict[str, Any],
-    predictions: dict[str, int],
-) -> dict[str, Any]:
-    state = initialize_row(env, row)
-    state["completion"] = [
-        {
-            "role": "assistant",
-            "content": json.dumps({"predictions": predictions}, sort_keys=True),
-        }
-    ]
-    asyncio.run(env.rubric.score_rollout(state))
-    return state
-
-
-def initialize_row(
-    env: vf.SingleTurnEnv,
-    row: dict[str, Any],
-) -> dict[str, Any]:
-    async def initialize() -> dict[str, Any]:
-        with patch("verifiers.envs.environment.resolve_client", return_value=object()):
-            return await env.init_state(row, object(), "offline-stub", {})
-
-    return asyncio.run(initialize())
 
 
 def score_brier_prediction(prediction: dict[Any, float]) -> float:
