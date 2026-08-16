@@ -4,6 +4,7 @@ import asyncio
 import json
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 import verifiers as vf
@@ -42,6 +43,35 @@ def test_load_environment_builds_default_heldout_rows() -> None:
     assert {json.loads(row["info"])["template_set"] for row in env.get_eval_dataset()} == {
         "heldout"
     }
+
+
+@pytest.mark.parametrize("task", ["find", "elicit-ask"])
+def test_verifiers_rollout_path_scores_correct_and_incorrect(task: str) -> None:
+    env = load_environment(task=task)
+    row = dict(env.get_eval_dataset()[0])
+    answer = json.loads(row["answer"])
+    incorrect = {"questions": []} if task == "elicit-ask" else {"findings": []}
+
+    correct_state = score_initialized_row(env, row, answer)
+    incorrect_state = score_initialized_row(env, row, incorrect)
+
+    assert correct_state["reward"] > 0.0
+    assert incorrect_state["reward"] == 0.0
+
+
+@pytest.mark.parametrize("task", ["find", "elicit-ask"])
+def test_all_built_rows_avoid_reserved_plain_string_task_payloads(task: str) -> None:
+    env = load_environment(task=task)
+
+    for dataset in (env.get_dataset(), env.get_eval_dataset()):
+        for raw_row in dataset:
+            row = dict(raw_row)
+            info = json.loads(row["info"])
+
+            assert "task" not in row
+            assert "task" not in info
+            assert info["task_label"] == task
+            assert initialize_row(env, row)["prompt"] == row["prompt"]
 
 
 def test_loader_preserves_original_positional_docs_count_argument() -> None:
@@ -1362,6 +1392,30 @@ def score_row(
     }
     asyncio.run(env.rubric.score_rollout(state))
     return state
+
+
+def score_initialized_row(
+    env: vf.SingleTurnEnv,
+    row: dict[str, Any],
+    response: dict[str, Any],
+) -> dict[str, Any]:
+    state = initialize_row(env, row)
+    state["completion"] = [
+        {"role": "assistant", "content": json.dumps(response, sort_keys=True)}
+    ]
+    asyncio.run(env.rubric.score_rollout(state))
+    return state
+
+
+def initialize_row(
+    env: vf.SingleTurnEnv,
+    row: dict[str, Any],
+) -> dict[str, Any]:
+    async def initialize() -> dict[str, Any]:
+        with patch("verifiers.envs.environment.resolve_client", return_value=object()):
+            return await env.init_state(row, object(), "offline-stub", {})
+
+    return asyncio.run(initialize())
 
 
 def candidate_for_plant(
