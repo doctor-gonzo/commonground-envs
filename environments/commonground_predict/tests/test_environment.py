@@ -53,7 +53,8 @@ def test_load_environment_builds_ce_demo_split_from_env(monkeypatch: Any) -> Non
     snapshot = json.loads(row["snapshot"])
 
     assert len(env.get_eval_dataset()) == 1
-    assert info["synthetic"] is False
+    assert info["synthetic"] is True
+    assert snapshot["meta"]["source"] == "ce-demo-authored"
     assert info["cluster_count"] == 2
     assert len(snapshot["participants"]) == 62
     assert len(snapshot["statements"]) == 30

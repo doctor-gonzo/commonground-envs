@@ -241,7 +241,7 @@ dev = [{ name = "pytest", specifier = ">=8.4.0" }]
 
 [[package]]
 name = "commonground-predict"
-version = "0.0.0"
+version = "0.1.0"
 source = { editable = "environments/commonground_predict" }
 dependencies = [
     { name = "commonground-score" },
@@ -256,7 +256,7 @@ requires-dist = [
 
 [[package]]
 name = "commonground-score"
-version = "0.0.0"
+version = "0.1.0"
 source = { editable = "packages/commonground-score" }
 
 [[package]]

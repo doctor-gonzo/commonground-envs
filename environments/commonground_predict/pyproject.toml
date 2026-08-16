@@ -1,11 +1,12 @@
 [project]
 name = "commonground-predict"
-version = "0.0.0"
+version = "0.1.0"
 description = "Common Ground masked-vote prediction environment for Verifiers."
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
+keywords = ["social-reasoning", "prediction", "deterministic", "single-turn"]
 dependencies = [
-    "commonground-score",
+    "commonground-score>=0.1.0,<0.2",
     "verifiers==0.1.14",
 ]
 
