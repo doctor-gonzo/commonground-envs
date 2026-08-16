@@ -1,13 +1,15 @@
 from __future__ import annotations
 
-from math import isclose, nan
+from math import isclose, log, nan
 
 from commonground_score import (
     brier_score,
+    cluster_separation,
     comment_stats,
     prop_test,
     rating_to_vote,
     two_prop_test,
+    vote_entropy,
     vote_accuracy,
 )
 
@@ -31,6 +33,26 @@ def test_comment_stats_hand_computed_values() -> None:
     assert isclose(stats["pd"], 1 / 3, abs_tol=1e-12)
     assert isclose(stats["pat"], prop_test(2, 4), abs_tol=1e-12)
     assert isclose(stats["pdt"], prop_test(1, 4), abs_tol=1e-12)
+
+
+def test_vote_entropy_and_cluster_separation_hand_computed_values() -> None:
+    votes = [1, 1, -1]
+    expected_entropy = -(
+        (2 / 3) * log(2 / 3)
+        + (1 / 3) * log(1 / 3)
+    ) / log(3)
+
+    assert isclose(vote_entropy(votes), expected_entropy, abs_tol=1e-12)
+    assert cluster_separation(votes) == 2 / 3
+
+
+def test_panel_disagreement_math_handles_unanimity_passes_and_missing_votes() -> None:
+    assert vote_entropy([1, 1, 1]) == 0.0
+    assert cluster_separation([1, 1, 1]) == 0.0
+    assert isclose(vote_entropy([1, -1, 0]), 1.0, abs_tol=1e-12)
+    assert cluster_separation([1, -1, 0]) == 1.0
+    assert vote_entropy([1, -1, None]) == vote_entropy([1, -1])
+    assert cluster_separation([1, -1, None]) == 1.0
 
 
 def test_rating_to_vote_uses_canonical_signed_mapping() -> None:

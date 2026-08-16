@@ -6,6 +6,6 @@ from commonground_predict.environment import (
     render_prompt,
 )
 
-__version__ = "0.0.0"
+__version__ = "0.1.0"
 
 __all__ = ["PredictionJsonParser", "load_environment", "render_prompt"]

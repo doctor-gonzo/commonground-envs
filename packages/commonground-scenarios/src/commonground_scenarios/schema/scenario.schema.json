@@ -1,0 +1,227 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contextengine.sh/schemas/commonground-scenario.json",
+  "title": "Common Ground planted policy scenario",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "scenario_id",
+    "organization",
+    "factions",
+    "documents",
+    "planted_items",
+    "distractors",
+    "persona_panel",
+    "human_feedback",
+    "provenance"
+  ],
+  "properties": {
+    "scenario_id": {"$ref": "#/$defs/identifier"},
+    "organization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "sector", "fictional"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "sector": {"type": "string", "minLength": 1},
+        "fictional": {"type": "boolean"}
+      }
+    },
+    "factions": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 5,
+      "items": {"$ref": "#/$defs/faction"}
+    },
+    "documents": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 8,
+      "items": {"$ref": "#/$defs/document"}
+    },
+    "planted_items": {
+      "type": "array",
+      "minItems": 3,
+      "items": {"$ref": "#/$defs/plantedItem"}
+    },
+    "distractors": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/distractor"}
+    },
+    "persona_panel": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["vote_rule", "pass_threshold", "faction_ids"],
+          "properties": {
+            "vote_rule": {"const": "dimension-threshold-v1"},
+            "pass_threshold": {"const": 0.25},
+            "faction_ids": {"type": "array", "minItems": 3, "maxItems": 5, "items": {"$ref": "#/$defs/identifier"}}
+          }
+        }
+      ]
+    },
+    "human_feedback": {
+      "oneOf": [
+        {"type": "null"},
+        {"$ref": "#/$defs/contextEngineSnapshot"}
+      ]
+    },
+    "provenance": {"$ref": "#/$defs/provenance"}
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "provenance": {
+            "properties": {"synthetic": {"const": true}},
+            "required": ["synthetic"]
+          }
+        },
+        "required": ["provenance"]
+      },
+      "then": {
+        "properties": {
+          "organization": {"properties": {"fictional": {"const": true}}},
+          "persona_panel": {"type": "object"},
+          "human_feedback": {"type": "null"},
+          "provenance": {
+            "properties": {"generation_mode": {"enum": ["template", "operator-polished"]}}
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "organization": {"properties": {"fictional": {"const": false}}},
+          "persona_panel": {"type": "null"},
+          "human_feedback": {"$ref": "#/$defs/contextEngineSnapshot"},
+          "provenance": {"properties": {"generation_mode": {"const": "human"}}}
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "identifier": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"},
+    "faction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["faction_id", "name", "summary", "priors"],
+      "properties": {
+        "faction_id": {"$ref": "#/$defs/identifier"},
+        "name": {"type": "string", "minLength": 1},
+        "summary": {"type": "string", "minLength": 1},
+        "priors": {
+          "type": "object",
+          "minProperties": 3,
+          "additionalProperties": {"type": "number", "minimum": -1, "maximum": 1}
+        }
+      }
+    },
+    "document": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["doc_id", "title", "style", "text"],
+      "properties": {
+        "doc_id": {"$ref": "#/$defs/identifier"},
+        "title": {"type": "string", "minLength": 1},
+        "style": {"type": "string", "minLength": 1},
+        "text": {"type": "string", "minLength": 1}
+      }
+    },
+    "plantedItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["plant_id", "doc_id", "anchor_quote", "type", "canonical_question", "canonical_question_aliases", "target_dimension", "target_stances"],
+      "properties": {
+        "plant_id": {"$ref": "#/$defs/identifier"},
+        "doc_id": {"$ref": "#/$defs/identifier"},
+        "anchor_quote": {"type": "string", "minLength": 1},
+        "type": {"enum": ["ambiguity", "contradiction", "gap"]},
+        "canonical_question": {
+          "type": "string",
+          "pattern": "^(Am|Are|Can|Could|Did|Do|Does|Had|Has|Have|Is|May|Might|Must|Shall|Should|Was|Were|Will|Would) [^\\s?]+(?: [^\\s?]+)*\\?(?![\\s\\S])"
+        },
+        "canonical_question_aliases": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^(Am|Are|Can|Could|Did|Do|Does|Had|Has|Have|Is|May|Might|Must|Shall|Should|Was|Were|Will|Would) [^\\s?]+(?: [^\\s?]+)*\\?(?![\\s\\S])"
+          }
+        },
+        "target_dimension": {"$ref": "#/$defs/identifier"},
+        "target_stances": {
+          "type": "object",
+          "minProperties": 3,
+          "additionalProperties": {"enum": ["agree", "disagree", "pass"]}
+        }
+      }
+    },
+    "distractor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["doc_id", "anchor_quote", "reason"],
+      "properties": {
+        "doc_id": {"$ref": "#/$defs/identifier"},
+        "anchor_quote": {"type": "string", "minLength": 1},
+        "reason": {"type": "string", "minLength": 1}
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["seed", "template_id", "template_set", "generated_at", "synthetic", "generation_mode"],
+      "properties": {
+        "seed": {"type": "integer"},
+        "template_id": {"$ref": "#/$defs/identifier"},
+        "template_set": {"enum": ["train", "heldout"]},
+        "generated_at": {"type": "string", "format": "date"},
+        "synthetic": {"type": "boolean"},
+        "generation_mode": {"enum": ["template", "operator-polished", "human"]}
+      }
+    },
+    "contextEngineSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["session_id", "statements", "participants", "votes", "masked_cells", "held_out", "clusters", "stats", "meta"],
+      "properties": {
+        "session_id": {"type": "string", "minLength": 1},
+        "statements": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["index", "text"],
+            "properties": {
+              "index": {"type": "integer", "minimum": 0},
+              "text": {"type": "string", "minLength": 1}
+            }
+          }
+        },
+        "participants": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+        "votes": {"type": "array", "minItems": 1, "items": {"type": "array", "items": {"enum": [-1, 0, 1, null]}}},
+        "masked_cells": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "prefixItems": [{"type": "integer", "minimum": 0}, {"type": "integer", "minimum": 0}],
+            "minItems": 2,
+            "maxItems": 2
+          }
+        },
+        "held_out": {"type": "object", "additionalProperties": {"enum": [-1, 0, 1]}},
+        "clusters": {"type": "array", "items": {"type": "object"}},
+        "stats": {"type": "object"},
+        "meta": {
+          "type": "object",
+          "required": ["synthetic"],
+          "properties": {"synthetic": {"const": false}}
+        }
+      }
+    }
+  }
+}

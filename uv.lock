@@ -9,8 +9,10 @@ resolution-markers = [
 
 [manifest]
 members = [
+    "commonground-elicit",
     "commonground-envs",
     "commonground-predict",
+    "commonground-scenarios",
     "commonground-score",
 ]
 
@@ -225,6 +227,23 @@ wheels = [
 ]
 
 [[package]]
+name = "commonground-elicit"
+version = "0.1.0"
+source = { editable = "environments/commonground_elicit" }
+dependencies = [
+    { name = "commonground-scenarios" },
+    { name = "commonground-score" },
+    { name = "verifiers" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "commonground-scenarios", editable = "packages/commonground-scenarios" },
+    { name = "commonground-score", editable = "packages/commonground-score" },
+    { name = "verifiers", specifier = "==0.1.14" },
+]
+
+[[package]]
 name = "commonground-envs"
 version = "0.0.0"
 source = { virtual = "." }
@@ -241,7 +260,7 @@ dev = [{ name = "pytest", specifier = ">=8.4.0" }]
 
 [[package]]
 name = "commonground-predict"
-version = "0.0.0"
+version = "0.1.0"
 source = { editable = "environments/commonground_predict" }
 dependencies = [
     { name = "commonground-score" },
@@ -255,8 +274,13 @@ requires-dist = [
 ]
 
 [[package]]
+name = "commonground-scenarios"
+version = "0.1.0"
+source = { editable = "packages/commonground-scenarios" }
+
+[[package]]
 name = "commonground-score"
-version = "0.0.0"
+version = "0.1.0"
 source = { editable = "packages/commonground-score" }
 
 [[package]]

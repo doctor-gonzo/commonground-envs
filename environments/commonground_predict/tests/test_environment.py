@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 import verifiers as vf
+from verifiers.types import State
 
 from commonground_predict import PredictionJsonParser, load_environment
 from commonground_predict.environment import (
@@ -19,6 +20,7 @@ from commonground_predict.environment import (
 )
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "commonground_predict" / "data"
+CANONICAL_TASK_COLUMNS = ("prompt", "answer", "info", "example_id")
 
 
 def test_load_environment_builds_bundled_split() -> None:
@@ -27,6 +29,39 @@ def test_load_environment_builds_bundled_split() -> None:
     assert isinstance(env, vf.SingleTurnEnv)
     assert env.env_id == "commonground-predict"
     assert len(env.get_eval_dataset()) == 20
+
+
+def test_server_state_path_binds_answer_for_correct_and_incorrect() -> None:
+    env = load_environment()
+    row = dict(env.get_eval_dataset()[0])
+    answer = json.loads(row["answer"])
+    incorrect = {cell_id: wrong_vote(vote) for cell_id, vote in answer.items()}
+
+    correct_state = score_row(env, row, answer)
+    incorrect_state = score_row(env, row, incorrect)
+
+    assert correct_state["reward"] == 1.0
+    assert correct_state["metrics"]["vote_accuracy"] == 1.0
+    assert incorrect_state["reward"] == 0.0
+    assert incorrect_state["metrics"]["vote_accuracy"] == 0.0
+    assert set(correct_state["task"]) == set(CANONICAL_TASK_COLUMNS)
+    assert "input" not in correct_state
+
+
+def test_all_built_rows_use_standard_answer_contract() -> None:
+    env = load_environment()
+
+    for dataset in (env.get_dataset(), env.get_eval_dataset()):
+        for raw_row in dataset:
+            row = dict(raw_row)
+            answer = json.loads(row["answer"])
+            info = json.loads(row["info"])
+            snapshot = json.loads(row["snapshot"])
+
+            assert "held_out" not in row
+            assert answer == snapshot["held_out"]
+            assert info["masked_vote_count"] == len(answer)
+            assert State.for_task(canonical_task(row))["answer"] == row["answer"]
 
 
 def test_bundled_eval_path_is_inside_import_package() -> None:
@@ -48,12 +83,13 @@ def test_load_environment_builds_ce_demo_split_from_env(monkeypatch: Any) -> Non
 
     env = load_environment(masked_vote_count=3)
     row = dict(env.get_eval_dataset()[0])
-    held_out = json.loads(row["held_out"])
+    held_out = json.loads(row["answer"])
     info = json.loads(row["info"])
     snapshot = json.loads(row["snapshot"])
 
     assert len(env.get_eval_dataset()) == 1
-    assert info["synthetic"] is False
+    assert info["synthetic"] is True
+    assert snapshot["meta"]["source"] == "ce-demo-authored"
     assert info["cluster_count"] == 2
     assert len(snapshot["participants"]) == 62
     assert len(snapshot["statements"]) == 30
@@ -178,7 +214,7 @@ def test_cell_keys_ignore_whitespace_for_point_and_brier_scores() -> None:
 def test_rubric_scores_perfect_completion_at_one() -> None:
     env = load_environment()
     row = dict(env.get_eval_dataset()[0])
-    held_out = json.loads(row["held_out"])
+    held_out = json.loads(row["answer"])
 
     state = score_row(env, row, held_out)
 
@@ -190,7 +226,7 @@ def test_rubric_scores_perfect_completion_at_one() -> None:
 def test_rubric_scores_all_wrong_completion_at_zero() -> None:
     env = load_environment()
     row = dict(env.get_eval_dataset()[0])
-    held_out = json.loads(row["held_out"])
+    held_out = json.loads(row["answer"])
     wrong_predictions = {
         cell_id: wrong_vote(vote)
         for cell_id, vote in held_out.items()
@@ -233,7 +269,7 @@ def test_masked_vote_count_knob_changes_held_out_count() -> None:
     env = load_environment(masked_vote_count=3, min_cluster_count=2)
     row = dict(env.get_eval_dataset()[0])
 
-    assert len(json.loads(row["held_out"])) == 3
+    assert len(json.loads(row["answer"])) == 3
 
 
 def test_masked_vote_selection_is_repeatable() -> None:
@@ -315,13 +351,18 @@ def score_row(
             "content": json.dumps({"predictions": predictions}, sort_keys=True),
         }
     ]
-    state = {
-        "prompt": row["prompt"],
-        "completion": completion,
-        "input": row,
-    }
+    state = State.for_task(canonical_task(row))
+    state["completion"] = completion
     asyncio.run(env.rubric.score_rollout(state))
     return state
+
+
+def canonical_task(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: row[key]
+        for key in CANONICAL_TASK_COLUMNS
+        if key in row
+    }
 
 
 def score_brier_prediction(prediction: dict[Any, float]) -> float:
@@ -340,7 +381,7 @@ def assert_env_rows_have_no_masks(env: vf.SingleTurnEnv) -> None:
         snapshot = json.loads(row["snapshot"])
         info = json.loads(row["info"])
 
-        assert json.loads(row["held_out"]) == {}
+        assert json.loads(row["answer"]) == {}
         assert snapshot["held_out"] == {}
         assert snapshot["masked_cells"] == []
         assert info["masked_vote_count"] == 0
