@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import email
-from pathlib import Path
 import subprocess
 import tempfile
 import zipfile
-
+from dataclasses import dataclass
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 REQUIRES_PYTHON_PARTS = frozenset({">=3.12", "<3.13"})
@@ -40,9 +39,7 @@ TARGETS = (
     WheelTarget(
         name="commonground-predict",
         source_dir=ROOT / "environments" / "commonground_predict",
-        requirements=frozenset(
-            {"commonground-score<0.2,>=0.1.0", "verifiers==0.1.14"}
-        ),
+        requirements=frozenset({"commonground-score<0.2,>=0.1.0", "verifiers==0.1.14"}),
         bundled_files=_data_files(
             ROOT / "environments" / "commonground_predict", "commonground_predict"
         ),
@@ -66,9 +63,7 @@ TARGETS = (
         name="commonground-scenarios",
         source_dir=ROOT / "packages" / "commonground-scenarios",
         requirements=frozenset(),
-        bundled_files=frozenset(
-            {"commonground_scenarios/schema/scenario.schema.json"}
-        ),
+        bundled_files=frozenset({"commonground_scenarios/schema/scenario.schema.json"}),
     ),
     WheelTarget(
         name="commonground-score",

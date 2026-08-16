@@ -8,8 +8,6 @@ from typing import Any
 
 import pytest
 import verifiers as vf
-from verifiers.types import State
-
 from commonground_predict import PredictionJsonParser, load_environment
 from commonground_predict.environment import (
     BUNDLED_EVAL_PATH,
@@ -18,6 +16,7 @@ from commonground_predict.environment import (
     brier,
     vote_accuracy,
 )
+from verifiers.types import State
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "commonground_predict" / "data"
 CANONICAL_TASK_COLUMNS = ("prompt", "answer", "info", "example_id")
@@ -73,7 +72,7 @@ def test_bundled_eval_path_is_inside_import_package() -> None:
         / "eval_synthetic.jsonl"
     )
 
-    assert BUNDLED_EVAL_PATH == expected
+    assert expected == BUNDLED_EVAL_PATH
     assert BUNDLED_EVAL_PATH.is_file()
 
 
@@ -164,9 +163,7 @@ def test_load_environment_rejects_cluster_assignment_length_mismatch(
 def test_parser_handles_fenced_json() -> None:
     parser = PredictionJsonParser()
 
-    parsed = parser.parse(
-        '```json\n{"predictions":{"0,1":1,"2,3":0}}\n```\n'
-    )
+    parsed = parser.parse('```json\n{"predictions":{"0,1":1,"2,3":0}}\n```\n')
 
     assert parsed == {"predictions": {"0,1": 1, "2,3": 0}}
 
@@ -195,11 +192,7 @@ def test_cell_keys_ignore_whitespace_for_point_and_brier_scores() -> None:
         {
             "role": "assistant",
             "content": json.dumps(
-                {
-                    "predictions": {
-                        "0, 5": {"agree": 1.0, "disagree": 0.0, "pass": 0.0}
-                    }
-                }
+                {"predictions": {"0, 5": {"agree": 1.0, "disagree": 0.0, "pass": 0.0}}}
             ),
         }
     ]
@@ -228,8 +221,7 @@ def test_rubric_scores_all_wrong_completion_at_zero() -> None:
     row = dict(env.get_eval_dataset()[0])
     held_out = json.loads(row["answer"])
     wrong_predictions = {
-        cell_id: wrong_vote(vote)
-        for cell_id, vote in held_out.items()
+        cell_id: wrong_vote(vote) for cell_id, vote in held_out.items()
     }
 
     state = score_row(env, row, wrong_predictions)
@@ -251,9 +243,7 @@ def test_brier_scores_perfect_one_hot_probability_vector() -> None:
 
 
 def test_brier_scores_uniform_probability_vector() -> None:
-    score = score_brier_prediction(
-        {"agree": 1 / 3, "disagree": 1 / 3, "pass": 1 / 3}
-    )
+    score = score_brier_prediction({"agree": 1 / 3, "disagree": 1 / 3, "pass": 1 / 3})
 
     # (1/3 - 1)^2 + (1/3 - 0)^2 + (1/3 - 0)^2 = 2/3
     assert isclose(score, 2 / 3, abs_tol=1e-12)
@@ -358,11 +348,7 @@ def score_row(
 
 
 def canonical_task(row: dict[str, Any]) -> dict[str, Any]:
-    return {
-        key: row[key]
-        for key in CANONICAL_TASK_COLUMNS
-        if key in row
-    }
+    return {key: row[key] for key in CANONICAL_TASK_COLUMNS if key in row}
 
 
 def score_brier_prediction(prediction: dict[Any, float]) -> float:

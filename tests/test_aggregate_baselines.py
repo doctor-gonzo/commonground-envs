@@ -2,14 +2,13 @@ from __future__ import annotations
 
 import csv
 import importlib.util
-from pathlib import Path
 import shutil
 import sys
+from pathlib import Path
 from typing import Any
 
 import pytest
 from verifiers.utils.eval_utils import load_toml_config
-
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "eval_outputs"
@@ -75,7 +74,9 @@ def test_incomplete_run_is_rejected_without_partial_summary(tmp_path: Path) -> N
     lines = result_path.read_text(encoding="utf-8").splitlines()
     result_path.write_text("\n".join(lines[:-1]) + "\n", encoding="utf-8")
 
-    with pytest.raises(aggregate.InvalidRunError, match="expected 6 rollouts.*found 5"):
+    with pytest.raises(
+        aggregate.InvalidRunError, match=r"expected 6 rollouts.*found 5"
+    ):
         aggregate.load_summaries(fixture_copy)
 
 

@@ -8,13 +8,13 @@ from __future__ import annotations
 
 import argparse
 import csv
-from dataclasses import dataclass
 import json
-from pathlib import Path
 import statistics
 import sys
-from typing import Any, Iterable, Mapping, Sequence
-
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUTS_GLOB = "environments/*/outputs/evals/**/results.jsonl"
@@ -62,7 +62,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 
 def load_summaries(root: Path) -> list[Summary]:
-    result_paths = sorted(root.glob(DEFAULT_OUTPUTS_GLOB), key=lambda path: path.as_posix())
+    result_paths = sorted(
+        root.glob(DEFAULT_OUTPUTS_GLOB), key=lambda path: path.as_posix()
+    )
     if not result_paths:
         raise InvalidRunError(
             f"no saved eval results found under {root / 'environments'}"
@@ -74,7 +76,9 @@ def load_summaries(root: Path) -> list[Summary]:
         grouped.setdefault((run.model, run.environment), []).append(run)
 
     summaries: list[Summary] = []
-    for model, environment in sorted(grouped, key=lambda key: (key[0].casefold(), key[1])):
+    for model, environment in sorted(
+        grouped, key=lambda key: (key[0].casefold(), key[1])
+    ):
         runs = grouped[(model, environment)]
         metric_keys = {tuple(run.metrics) for run in runs}
         if len(metric_keys) != 1:
@@ -85,9 +89,7 @@ def load_summaries(root: Path) -> list[Summary]:
         rewards = tuple(value for run in runs for value in run.rewards)
         metrics = {
             metric_name: summarize(
-                value
-                for run in runs
-                for value in run.metrics.get(metric_name, ())
+                value for run in runs for value in run.metrics.get(metric_name, ())
             )
             for metric_name in METRIC_NAMES
             if metric_name in runs[0].metrics
@@ -181,7 +183,9 @@ def load_json_object(path: Path) -> dict[str, Any]:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError as error:
-        raise InvalidRunError(f"missing metadata beside saved results: {path}") from error
+        raise InvalidRunError(
+            f"missing metadata beside saved results: {path}"
+        ) from error
     except json.JSONDecodeError as error:
         raise InvalidRunError(f"invalid JSON in {path}: {error}") from error
     if not isinstance(value, dict):
@@ -191,22 +195,24 @@ def load_json_object(path: Path) -> dict[str, Any]:
 
 def load_json_lines(path: Path) -> list[dict[str, Any]]:
     outputs: list[dict[str, Any]] = []
-    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+    for line_number, line in enumerate(
+        path.read_text(encoding="utf-8").splitlines(), start=1
+    ):
         if not line.strip():
             continue
         try:
             value = json.loads(line)
         except json.JSONDecodeError as error:
-            raise InvalidRunError(f"invalid JSON in {path}:{line_number}: {error}") from error
+            raise InvalidRunError(
+                f"invalid JSON in {path}:{line_number}: {error}"
+            ) from error
         if not isinstance(value, dict):
             raise InvalidRunError(f"{path}:{line_number}: expected a JSON object")
         outputs.append(value)
     return outputs
 
 
-def require_nonempty_string(
-    value: Mapping[str, Any], key: str, path: Path
-) -> str:
+def require_nonempty_string(value: Mapping[str, Any], key: str, path: Path) -> str:
     field = value.get(key)
     if not isinstance(field, str) or not field.strip():
         raise InvalidRunError(f"{path}: {key} must be a non-empty string")

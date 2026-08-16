@@ -78,7 +78,9 @@ def load_snapshots(
     """Load JSONL snapshots and apply deterministic difficulty filters."""
 
     snapshots = []
-    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+    for line_number, line in enumerate(
+        path.read_text(encoding="utf-8").splitlines(), start=1
+    ):
         if not line.strip():
             continue
         snapshot = json.loads(line)
@@ -178,9 +180,8 @@ def snapshot_cluster_dimension_error(
         if member_indices:
             expected_indices = set(range(participant_count))
             unique_indices = set(member_indices)
-            if (
-                unique_indices != expected_indices
-                or len(member_indices) != len(unique_indices)
+            if unique_indices != expected_indices or len(member_indices) != len(
+                unique_indices
             ):
                 return (
                     f"clusters member_indices={len(unique_indices)} unique/{len(member_indices)} total "
@@ -265,7 +266,10 @@ def apply_masked_vote_count(
         votes[participant_index][statement_index] = None
 
     prepared["votes"] = votes
-    prepared["masked_cells"] = [[participant_index, statement_index] for participant_index, statement_index in selected]
+    prepared["masked_cells"] = [
+        [participant_index, statement_index]
+        for participant_index, statement_index in selected
+    ]
     prepared["held_out"] = held_out
     return prepared
 
@@ -275,7 +279,9 @@ def reconstruct_known_votes(snapshot: Mapping[str, Any]) -> list[list[int | None
 
     votes = [list(row) for row in snapshot["votes"]]
     for cell_id, vote in snapshot.get("held_out", {}).items():
-        participant_index_text, statement_index_text = str(cell_id).split(",", maxsplit=1)
+        participant_index_text, statement_index_text = str(cell_id).split(
+            ",", maxsplit=1
+        )
         votes[int(participant_index_text)][int(statement_index_text)] = int(vote)
     return votes
 
@@ -295,7 +301,9 @@ def snapshot_cluster_count(snapshot: Mapping[str, Any]) -> int:
 
 
 def snapshot_to_row(snapshot: Mapping[str, Any]) -> dict[str, Any]:
-    held_out = {str(cell_id): int(vote) for cell_id, vote in snapshot["held_out"].items()}
+    held_out = {
+        str(cell_id): int(vote) for cell_id, vote in snapshot["held_out"].items()
+    }
     info = {
         "session_id": snapshot["session_id"],
         "masked_vote_count": len(held_out),
@@ -314,14 +322,19 @@ def render_prompt(snapshot: Mapping[str, Any]) -> str:
     """Render the compact masked-vote prediction prompt."""
 
     statements = snapshot["statements"]
-    masked_cells = [f"{participant_index},{statement_index}" for participant_index, statement_index in snapshot["masked_cells"]]
+    masked_cells = [
+        f"{participant_index},{statement_index}"
+        for participant_index, statement_index in snapshot["masked_cells"]
+    ]
     lines = [
         "Predict the held-out votes in this deliberation snapshot.",
         "Votes use 1=agree, -1=disagree, 0=pass/unsure, ?=not seen or masked.",
         "",
         "Statements:",
     ]
-    lines.extend(f"{statement['index']}: {statement['text']}" for statement in statements)
+    lines.extend(
+        f"{statement['index']}: {statement['text']}" for statement in statements
+    )
     lines.extend(
         [
             "",
@@ -331,8 +344,7 @@ def render_prompt(snapshot: Mapping[str, Any]) -> str:
     )
     for participant_index, row in enumerate(snapshot["votes"]):
         lines.append(
-            f"p{participant_index:02d}: "
-            + " ".join(_vote_symbol(vote) for vote in row)
+            f"p{participant_index:02d}: " + " ".join(_vote_symbol(vote) for vote in row)
         )
     lines.extend(
         [
@@ -384,11 +396,12 @@ def parse_completion_predictions(
 
 
 def parse_held_out(held_out: Mapping[str, int] | str) -> dict[str, int]:
-    if isinstance(held_out, str):
-        loaded = json.loads(held_out)
-    else:
-        loaded = held_out
-    return {str(cell_id): int(vote) for cell_id, vote in loaded.items() if int(vote) in VALID_VOTES}
+    loaded = json.loads(held_out) if isinstance(held_out, str) else held_out
+    return {
+        str(cell_id): int(vote)
+        for cell_id, vote in loaded.items()
+        if int(vote) in VALID_VOTES
+    }
 
 
 def coerce_point_predictions(predictions: Mapping[str, Any]) -> dict[str, int]:
@@ -400,7 +413,9 @@ def coerce_point_predictions(predictions: Mapping[str, Any]) -> dict[str, int]:
     return coerced
 
 
-def coerce_brier_predictions(predictions: Mapping[str, Any]) -> dict[str, int | dict[Any, Any]]:
+def coerce_brier_predictions(
+    predictions: Mapping[str, Any],
+) -> dict[str, int | dict[Any, Any]]:
     coerced: dict[str, int | dict[Any, Any]] = {}
     for cell_id, prediction in predictions.items():
         normalized_cell_id = "".join(str(cell_id).split())
@@ -418,7 +433,11 @@ def coerce_vote(prediction: Any) -> int | None:
         return None
     if isinstance(prediction, int) and prediction in VALID_VOTES:
         return prediction
-    if isinstance(prediction, float) and prediction.is_integer() and int(prediction) in VALID_VOTES:
+    if (
+        isinstance(prediction, float)
+        and prediction.is_integer()
+        and int(prediction) in VALID_VOTES
+    ):
         return int(prediction)
     if isinstance(prediction, str) and prediction in {"-1", "0", "1"}:
         return int(prediction)

@@ -9,8 +9,8 @@ from commonground_score import (
     prop_test,
     rating_to_vote,
     two_prop_test,
-    vote_entropy,
     vote_accuracy,
+    vote_entropy,
 )
 
 
@@ -37,10 +37,7 @@ def test_comment_stats_hand_computed_values() -> None:
 
 def test_vote_entropy_and_cluster_separation_hand_computed_values() -> None:
     votes = [1, 1, -1]
-    expected_entropy = -(
-        (2 / 3) * log(2 / 3)
-        + (1 / 3) * log(1 / 3)
-    ) / log(3)
+    expected_entropy = -((2 / 3) * log(2 / 3) + (1 / 3) * log(1 / 3)) / log(3)
 
     assert isclose(vote_entropy(votes), expected_entropy, abs_tol=1e-12)
     assert cluster_separation(votes) == 2 / 3

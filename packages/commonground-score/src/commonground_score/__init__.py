@@ -7,8 +7,8 @@ from commonground_score.scoring import (
     prop_test,
     rating_to_vote,
     two_prop_test,
-    vote_entropy,
     vote_accuracy,
+    vote_entropy,
 )
 
 __version__ = "0.1.0"
@@ -20,6 +20,6 @@ __all__ = [
     "prop_test",
     "rating_to_vote",
     "two_prop_test",
-    "vote_entropy",
     "vote_accuracy",
+    "vote_entropy",
 ]

@@ -3,22 +3,23 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Mapping, Sequence
 import hashlib
 import json
-from math import isfinite
 import os
-from pathlib import Path
 import re
 import shutil
 import sys
 import tempfile
 import unicodedata
+from collections.abc import Mapping, Sequence
+from math import isfinite
+from pathlib import Path
 from typing import Any
 
-
 ROOT = Path(__file__).resolve().parents[1]
-DATA_DIR = ROOT / "environments" / "commonground_predict" / "commonground_predict" / "data"
+DATA_DIR = (
+    ROOT / "environments" / "commonground_predict" / "commonground_predict" / "data"
+)
 DEFAULT_OUTPUT = DATA_DIR / "eval_real.jsonl"
 DEFAULT_MANIFEST = DATA_DIR / "eval_real.manifest.json"
 PROTECTED_SPLITS = {"eval_synthetic.jsonl", "eval_ce_demo.jsonl"}
@@ -80,7 +81,9 @@ def validate_snapshot(snapshot: Any) -> dict[str, Any]:
     ):
         raise SnapshotValidationError("session_id must be a non-empty string")
     if contains_identifier(session_id):
-        raise SnapshotValidationError("session_id contains a redacted identifier pattern")
+        raise SnapshotValidationError(
+            "session_id contains a redacted identifier pattern"
+        )
 
     statements = snapshot.get("statements")
     participants = snapshot.get("participants")
@@ -92,7 +95,9 @@ def validate_snapshot(snapshot: Any) -> dict[str, Any]:
     if not isinstance(votes, list):
         raise SnapshotValidationError("votes must be a participant-major list")
 
-    expected_participants = [f"p{participant_index:03d}" for participant_index in range(len(participants))]
+    expected_participants = [
+        f"p{participant_index:03d}" for participant_index in range(len(participants))
+    ]
     if participants != expected_participants:
         raise SnapshotValidationError(
             "participants must use positional pseudonyms p000, p001, ..."
@@ -100,8 +105,12 @@ def validate_snapshot(snapshot: Any) -> dict[str, Any]:
 
     for statement_index, statement in enumerate(statements):
         if not isinstance(statement, Mapping):
-            raise SnapshotValidationError(f"statement {statement_index} must be an object")
-        _require_exact_fields(statement, STATEMENT_FIELDS, f"statement {statement_index}")
+            raise SnapshotValidationError(
+                f"statement {statement_index} must be an object"
+            )
+        _require_exact_fields(
+            statement, STATEMENT_FIELDS, f"statement {statement_index}"
+        )
         actual_index = statement.get("index")
         if type(actual_index) is not int or actual_index != statement_index:
             raise SnapshotValidationError(
@@ -230,7 +239,11 @@ def validate_clusters(clusters: Any, participants: Sequence[str]) -> list[int]:
             raise SnapshotValidationError(
                 f"cluster {cluster_index} members must match member_indices"
             )
-        expected_members = [participants[index] for index in raw_indices if 0 <= index < len(participants)]
+        expected_members = [
+            participants[index]
+            for index in raw_indices
+            if 0 <= index < len(participants)
+        ]
         if len(expected_members) != len(raw_indices) or raw_members != expected_members:
             raise SnapshotValidationError(
                 f"cluster {cluster_index} members do not match participant indices"
@@ -266,12 +279,26 @@ def validate_stats(stats: Any, statement_count: int) -> dict[str, Any]:
         )
 
     validated_comments: list[dict[str, int | float]] = []
-    integer_fields = {"commentIndex", "agrees", "disagrees", "unsure", "total", "responded"}
+    integer_fields = {
+        "commentIndex",
+        "agrees",
+        "disagrees",
+        "unsure",
+        "total",
+        "responded",
+    }
     for comment_index, comment in enumerate(comments):
         if not isinstance(comment, Mapping):
-            raise SnapshotValidationError(f"stats.comment {comment_index} must be an object")
-        _require_exact_fields(comment, COMMENT_STAT_FIELDS, f"stats.comment {comment_index}")
-        if type(comment.get("commentIndex")) is not int or comment["commentIndex"] != comment_index:
+            raise SnapshotValidationError(
+                f"stats.comment {comment_index} must be an object"
+            )
+        _require_exact_fields(
+            comment, COMMENT_STAT_FIELDS, f"stats.comment {comment_index}"
+        )
+        if (
+            type(comment.get("commentIndex")) is not int
+            or comment["commentIndex"] != comment_index
+        ):
             raise SnapshotValidationError(
                 f"stats.comment {comment_index} must use positional commentIndex"
             )
@@ -290,11 +317,15 @@ def validate_stats(stats: Any, statement_count: int) -> dict[str, Any]:
                 raise SnapshotValidationError(
                     f"stats.comment {comment_index}.{field} must be finite"
                 )
-        validated_comments.append({field: comment[field] for field in COMMENT_STAT_FIELDS})
+        validated_comments.append(
+            {field: comment[field] for field in COMMENT_STAT_FIELDS}
+        )
     return {"comment": validated_comments}
 
 
-def _require_exact_fields(value: Mapping[str, Any], expected: set[str], label: str) -> None:
+def _require_exact_fields(
+    value: Mapping[str, Any], expected: set[str], label: str
+) -> None:
     actual = set(value)
     if actual != expected:
         missing = sorted(expected - actual)
@@ -308,7 +339,9 @@ def _reject_json_constant(value: str) -> None:
     raise SnapshotValidationError(f"non-standard JSON constant is not allowed: {value}")
 
 
-def ingest_files(input_paths: Sequence[Path]) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str]]:
+def ingest_files(
+    input_paths: Sequence[Path],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str]]:
     accepted: list[dict[str, Any]] = []
     manifest_entries: list[dict[str, Any]] = []
     errors: list[str] = []
@@ -348,7 +381,11 @@ def ingest_files(input_paths: Sequence[Path]) -> tuple[list[dict[str, Any]], lis
                     "session_id": validated["session_id"],
                     "participant_count": len(validated["participants"]),
                     "statement_count": len(validated["statements"]),
-                    "cluster_count": len(validate_clusters(validated["clusters"], validated["participants"])),
+                    "cluster_count": len(
+                        validate_clusters(
+                            validated["clusters"], validated["participants"]
+                        )
+                    ),
                     "k_anonymity": validated["meta"]["k_anonymity"],
                 }
             )
@@ -364,14 +401,17 @@ def write_outputs(
     protected_names = {name.casefold() for name in PROTECTED_SPLITS}
     for destination in (output_path, manifest_path):
         if destination.name.casefold() in protected_names:
-            raise ValueError(f"refusing to overwrite protected split: {destination.name}")
+            raise ValueError(
+                f"refusing to overwrite protected split: {destination.name}"
+            )
     if str(output_path.resolve()).casefold() == str(manifest_path.resolve()).casefold():
         raise ValueError("output and manifest paths must be different")
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     jsonl = "".join(
-        json.dumps(snapshot, sort_keys=True, separators=(",", ":"), allow_nan=False) + "\n"
+        json.dumps(snapshot, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        + "\n"
         for snapshot in snapshots
     )
     manifest = {
@@ -380,7 +420,9 @@ def write_outputs(
         "snapshot_count": len(snapshots),
         "snapshots": list(manifest_entries),
     }
-    manifest_json = json.dumps(manifest, indent=2, sort_keys=True, allow_nan=False) + "\n"
+    manifest_json = (
+        json.dumps(manifest, indent=2, sort_keys=True, allow_nan=False) + "\n"
+    )
 
     output_temporary: Path | None = None
     manifest_temporary: Path | None = None
@@ -445,8 +487,14 @@ def _restore_destination(destination: Path, backup: Path | None) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("inputs", nargs="+", type=Path, help="Context Engine exporter JSONL files")
-    parser.add_argument("--skip-invalid", action="store_true", help="write valid rows despite rejected inputs")
+    parser.add_argument(
+        "inputs", nargs="+", type=Path, help="Context Engine exporter JSONL files"
+    )
+    parser.add_argument(
+        "--skip-invalid",
+        action="store_true",
+        help="write valid rows despite rejected inputs",
+    )
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
     return parser

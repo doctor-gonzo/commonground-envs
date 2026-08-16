@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from math import isfinite, log, sqrt
-from typing import Mapping
+from typing import Any, cast
 
 Vote = int | None
 PointPrediction = int
@@ -109,7 +110,9 @@ def vote_accuracy(predictions: Mapping[str, int], held_out: Mapping[str, int]) -
 
     if not held_out:
         return 0.0
-    correct = sum(predictions.get(cell_id) == vote for cell_id, vote in held_out.items())
+    correct = sum(
+        predictions.get(cell_id) == vote for cell_id, vote in held_out.items()
+    )
     return correct / len(held_out)
 
 
@@ -133,7 +136,9 @@ def brier_score(
     for cell_id, actual_vote in held_out.items():
         pred_probs = _prediction_probs(predictions.get(cell_id))
         actual_label = _VOTE_TO_LABEL[actual_vote]
-        total += sum((pred_probs[label] - float(label == actual_label)) ** 2 for label in _LABELS)
+        total += sum(
+            (pred_probs[label] - float(label == actual_label)) ** 2 for label in _LABELS
+        )
     return total / len(held_out)
 
 
@@ -154,7 +159,7 @@ def _mapping_prediction_probs(prediction: Mapping[object, object]) -> dict[str, 
         if label is None:
             continue
         try:
-            score = float(value)
+            score = float(cast(Any, value))
         except (TypeError, ValueError):
             invalid = True
             continue

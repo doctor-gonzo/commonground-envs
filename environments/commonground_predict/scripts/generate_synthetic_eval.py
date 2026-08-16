@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import random
 from pathlib import Path
+from typing import cast
 
 SEED = 20260709
 SNAPSHOT_COUNT = 20
@@ -46,7 +47,9 @@ def main() -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     snapshots = [make_snapshot(rng, index) for index in range(SNAPSHOT_COUNT)]
     output_path.write_text(
-        "".join(json.dumps(snapshot, separators=(",", ":")) + "\n" for snapshot in snapshots),
+        "".join(
+            json.dumps(snapshot, separators=(",", ":")) + "\n" for snapshot in snapshots
+        ),
         encoding="utf-8",
     )
 
@@ -64,11 +67,13 @@ def make_snapshot(rng: random.Random, session_index: int) -> dict:
     statements = make_statements(rng, session_index, statement_count)
     cluster_patterns = make_cluster_patterns(rng, cluster_count, statement_count)
     full_votes = make_votes(rng, clusters, cluster_patterns)
-    votes = [row[:] for row in full_votes]
+    votes = cast(list[list[int | None]], [row[:] for row in full_votes])
     masked_cells = sorted(mask_cells(rng, participant_count, statement_count))
     held_out = {}
     for participant_index, statement_index in masked_cells:
-        held_out[f"{participant_index},{statement_index}"] = full_votes[participant_index][statement_index]
+        held_out[f"{participant_index},{statement_index}"] = full_votes[
+            participant_index
+        ][statement_index]
         votes[participant_index][statement_index] = None
 
     return {
@@ -93,7 +98,9 @@ def balanced_clusters(
     cluster_count: int,
 ) -> list[int]:
     clusters = [cluster for cluster in range(cluster_count) for _ in range(K_ANONYMITY)]
-    clusters.extend(rng.randrange(cluster_count) for _ in range(participant_count - len(clusters)))
+    clusters.extend(
+        rng.randrange(cluster_count) for _ in range(participant_count - len(clusters))
+    )
     rng.shuffle(clusters)
     return clusters
 
@@ -107,7 +114,9 @@ def make_statements(
     return [
         {
             "index": statement_index,
-            "text": STATEMENT_BANK[(start + session_index + statement_index) % len(STATEMENT_BANK)],
+            "text": STATEMENT_BANK[
+                (start + session_index + statement_index) % len(STATEMENT_BANK)
+            ],
         }
         for statement_index in range(statement_count)
     ]

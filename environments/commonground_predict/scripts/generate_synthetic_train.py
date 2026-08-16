@@ -16,6 +16,7 @@ import importlib.util
 import json
 import random
 from pathlib import Path
+from typing import Any, Protocol, cast
 
 TRAIN_SEED = 20260815
 TRAIN_SNAPSHOT_COUNT = 150
@@ -24,14 +25,23 @@ SESSION_INDEX_OFFSET = 1000  # keeps session_ids disjoint from the eval split (0
 _EVAL_GENERATOR = Path(__file__).with_name("generate_synthetic_eval.py")
 
 
-def _load_eval_generator():
+class EvalGenerator(Protocol):
+    SEED: int
+
+    def make_snapshot(
+        self, rng: random.Random, session_index: int
+    ) -> dict[str, Any]: ...
+
+
+def _load_eval_generator() -> EvalGenerator:
     spec = importlib.util.spec_from_file_location(
         "commonground_generate_synthetic_eval", _EVAL_GENERATOR
     )
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"unable to load {_EVAL_GENERATOR}")
     module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
     spec.loader.exec_module(module)
-    return module
+    return cast(EvalGenerator, module)
 
 
 def main() -> None:

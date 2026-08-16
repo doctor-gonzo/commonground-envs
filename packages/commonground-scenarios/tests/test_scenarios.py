@@ -3,9 +3,7 @@ from __future__ import annotations
 import copy
 import json
 
-from jsonschema import Draft202012Validator, FormatChecker
 import pytest
-
 from commonground_scenarios import (
     HELDOUT_TEMPLATES,
     TRAIN_TEMPLATES,
@@ -15,7 +13,7 @@ from commonground_scenarios import (
     scenario_to_bytes,
     validate_scenario,
 )
-
+from jsonschema import Draft202012Validator, FormatChecker
 
 ALL_TEMPLATES = TRAIN_TEMPLATES + HELDOUT_TEMPLATES
 
@@ -25,9 +23,15 @@ def test_template_sets_meet_size_and_separation_contract() -> None:
     heldout_ids = {template.template_id for template in HELDOUT_TEMPLATES}
     train_sectors = {template.sector for template in TRAIN_TEMPLATES}
     heldout_sectors = {template.sector for template in HELDOUT_TEMPLATES}
-    train_styles = {document["style"] for template in TRAIN_TEMPLATES for document in template.documents}
+    train_styles = {
+        document["style"]
+        for template in TRAIN_TEMPLATES
+        for document in template.documents
+    }
     heldout_styles = {
-        document["style"] for template in HELDOUT_TEMPLATES for document in template.documents
+        document["style"]
+        for template in HELDOUT_TEMPLATES
+        for document in template.documents
     }
     train_patterns = {_planting_pattern(template) for template in TRAIN_TEMPLATES}
     heldout_patterns = {_planting_pattern(template) for template in HELDOUT_TEMPLATES}
@@ -41,7 +45,9 @@ def test_template_sets_meet_size_and_separation_contract() -> None:
     assert len(heldout_patterns) == len(HELDOUT_TEMPLATES)
 
 
-@pytest.mark.parametrize("template", ALL_TEMPLATES, ids=lambda template: template.template_id)
+@pytest.mark.parametrize(
+    "template", ALL_TEMPLATES, ids=lambda template: template.template_id
+)
 def test_same_seed_regenerates_byte_identical_scenario(template: object) -> None:
     first = scenario_to_bytes(generate_scenario(7352, template))
     second = scenario_to_bytes(generate_scenario(7352, template))
@@ -51,8 +57,12 @@ def test_same_seed_regenerates_byte_identical_scenario(template: object) -> None
     assert json.loads(first) == json.loads(second)
 
 
-@pytest.mark.parametrize("template", ALL_TEMPLATES, ids=lambda template: template.template_id)
-def test_generated_scenario_contains_complete_planted_structure(template: object) -> None:
+@pytest.mark.parametrize(
+    "template", ALL_TEMPLATES, ids=lambda template: template.template_id
+)
+def test_generated_scenario_contains_complete_planted_structure(
+    template: object,
+) -> None:
     scenario = generate_scenario(17, template, generated_at="2026-08-15")
 
     validate_scenario(scenario)
@@ -125,11 +135,14 @@ def test_validator_and_schema_accept_supported_yes_no_auxiliary(
     scenario["planted_items"][0]["canonical_question"] = question
 
     validate_scenario(scenario)
-    assert list(
-        Draft202012Validator(
-            load_scenario_schema(), format_checker=FormatChecker()
-        ).iter_errors(scenario)
-    ) == []
+    assert (
+        list(
+            Draft202012Validator(
+                load_scenario_schema(), format_checker=FormatChecker()
+            ).iter_errors(scenario)
+        )
+        == []
+    )
 
 
 def test_validator_preserves_punctuation_in_question_identity() -> None:
@@ -156,9 +169,7 @@ def test_validator_preserves_semantic_punctuation_in_question_fingerprints() -> 
 
 def test_validator_allows_distinct_canonical_question_substrings() -> None:
     scenario = generate_scenario(17, HELDOUT_TEMPLATES[0])
-    scenario["planted_items"][0]["canonical_question"] = (
-        "Is offline approval allowed?"
-    )
+    scenario["planted_items"][0]["canonical_question"] = "Is offline approval allowed?"
     scenario["planted_items"][1]["canonical_question"] = (
         "Should managers ask, Is offline approval allowed?"
     )
@@ -166,7 +177,9 @@ def test_validator_allows_distinct_canonical_question_substrings() -> None:
     validate_scenario(scenario)
 
 
-def test_validator_allows_unlisted_semantic_paraphrases_as_distinct_identities() -> None:
+def test_validator_allows_unlisted_semantic_paraphrases_as_distinct_identities() -> (
+    None
+):
     scenario = generate_scenario(17, HELDOUT_TEMPLATES[0])
     scenario["planted_items"][0]["canonical_question"] = (
         "Should dispatchers decide which observable conditions require a route pause?"
@@ -183,7 +196,9 @@ def test_validator_rejects_alias_that_duplicates_its_canonical_question() -> Non
     plant = scenario["planted_items"][0]
     plant["canonical_question_aliases"] = [plant["canonical_question"]]
 
-    with pytest.raises(ScenarioValidationError, match="duplicate canonical question or alias"):
+    with pytest.raises(
+        ScenarioValidationError, match="duplicate canonical question or alias"
+    ):
         validate_scenario(scenario)
 
 
@@ -202,7 +217,9 @@ def test_validator_and_schema_reject_non_yes_no_question_alias() -> None:
         "Which conditions require a route pause?"
     ]
 
-    with pytest.raises(ScenarioValidationError, match="alias must be a yes/no question"):
+    with pytest.raises(
+        ScenarioValidationError, match="alias must be a yes/no question"
+    ):
         validate_scenario(scenario)
     assert list(
         Draft202012Validator(
@@ -250,7 +267,9 @@ def test_validator_rejects_duplicate_planted_anchor_in_same_document() -> None:
 @pytest.mark.parametrize("item_kind", ["plant", "distractor"])
 def test_validator_rejects_noncanonical_anchor_whitespace(item_kind: str) -> None:
     scenario = generate_scenario(17, HELDOUT_TEMPLATES[0])
-    items = scenario["planted_items"] if item_kind == "plant" else scenario["distractors"]
+    items = (
+        scenario["planted_items"] if item_kind == "plant" else scenario["distractors"]
+    )
     item = items[0]
     document = next(
         document
@@ -320,19 +339,18 @@ def test_packaged_json_schema_names_every_top_level_field() -> None:
     state_machine = schema["allOf"][0]
     assert state_machine["then"]["properties"]["human_feedback"] == {"type": "null"}
     assert state_machine["else"]["properties"]["persona_panel"] == {"type": "null"}
-    assert (
-        schema["$defs"]["contextEngineSnapshot"]["properties"]["meta"]["properties"][
-            "synthetic"
-        ]
-        == {"const": False}
-    )
+    assert schema["$defs"]["contextEngineSnapshot"]["properties"]["meta"]["properties"][
+        "synthetic"
+    ] == {"const": False}
 
 
 @pytest.mark.parametrize(
     ("mutation", "error"),
     [
         (
-            lambda scenario: scenario["planted_items"][0].__setitem__("anchor_quote", "missing"),
+            lambda scenario: scenario["planted_items"][0].__setitem__(
+                "anchor_quote", "missing"
+            ),
             "plant anchor is absent",
         ),
         (
@@ -342,7 +360,9 @@ def test_packaged_json_schema_names_every_top_level_field() -> None:
             "target_stances do not match faction priors",
         ),
         (
-            lambda scenario: scenario["provenance"].__setitem__("generation_mode", "human"),
+            lambda scenario: scenario["provenance"].__setitem__(
+                "generation_mode", "human"
+            ),
             "synthetic scenarios require template generation provenance",
         ),
         (
@@ -351,7 +371,9 @@ def test_packaged_json_schema_names_every_top_level_field() -> None:
         ),
     ],
 )
-def test_validator_rejects_broken_answer_key_or_provenance(mutation: object, error: str) -> None:
+def test_validator_rejects_broken_answer_key_or_provenance(
+    mutation: object, error: str
+) -> None:
     scenario = copy.deepcopy(generate_scenario(42, TRAIN_TEMPLATES[0]))
     mutation(scenario)
 
@@ -378,7 +400,9 @@ def test_valid_human_socket_replaces_panel_and_declares_real_provenance() -> Non
         ("meta", [], "meta must be an object"),
     ],
 )
-def test_human_socket_rejects_schema_invalid_ce_fields(field: str, value: object, error: str) -> None:
+def test_human_socket_rejects_schema_invalid_ce_fields(
+    field: str, value: object, error: str
+) -> None:
     scenario = as_human_scenario(generate_scenario(42, TRAIN_TEMPLATES[0]))
     scenario["human_feedback"][field] = value
 
@@ -390,7 +414,7 @@ def test_human_socket_rejects_synthetic_embedded_snapshot() -> None:
     scenario = as_human_scenario(generate_scenario(42, TRAIN_TEMPLATES[0]))
     scenario["human_feedback"]["meta"]["synthetic"] = True
 
-    with pytest.raises(ScenarioValidationError, match="meta.synthetic must be false"):
+    with pytest.raises(ScenarioValidationError, match=r"meta\.synthetic must be false"):
         validate_scenario(scenario)
 
 
@@ -399,12 +423,16 @@ def test_human_path_still_enforces_prior_derived_target_stances() -> None:
     first_faction = scenario["factions"][0]["faction_id"]
     scenario["planted_items"][0]["target_stances"][first_faction] = "disagree"
 
-    with pytest.raises(ScenarioValidationError, match="target_stances do not match faction priors"):
+    with pytest.raises(
+        ScenarioValidationError, match="target_stances do not match faction priors"
+    ):
         validate_scenario(scenario)
 
 
 def test_schema_and_manual_validator_share_integral_number_semantics() -> None:
-    schema_validator = Draft202012Validator(load_scenario_schema(), format_checker=FormatChecker())
+    schema_validator = Draft202012Validator(
+        load_scenario_schema(), format_checker=FormatChecker()
+    )
     scenario = as_human_scenario(generate_scenario(42, TRAIN_TEMPLATES[0]))
     scenario["provenance"]["seed"] = 42.0
     scenario["human_feedback"]["statements"][0]["index"] = 0.0
@@ -421,8 +449,12 @@ def test_schema_and_manual_validator_share_integral_number_semantics() -> None:
             "index", 0.5
         ),
         lambda candidate: candidate["human_feedback"]["votes"][1].__setitem__(0, -0.5),
-        lambda candidate: candidate["human_feedback"]["masked_cells"][0].__setitem__(0, 0.5),
-        lambda candidate: candidate["human_feedback"]["held_out"].__setitem__("0,0", 0.5),
+        lambda candidate: candidate["human_feedback"]["masked_cells"][0].__setitem__(
+            0, 0.5
+        ),
+        lambda candidate: candidate["human_feedback"]["held_out"].__setitem__(
+            "0,0", 0.5
+        ),
     )
     for mutation in mutations:
         invalid = copy.deepcopy(scenario)
@@ -434,13 +466,15 @@ def test_schema_and_manual_validator_share_integral_number_semantics() -> None:
     invalid_values = (True, float("nan"), float("inf"), float("-inf"))
     numeric_field_mutations = (
         lambda candidate, value: candidate["provenance"].__setitem__("seed", value),
-        lambda candidate, value: candidate["human_feedback"]["statements"][0].__setitem__(
-            "index", value
-        ),
-        lambda candidate, value: candidate["human_feedback"]["votes"][1].__setitem__(0, value),
-        lambda candidate, value: candidate["human_feedback"]["masked_cells"][0].__setitem__(
+        lambda candidate, value: candidate["human_feedback"]["statements"][
+            0
+        ].__setitem__("index", value),
+        lambda candidate, value: candidate["human_feedback"]["votes"][1].__setitem__(
             0, value
         ),
+        lambda candidate, value: candidate["human_feedback"]["masked_cells"][
+            0
+        ].__setitem__(0, value),
         lambda candidate, value: candidate["human_feedback"]["held_out"].__setitem__(
             "0,0", value
         ),
@@ -463,7 +497,9 @@ def test_generation_and_validation_require_canonical_full_date() -> None:
 
     with pytest.raises(ScenarioValidationError, match="YYYY-MM-DD"):
         validate_scenario(scenario)
-    schema_validator = Draft202012Validator(load_scenario_schema(), format_checker=FormatChecker())
+    schema_validator = Draft202012Validator(
+        load_scenario_schema(), format_checker=FormatChecker()
+    )
     assert list(schema_validator.iter_errors(scenario))
 
 
@@ -474,7 +510,9 @@ def as_human_scenario(scenario: dict[str, object]) -> dict[str, object]:
     scenario["provenance"]["generation_mode"] = "human"
     scenario["human_feedback"] = {
         "session_id": "verified-session",
-        "statements": [{"index": 0, "text": "Should the proposed interpretation apply?"}],
+        "statements": [
+            {"index": 0, "text": "Should the proposed interpretation apply?"}
+        ],
         "participants": ["p000", "p001", "p002"],
         "votes": [[1], [-1], [0]],
         "masked_cells": [],
@@ -494,7 +532,9 @@ def _planting_pattern(template: object) -> tuple[object, ...]:
     def anchor_position(item: dict[str, str]) -> tuple[int, int]:
         document_index = document_positions[item["doc_id"]]
         document_text = template.documents[document_index]["text"]
-        sentence_index = document_text[: document_text.index(item["anchor_quote"])].count(". ")
+        sentence_index = document_text[
+            : document_text.index(item["anchor_quote"])
+        ].count(". ")
         return document_index, sentence_index
 
     planted = tuple(

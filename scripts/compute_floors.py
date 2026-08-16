@@ -3,24 +3,30 @@
 from __future__ import annotations
 
 import argparse
-from collections import Counter
 import json
+from collections import Counter
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
 
-from commonground_predict.environment import apply_masked_vote_count, validate_snapshot_dimensions
-
+from commonground_predict.environment import (
+    apply_masked_vote_count,
+    validate_snapshot_dimensions,
+)
 
 VALID_VOTES = (-1, 0, 1)
 
 
-def compute_floors(path: Path, masked_vote_count: int, seed: str | None = None) -> dict[str, float]:
+def compute_floors(
+    path: Path, masked_vote_count: int, seed: str | None = None
+) -> dict[str, float]:
     always_agree_correct = 0
     visible_majority_correct = 0
     best_constant_correct = 0
     target_count = 0
 
-    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+    for line_number, line in enumerate(
+        path.read_text(encoding="utf-8").splitlines(), start=1
+    ):
         if not line.strip():
             continue
         snapshot = json.loads(line)

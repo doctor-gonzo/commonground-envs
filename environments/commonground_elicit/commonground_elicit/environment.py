@@ -5,10 +5,10 @@ from __future__ import annotations
 import json
 import math
 import os
-from collections.abc import Mapping, Sequence
-from pathlib import Path
 import re
 import unicodedata
+from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Any
 
 import verifiers as vf
@@ -19,7 +19,6 @@ from commonground_scenarios import (
 )
 from commonground_score import cluster_separation, vote_entropy
 from datasets import Dataset
-
 
 ENV_ID = "commonground-elicit"
 DATA_ENV_VAR = "COMMONGROUND_ELICIT_DATA_PATH"
@@ -102,7 +101,9 @@ def load_environment(
         task=task,
     )
     if not train_rows or not eval_rows:
-        raise ValueError("difficulty arguments remove all planted items from the dataset")
+        raise ValueError(
+            "difficulty arguments remove all planted items from the dataset"
+        )
     dataset = Dataset.from_list(train_rows)
     eval_dataset = Dataset.from_list(eval_rows)
     parser = ElicitJsonParser("questions" if task == "elicit-ask" else "findings")
@@ -143,14 +144,18 @@ def load_scenarios(path: Path) -> list[dict[str, Any]]:
         raise FileNotFoundError(path)
 
     scenarios: list[dict[str, Any]] = []
-    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+    for line_number, line in enumerate(
+        path.read_text(encoding="utf-8").splitlines(), start=1
+    ):
         if not line.strip():
             continue
         try:
             scenario = json.loads(line)
             validate_scenario(scenario)
         except (json.JSONDecodeError, TypeError, ValueError) as error:
-            raise ValueError(f"invalid scenario at {path}:{line_number}: {error}") from error
+            raise ValueError(
+                f"invalid scenario at {path}:{line_number}: {error}"
+            ) from error
         scenarios.append(scenario)
     if not scenarios:
         raise ValueError(f"no scenarios loaded from {path}")
@@ -328,7 +333,11 @@ def build_document_view(
     }
 
     visible_distractors = _density_prefix(
-        [item for item in scenario["distractors"] if item["doc_id"] in selected_doc_ids],
+        [
+            item
+            for item in scenario["distractors"]
+            if item["doc_id"] in selected_doc_ids
+        ],
         distractor_density,
     )
     visible_distractor_anchors = {
@@ -344,7 +353,9 @@ def build_document_view(
         for doc_id, anchor in sorted(omitted_plant_anchors):
             if doc_id == document["doc_id"]:
                 text = text.replace(anchor, "")
-        for doc_id, anchor in sorted(all_distractor_anchors - visible_distractor_anchors):
+        for doc_id, anchor in sorted(
+            all_distractor_anchors - visible_distractor_anchors
+        ):
             if doc_id == document["doc_id"]:
                 text = text.replace(anchor, "")
         text = " ".join(text.split())
@@ -366,7 +377,9 @@ def build_document_view(
             text = text[:truncation_index].rstrip() + "…"
         documents.append({**document, "text": text})
 
-    visible_text_by_doc = {document["doc_id"]: document["text"] for document in documents}
+    visible_text_by_doc = {
+        document["doc_id"]: document["text"] for document in documents
+    }
     visible_plants = [
         plant
         for plant in selected_plants
@@ -509,7 +522,10 @@ def _parse_questions_list(raw_questions: Any) -> list[dict[str, Any]] | None:
     questions: list[dict[str, Any]] = []
     expected_fields = {"doc_id", "quote", "question", "target_stances"}
     for raw_question in raw_questions:
-        if not isinstance(raw_question, Mapping) or set(raw_question) != expected_fields:
+        if (
+            not isinstance(raw_question, Mapping)
+            or set(raw_question) != expected_fields
+        ):
             return None
         if not all(
             isinstance(raw_question[field], str) and raw_question[field].strip()
@@ -520,9 +536,7 @@ def _parse_questions_list(raw_questions: Any) -> list[dict[str, Any]] | None:
         if not isinstance(target_stances, Mapping) or not target_stances:
             return None
         if not all(
-            isinstance(faction_id, str)
-            and faction_id
-            and stance in STANCE_TO_VOTE
+            isinstance(faction_id, str) and faction_id and stance in STANCE_TO_VOTE
             for faction_id, stance in target_stances.items()
         ):
             return None
@@ -594,7 +608,9 @@ def _candidate_plant_question_utility(
     quote_overlap, question_overlap = text_match
     planted_stances = plant.get("target_stances", {})
     candidate_stances = candidate.get("target_stances", {})
-    if not isinstance(planted_stances, Mapping) or set(candidate_stances) != set(planted_stances):
+    if not isinstance(planted_stances, Mapping) or set(candidate_stances) != set(
+        planted_stances
+    ):
         return 0.0
     if dict(candidate_stances) != dict(planted_stances):
         return 0.0
@@ -638,7 +654,9 @@ def _question_matches_plant(candidate: str, plant: Mapping[str, Any]) -> bool:
 def panel_disagreement(target_stances: Mapping[str, str]) -> float:
     """Combine score-package entropy and pair separation for planted votes."""
 
-    votes = [STANCE_TO_VOTE[stance] for stance in target_stances.values()]
+    votes: list[int | None] = [
+        STANCE_TO_VOTE[stance] for stance in target_stances.values()
+    ]
     return (vote_entropy(votes) + cluster_separation(votes)) / 2
 
 
@@ -689,9 +707,15 @@ def _parse_findings_list(raw_findings: Any) -> list[dict[str, str]] | None:
         return None
     findings: list[dict[str, str]] = []
     for raw_finding in raw_findings:
-        if not isinstance(raw_finding, Mapping) or set(raw_finding) != {"doc_id", "quote", "type"}:
+        if not isinstance(raw_finding, Mapping) or set(raw_finding) != {
+            "doc_id",
+            "quote",
+            "type",
+        }:
             return None
-        if not all(isinstance(raw_finding[field], str) for field in ("doc_id", "quote", "type")):
+        if not all(
+            isinstance(raw_finding[field], str) for field in ("doc_id", "quote", "type")
+        ):
             return None
         if not raw_finding["doc_id"].strip() or not raw_finding["quote"].strip():
             return None
@@ -704,7 +728,9 @@ def _parse_findings_list(raw_findings: Any) -> list[dict[str, str]] | None:
 def parse_planted_items(
     planted_items: Sequence[Mapping[str, str]] | str,
 ) -> list[dict[str, str]]:
-    loaded = json.loads(planted_items) if isinstance(planted_items, str) else planted_items
+    loaded = (
+        json.loads(planted_items) if isinstance(planted_items, str) else planted_items
+    )
     return [
         {
             "doc_id": str(item["doc_id"]),
@@ -732,7 +758,9 @@ def match_findings(
                 continue
             if candidate.get("type") != plant.get("type"):
                 continue
-            overlap = normalized_quote_overlap(candidate.get("quote", ""), plant.get("quote", ""))
+            overlap = normalized_quote_overlap(
+                candidate.get("quote", ""), plant.get("quote", "")
+            )
             if overlap >= quote_overlap_threshold:
                 adjacency[candidate_index].append((overlap, plant_index))
     for edges in adjacency.values():
@@ -788,8 +816,7 @@ def _token_f1(left_tokens: Mapping[str, int], right_tokens: Mapping[str, int]) -
     if not left_tokens or not right_tokens:
         return 0.0
     shared = sum(
-        min(count, right_tokens.get(token, 0))
-        for token, count in left_tokens.items()
+        min(count, right_tokens.get(token, 0)) for token, count in left_tokens.items()
     )
     return 2 * shared / (sum(left_tokens.values()) + sum(right_tokens.values()))
 
@@ -900,20 +927,30 @@ def validate_difficulty_args(
     if task not in VALID_TASKS:
         raise ValueError(f"task must be one of {sorted(VALID_TASKS)}")
     for name, value in (("docs_count", docs_count), ("docs_length", docs_length)):
-        if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value <= 0):
+        if value is not None and (
+            isinstance(value, bool) or not isinstance(value, int) or value <= 0
+        ):
             raise ValueError(f"{name} must be a positive integer or None")
-    for name, value, allow_zero in (
+    for name, density, allow_zero in (
         ("planted_density", planted_density, False),
         ("distractor_density", distractor_density, True),
         ("panel_polarization", panel_polarization, False),
     ):
-        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        if (
+            isinstance(density, bool)
+            or not isinstance(density, (int, float))
+            or not math.isfinite(density)
+        ):
             raise ValueError(f"{name} must be finite")
-        lower_bound_ok = value >= 0 if allow_zero else value > 0
-        if not lower_bound_ok or value > 1:
+        lower_bound_ok = density >= 0 if allow_zero else density > 0
+        if not lower_bound_ok or density > 1:
             interval = "[0, 1]" if allow_zero else "(0, 1]"
             raise ValueError(f"{name} must be within {interval}")
-    if isinstance(question_count, bool) or not isinstance(question_count, int) or question_count <= 0:
+    if (
+        isinstance(question_count, bool)
+        or not isinstance(question_count, int)
+        or question_count <= 0
+    ):
         raise ValueError("question_count must be a positive integer")
 
 
@@ -924,7 +961,9 @@ def _density_prefix(items: Sequence[Any], density: float) -> list[Any]:
     return list(items[:count])
 
 
-def _safe_truncation_index(text: str, requested_index: int, anchors: Sequence[str]) -> int:
+def _safe_truncation_index(
+    text: str, requested_index: int, anchors: Sequence[str]
+) -> int:
     """Move a character cut left until it cannot bisect any planted anchor."""
 
     truncation_index = requested_index

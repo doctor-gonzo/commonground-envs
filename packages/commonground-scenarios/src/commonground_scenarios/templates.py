@@ -25,25 +25,41 @@ TRAIN_TEMPLATES = (
         template_id="customer-support-handbook",
         template_set="train",
         sector="subscription support",
-        organization_names=("Lantern Support Cooperative", "Harbor Desk Guild", "Juniper Service Works"),
+        organization_names=(
+            "Lantern Support Cooperative",
+            "Harbor Desk Guild",
+            "Juniper Service Works",
+        ),
         factions=(
             {
                 "faction_id": "support",
                 "name": "Customer support",
                 "summary": "Wants latitude to resolve customer harm quickly.",
-                "priors": {"credit-latitude": 0.9, "refund-window": 0.8, "escalation-gap": 0.7},
+                "priors": {
+                    "credit-latitude": 0.9,
+                    "refund-window": 0.8,
+                    "escalation-gap": 0.7,
+                },
             },
             {
                 "faction_id": "finance",
                 "name": "Finance controls",
                 "summary": "Wants predictable approvals and bounded concessions.",
-                "priors": {"credit-latitude": -0.8, "refund-window": -0.9, "escalation-gap": 0.0},
+                "priors": {
+                    "credit-latitude": -0.8,
+                    "refund-window": -0.9,
+                    "escalation-gap": 0.0,
+                },
             },
             {
                 "faction_id": "risk",
                 "name": "Risk review",
                 "summary": "Wants reviewable exceptions and explicit escalation ownership.",
-                "priors": {"credit-latitude": 0.0, "refund-window": -0.6, "escalation-gap": -0.9},
+                "priors": {
+                    "credit-latitude": 0.0,
+                    "refund-window": -0.6,
+                    "escalation-gap": -0.9,
+                },
             },
         ),
         documents=(
@@ -112,25 +128,41 @@ TRAIN_TEMPLATES = (
         template_id="learning-platform-operations",
         template_set="train",
         sector="online learning",
-        organization_names=("Mosaic Learning Circle", "Northstar Lesson Studio", "Cedar Course Cooperative"),
+        organization_names=(
+            "Mosaic Learning Circle",
+            "Northstar Lesson Studio",
+            "Cedar Course Cooperative",
+        ),
         factions=(
             {
                 "faction_id": "instructors",
                 "name": "Instructors",
                 "summary": "Want discretion over feedback and revision pacing.",
-                "priors": {"feedback-depth": 0.9, "revision-limit": -0.7, "access-gap": 0.6},
+                "priors": {
+                    "feedback-depth": 0.9,
+                    "revision-limit": -0.7,
+                    "access-gap": 0.6,
+                },
             },
             {
                 "faction_id": "learner-success",
                 "name": "Learner success",
                 "summary": "Wants generous revision and accessibility support.",
-                "priors": {"feedback-depth": 0.6, "revision-limit": 0.9, "access-gap": 0.9},
+                "priors": {
+                    "feedback-depth": 0.6,
+                    "revision-limit": 0.9,
+                    "access-gap": 0.9,
+                },
             },
             {
                 "faction_id": "quality",
                 "name": "Quality assurance",
                 "summary": "Wants consistent workload and documented accommodations.",
-                "priors": {"feedback-depth": -0.8, "revision-limit": -0.8, "access-gap": -0.7},
+                "priors": {
+                    "feedback-depth": -0.8,
+                    "revision-limit": -0.8,
+                    "access-gap": -0.7,
+                },
             },
         ),
         documents=(
@@ -199,25 +231,41 @@ TRAIN_TEMPLATES = (
         template_id="civic-assistant-guidance",
         template_set="train",
         sector="municipal services",
-        organization_names=("Maple Civic Lab", "Open Borough Studio", "Riverbend Service Office"),
+        organization_names=(
+            "Maple Civic Lab",
+            "Open Borough Studio",
+            "Riverbend Service Office",
+        ),
         factions=(
             {
                 "faction_id": "caseworkers",
                 "name": "Case workers",
                 "summary": "Want flexible triage and direct resolution.",
-                "priors": {"urgent-triage": 0.9, "appeal-route": 0.8, "offline-gap": 0.7},
+                "priors": {
+                    "urgent-triage": 0.9,
+                    "appeal-route": 0.8,
+                    "offline-gap": 0.7,
+                },
             },
             {
                 "faction_id": "auditors",
                 "name": "Program auditors",
                 "summary": "Want uniform queues and complete records.",
-                "priors": {"urgent-triage": -0.8, "appeal-route": -0.9, "offline-gap": -0.7},
+                "priors": {
+                    "urgent-triage": -0.8,
+                    "appeal-route": -0.9,
+                    "offline-gap": -0.7,
+                },
             },
             {
                 "faction_id": "residents",
                 "name": "Resident advocates",
                 "summary": "Want accessible channels and rapid review.",
-                "priors": {"urgent-triage": 0.7, "appeal-route": 0.9, "offline-gap": 0.9},
+                "priors": {
+                    "urgent-triage": 0.7,
+                    "appeal-route": 0.9,
+                    "offline-gap": 0.9,
+                },
             },
         ),
         documents=(
@@ -286,25 +334,41 @@ TRAIN_TEMPLATES = (
         template_id="benefits-communications",
         template_set="train",
         sector="workplace benefits",
-        organization_names=("Willow People Collective", "Brightpath Benefits Studio", "Commonleaf Workplace Guild"),
+        organization_names=(
+            "Willow People Collective",
+            "Brightpath Benefits Studio",
+            "Commonleaf Workplace Guild",
+        ),
         factions=(
             {
                 "faction_id": "people-ops",
                 "name": "People operations",
                 "summary": "Want accessible benefits and flexible administration.",
-                "priors": {"notice-window": 0.8, "stipend-approval": 0.7, "contractor-gap": 0.9},
+                "priors": {
+                    "notice-window": 0.8,
+                    "stipend-approval": 0.7,
+                    "contractor-gap": 0.9,
+                },
             },
             {
                 "faction_id": "managers",
                 "name": "Team managers",
                 "summary": "Want local discretion and fast decisions.",
-                "priors": {"notice-window": 0.9, "stipend-approval": 0.8, "contractor-gap": 0.0},
+                "priors": {
+                    "notice-window": 0.9,
+                    "stipend-approval": 0.8,
+                    "contractor-gap": 0.0,
+                },
             },
             {
                 "faction_id": "payroll",
                 "name": "Payroll controls",
                 "summary": "Want advance approval and clear eligibility boundaries.",
-                "priors": {"notice-window": -0.8, "stipend-approval": -0.9, "contractor-gap": -0.8},
+                "priors": {
+                    "notice-window": -0.8,
+                    "stipend-approval": -0.9,
+                    "contractor-gap": -0.8,
+                },
             },
         ),
         documents=(
@@ -377,25 +441,41 @@ HELDOUT_TEMPLATES = (
         template_id="freight-cooperative-manual",
         template_set="heldout",
         sector="freight logistics",
-        organization_names=("Blue Heron Freight Cooperative", "Granite Route Guild", "Prairie Relay Works"),
+        organization_names=(
+            "Blue Heron Freight Cooperative",
+            "Granite Route Guild",
+            "Prairie Relay Works",
+        ),
         factions=(
             {
                 "faction_id": "dispatch",
                 "name": "Dispatchers",
                 "summary": "Want routing discretion and fast exception handling.",
-                "priors": {"weather-threshold": 0.9, "handoff-authority": 0.8, "silent-driver-gap": 0.7},
+                "priors": {
+                    "weather-threshold": 0.9,
+                    "handoff-authority": 0.8,
+                    "silent-driver-gap": 0.7,
+                },
             },
             {
                 "faction_id": "safety",
                 "name": "Safety officers",
                 "summary": "Want conservative stops and explicit handoff authority.",
-                "priors": {"weather-threshold": -0.9, "handoff-authority": -0.8, "silent-driver-gap": -0.9},
+                "priors": {
+                    "weather-threshold": -0.9,
+                    "handoff-authority": -0.8,
+                    "silent-driver-gap": -0.9,
+                },
             },
             {
                 "faction_id": "customers",
                 "name": "Customer coordinators",
                 "summary": "Want continuity and timely delivery updates.",
-                "priors": {"weather-threshold": 0.6, "handoff-authority": 0.9, "silent-driver-gap": 0.8},
+                "priors": {
+                    "weather-threshold": 0.6,
+                    "handoff-authority": 0.9,
+                    "silent-driver-gap": 0.8,
+                },
             },
         ),
         documents=(
@@ -466,25 +546,41 @@ HELDOUT_TEMPLATES = (
         template_id="creator-marketplace-playbook",
         template_set="heldout",
         sector="digital marketplace",
-        organization_names=("Copper Kite Marketplace", "Fieldnote Creator Exchange", "Silver Loom Cooperative"),
+        organization_names=(
+            "Copper Kite Marketplace",
+            "Fieldnote Creator Exchange",
+            "Silver Loom Cooperative",
+        ),
         factions=(
             {
                 "faction_id": "creators",
                 "name": "Creators",
                 "summary": "Want flexible remedies and control over listings.",
-                "priors": {"timely-response": 0.9, "removal-authority": -0.8, "appeal-gap": 0.9},
+                "priors": {
+                    "timely-response": 0.9,
+                    "removal-authority": -0.8,
+                    "appeal-gap": 0.9,
+                },
             },
             {
                 "faction_id": "trust",
                 "name": "Trust and safety",
                 "summary": "Want rapid enforcement and reviewable appeals.",
-                "priors": {"timely-response": -0.8, "removal-authority": 0.9, "appeal-gap": 0.8},
+                "priors": {
+                    "timely-response": -0.8,
+                    "removal-authority": 0.9,
+                    "appeal-gap": 0.8,
+                },
             },
             {
                 "faction_id": "buyers",
                 "name": "Buyer advocates",
                 "summary": "Want clear deadlines and stable remedies.",
-                "priors": {"timely-response": -0.7, "removal-authority": 0.7, "appeal-gap": -0.8},
+                "priors": {
+                    "timely-response": -0.7,
+                    "removal-authority": 0.7,
+                    "appeal-gap": -0.8,
+                },
             },
         ),
         documents=(
@@ -552,7 +648,9 @@ HELDOUT_TEMPLATES = (
 )
 
 
-_TEMPLATES = {template.template_id: template for template in TRAIN_TEMPLATES + HELDOUT_TEMPLATES}
+_TEMPLATES = {
+    template.template_id: template for template in TRAIN_TEMPLATES + HELDOUT_TEMPLATES
+}
 
 
 def get_template(template_id: str) -> DomainTemplate:
