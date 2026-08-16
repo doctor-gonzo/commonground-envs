@@ -14,11 +14,13 @@ dev = [
 [tool.uv.workspace]
 members = [
     "packages/commonground-score",
+    "packages/commonground-scenarios",
     "environments/commonground_predict",
 ]
 
 [tool.pytest.ini_options]
 testpaths = [
     "packages/commonground-score/tests",
+    "packages/commonground-scenarios/tests",
     "environments/commonground_predict/tests",
 ]

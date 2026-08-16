@@ -11,6 +11,7 @@ resolution-markers = [
 members = [
     "commonground-envs",
     "commonground-predict",
+    "commonground-scenarios",
     "commonground-score",
 ]
 
@@ -253,6 +254,11 @@ requires-dist = [
     { name = "commonground-score", editable = "packages/commonground-score" },
     { name = "verifiers", specifier = "==0.1.14" },
 ]
+
+[[package]]
+name = "commonground-scenarios"
+version = "0.1.0"
+source = { editable = "packages/commonground-scenarios" }
 
 [[package]]
 name = "commonground-score"
