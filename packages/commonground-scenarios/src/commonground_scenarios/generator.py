@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import copy
-from collections.abc import Callable
 import json
 import random
+from collections.abc import Callable
 from typing import Any
 
 from commonground_scenarios.templates import DomainTemplate, get_template
@@ -16,8 +16,9 @@ from commonground_scenarios.validation import (
     validate_scenario,
 )
 
-
 DEFAULT_GENERATED_AT = "2026-08-15"
+
+
 def generate_scenario(
     seed: int,
     domain_template: DomainTemplate | str,
@@ -34,7 +35,11 @@ def generate_scenario(
 
     if isinstance(seed, bool) or not isinstance(seed, int):
         raise TypeError("seed must be an integer")
-    template = get_template(domain_template) if isinstance(domain_template, str) else domain_template
+    template = (
+        get_template(domain_template)
+        if isinstance(domain_template, str)
+        else domain_template
+    )
     canonical_date(generated_at)
     rng = random.Random(seed)
 
@@ -79,7 +84,9 @@ def generate_scenario(
             "template_set": template.template_set,
             "generated_at": generated_at,
             "synthetic": True,
-            "generation_mode": "operator-polished" if prose_polisher is not None else "template",
+            "generation_mode": "operator-polished"
+            if prose_polisher is not None
+            else "template",
         },
     }
     validate_scenario(scenario)

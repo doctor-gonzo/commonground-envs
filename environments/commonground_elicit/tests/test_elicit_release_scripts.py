@@ -3,10 +3,9 @@ from __future__ import annotations
 import copy
 import importlib.util
 import json
-from pathlib import Path
 import random
+from pathlib import Path
 from typing import Any
-
 
 ROOT = Path(__file__).resolve().parents[3]
 DATA_DIR = Path(__file__).resolve().parents[1] / "commonground_elicit" / "data"
@@ -15,7 +14,9 @@ EVAL_SPLIT = DATA_DIR / "eval_synthetic_heldout.jsonl"
 
 
 def load_script(module_name: str, filename: str) -> Any:
-    spec = importlib.util.spec_from_file_location(module_name, ROOT / "scripts" / filename)
+    spec = importlib.util.spec_from_file_location(
+        module_name, ROOT / "scripts" / filename
+    )
     if spec is None or spec.loader is None:
         raise RuntimeError(f"unable to load {filename}")
     module = importlib.util.module_from_spec(spec)
@@ -23,7 +24,9 @@ def load_script(module_name: str, filename: str) -> Any:
     return module
 
 
-generator = load_script("commonground_generate_elicit_splits", "generate_elicit_splits.py")
+generator = load_script(
+    "commonground_generate_elicit_splits", "generate_elicit_splits.py"
+)
 floors = load_script("commonground_compute_elicit_floors", "compute_elicit_floors.py")
 
 
@@ -59,9 +62,7 @@ def test_same_seed_regeneration_is_byte_identical(tmp_path: Path) -> None:
 def test_bundled_splits_are_synthetic_and_template_separated() -> None:
     train = read_jsonl(TRAIN_SPLIT)
     heldout = read_jsonl(EVAL_SPLIT)
-    train_template_ids = {
-        scenario["provenance"]["template_id"] for scenario in train
-    }
+    train_template_ids = {scenario["provenance"]["template_id"] for scenario in train}
     heldout_template_ids = {
         scenario["provenance"]["template_id"] for scenario in heldout
     }
@@ -93,8 +94,7 @@ def test_baseline_generation_depends_only_on_public_projections() -> None:
     assert factions == floors.public_factions(altered)
     assert all(set(document) == {"doc_id", "text"} for document in documents)
     assert all(
-        set(faction) == {"faction_id", "name", "summary"}
-        for faction in factions
+        set(faction) == {"faction_id", "name", "summary"} for faction in factions
     )
     assert floors.random_span_findings(
         documents, random.Random("same")

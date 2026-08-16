@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+import re
+import unicodedata
 from collections.abc import Mapping
 from datetime import date
 from importlib.resources import files
-import hashlib
-import json
 from math import isfinite
-import re
 from typing import Any
-import unicodedata
-
 
 SCENARIO_FIELDS = {
     "scenario_id",
@@ -72,8 +71,10 @@ class ScenarioValidationError(ValueError):
 def load_scenario_schema() -> dict[str, Any]:
     """Load the packaged JSON Schema document."""
 
-    schema_text = files("commonground_scenarios").joinpath("schema/scenario.schema.json").read_text(
-        encoding="utf-8"
+    schema_text = (
+        files("commonground_scenarios")
+        .joinpath("schema/scenario.schema.json")
+        .read_text(encoding="utf-8")
     )
     schema = json.loads(schema_text)
     if not isinstance(schema, dict):
@@ -103,20 +104,32 @@ def validate_scenario(scenario: Mapping[str, Any]) -> None:
 
     if provenance["synthetic"]:
         if organization["fictional"] is not True:
-            raise ScenarioValidationError("synthetic scenarios require a fictional organization")
+            raise ScenarioValidationError(
+                "synthetic scenarios require a fictional organization"
+            )
         if provenance["generation_mode"] not in {"template", "operator-polished"}:
-            raise ScenarioValidationError("synthetic scenarios require template generation provenance")
+            raise ScenarioValidationError(
+                "synthetic scenarios require template generation provenance"
+            )
         if panel is None:
             raise ScenarioValidationError("synthetic scenarios require persona_panel")
         if root["human_feedback"] is not None:
-            raise ScenarioValidationError("synthetic scenarios cannot contain human_feedback")
+            raise ScenarioValidationError(
+                "synthetic scenarios cannot contain human_feedback"
+            )
     else:
         if organization["fictional"] is not False:
-            raise ScenarioValidationError("human scenarios require a non-fictional organization")
+            raise ScenarioValidationError(
+                "human scenarios require a non-fictional organization"
+            )
         if provenance["generation_mode"] != "human":
-            raise ScenarioValidationError("human scenarios require human generation provenance")
+            raise ScenarioValidationError(
+                "human scenarios require human generation provenance"
+            )
         if panel is not None:
-            raise ScenarioValidationError("human scenarios replace persona_panel with human_feedback")
+            raise ScenarioValidationError(
+                "human scenarios replace persona_panel with human_feedback"
+            )
         _validate_human_feedback(root["human_feedback"])
 
 
@@ -137,7 +150,9 @@ def _validate_factions(value: Any) -> dict[str, dict[str, Any]]:
         _nonempty_text(faction["summary"], f"factions[{index}].summary")
         priors = faction["priors"]
         if not isinstance(priors, Mapping) or len(priors) < 3:
-            raise ScenarioValidationError(f"factions[{index}].priors must define planted dimensions")
+            raise ScenarioValidationError(
+                f"factions[{index}].priors must define planted dimensions"
+            )
         normalized_priors: dict[str, float] = {}
         for dimension, prior in priors.items():
             dimension_id = _identifier(dimension, f"factions[{index}].priors key")
@@ -145,7 +160,9 @@ def _validate_factions(value: Any) -> dict[str, dict[str, Any]]:
                 raise ScenarioValidationError(f"prior {dimension_id} must be numeric")
             numeric_prior = float(prior)
             if not isfinite(numeric_prior) or not -1 <= numeric_prior <= 1:
-                raise ScenarioValidationError(f"prior {dimension_id} must be finite and within [-1, 1]")
+                raise ScenarioValidationError(
+                    f"prior {dimension_id} must be finite and within [-1, 1]"
+                )
             normalized_priors[dimension_id] = numeric_prior
         factions[faction_id] = {**faction, "priors": normalized_priors}
     return factions
@@ -177,16 +194,22 @@ def _validate_panel(
         value, {"vote_rule", "pass_threshold", "faction_ids"}, "persona_panel"
     )
     if panel["vote_rule"] != "dimension-threshold-v1":
-        raise ScenarioValidationError("persona_panel.vote_rule must be dimension-threshold-v1")
+        raise ScenarioValidationError(
+            "persona_panel.vote_rule must be dimension-threshold-v1"
+        )
     threshold = panel["pass_threshold"]
     if isinstance(threshold, bool) or not isinstance(threshold, (int, float)):
         raise ScenarioValidationError("persona_panel.pass_threshold must be numeric")
     threshold = float(threshold)
     if threshold != PASS_THRESHOLD:
-        raise ScenarioValidationError(f"persona_panel.pass_threshold must equal {PASS_THRESHOLD}")
+        raise ScenarioValidationError(
+            f"persona_panel.pass_threshold must equal {PASS_THRESHOLD}"
+        )
     faction_ids = panel["faction_ids"]
     if not isinstance(faction_ids, list) or faction_ids != list(factions):
-        raise ScenarioValidationError("persona_panel.faction_ids must match faction order")
+        raise ScenarioValidationError(
+            "persona_panel.faction_ids must match faction order"
+        )
     return {**panel, "pass_threshold": threshold}
 
 
@@ -196,7 +219,9 @@ def _validate_plants(
     documents: Mapping[str, Mapping[str, Any]],
 ) -> None:
     if not isinstance(value, list) or len(value) < 3:
-        raise ScenarioValidationError("planted_items must contain the planted answer key")
+        raise ScenarioValidationError(
+            "planted_items must contain the planted answer key"
+        )
     seen_ids: set[str] = set()
     seen_anchor_keys: set[tuple[str, str]] = set()
     seen_question_fingerprints: set[str] = set()
@@ -226,13 +251,17 @@ def _validate_plants(
         doc_id = _identifier(plant["doc_id"], f"planted_items[{index}].doc_id")
         if doc_id not in documents:
             raise ScenarioValidationError(f"plant references unknown doc_id: {doc_id}")
-        anchor = _nonempty_text(plant["anchor_quote"], f"planted_items[{index}].anchor_quote")
+        anchor = _nonempty_text(
+            plant["anchor_quote"], f"planted_items[{index}].anchor_quote"
+        )
         if anchor != " ".join(anchor.split()):
             raise ScenarioValidationError(
                 f"plant anchor must use canonical whitespace: {plant_id}"
             )
         if anchor not in documents[doc_id]["text"]:
-            raise ScenarioValidationError(f"plant anchor is absent from document: {plant_id}")
+            raise ScenarioValidationError(
+                f"plant anchor is absent from document: {plant_id}"
+            )
         anchor_key = (doc_id, _anchor_identity(anchor))
         if anchor_key in seen_anchor_keys:
             raise ScenarioValidationError(f"duplicate planted anchor: {plant_id}")
@@ -247,9 +276,7 @@ def _validate_plants(
             )
         question_key = question_fingerprint(canonical_question)
         if question_key in seen_question_fingerprints:
-            raise ScenarioValidationError(
-                f"duplicate canonical_question: {plant_id}"
-            )
+            raise ScenarioValidationError(f"duplicate canonical_question: {plant_id}")
         seen_question_fingerprints.add(question_key)
         aliases = plant["canonical_question_aliases"]
         if not isinstance(aliases, list):
@@ -276,7 +303,9 @@ def _validate_plants(
         )
         stances = plant["target_stances"]
         if not isinstance(stances, Mapping) or set(stances) != set(factions):
-            raise ScenarioValidationError(f"target_stances must cover every faction: {plant_id}")
+            raise ScenarioValidationError(
+                f"target_stances must cover every faction: {plant_id}"
+            )
         if any(stance not in STANCES for stance in stances.values()):
             raise ScenarioValidationError(f"invalid target stance: {plant_id}")
         expected = {
@@ -286,11 +315,17 @@ def _validate_plants(
             for faction_id, faction in factions.items()
         }
         if dict(stances) != expected:
-            raise ScenarioValidationError(f"target_stances do not match faction priors: {plant_id}")
+            raise ScenarioValidationError(
+                f"target_stances do not match faction priors: {plant_id}"
+            )
         if not {"agree", "disagree"}.issubset(set(stances.values())):
-            raise ScenarioValidationError(f"plant must mark latently split factions: {plant_id}")
+            raise ScenarioValidationError(
+                f"plant must mark latently split factions: {plant_id}"
+            )
     if seen_types != PLANT_TYPES:
-        raise ScenarioValidationError("planted_items must include ambiguity, contradiction, and gap")
+        raise ScenarioValidationError(
+            "planted_items must include ambiguity, contradiction, and gap"
+        )
 
 
 def is_yes_no_question(text: str) -> bool:
@@ -327,20 +362,30 @@ def _validate_distractors(
     }
     for index, raw_distractor in enumerate(value):
         distractor = _exact_object(
-            raw_distractor, {"doc_id", "anchor_quote", "reason"}, f"distractors[{index}]"
+            raw_distractor,
+            {"doc_id", "anchor_quote", "reason"},
+            f"distractors[{index}]",
         )
         doc_id = _identifier(distractor["doc_id"], f"distractors[{index}].doc_id")
         if doc_id not in documents:
-            raise ScenarioValidationError(f"distractor references unknown doc_id: {doc_id}")
-        anchor = _nonempty_text(distractor["anchor_quote"], f"distractors[{index}].anchor_quote")
+            raise ScenarioValidationError(
+                f"distractor references unknown doc_id: {doc_id}"
+            )
+        anchor = _nonempty_text(
+            distractor["anchor_quote"], f"distractors[{index}].anchor_quote"
+        )
         if anchor != " ".join(anchor.split()):
             raise ScenarioValidationError(
                 "distractor anchor must use canonical whitespace"
             )
         if anchor not in documents[doc_id]["text"]:
-            raise ScenarioValidationError("distractor anchor is absent from its document")
+            raise ScenarioValidationError(
+                "distractor anchor is absent from its document"
+            )
         if _anchor_identity(anchor) in planted_anchors:
-            raise ScenarioValidationError("distractor cannot duplicate a planted anchor")
+            raise ScenarioValidationError(
+                "distractor cannot duplicate a planted anchor"
+            )
         _nonempty_text(distractor["reason"], f"distractors[{index}].reason")
 
 
@@ -365,9 +410,13 @@ def _validate_provenance(value: Any, scenario_id: str) -> dict[str, Any]:
     template_id = _identifier(provenance["template_id"], "provenance.template_id")
     expected_scenario_id = scenario_id_for(template_id, seed)
     if scenario_id != expected_scenario_id:
-        raise ScenarioValidationError("scenario_id must match provenance template and seed")
+        raise ScenarioValidationError(
+            "scenario_id must match provenance template and seed"
+        )
     if provenance["template_set"] not in {"train", "heldout"}:
-        raise ScenarioValidationError("provenance.template_set must be train or heldout")
+        raise ScenarioValidationError(
+            "provenance.template_set must be train or heldout"
+        )
     canonical_date(provenance["generated_at"])
     if type(provenance["synthetic"]) is not bool:
         raise ScenarioValidationError("provenance.synthetic must be boolean")
@@ -388,15 +437,28 @@ def _validate_human_feedback(value: Any) -> None:
         statement_object = _exact_object(
             statement, {"index", "text"}, f"human_feedback.statements[{index}]"
         )
-        if _json_integer(
-            statement_object["index"], f"human_feedback.statements[{index}].index"
-        ) != index:
-            raise ScenarioValidationError("human_feedback statement indices must be positional")
-        _nonempty_text(statement_object["text"], f"human_feedback.statements[{index}].text")
-    if not isinstance(participants, list) or not participants or not all(
-        isinstance(participant, str) and participant for participant in participants
+        if (
+            _json_integer(
+                statement_object["index"], f"human_feedback.statements[{index}].index"
+            )
+            != index
+        ):
+            raise ScenarioValidationError(
+                "human_feedback statement indices must be positional"
+            )
+        _nonempty_text(
+            statement_object["text"], f"human_feedback.statements[{index}].text"
+        )
+    if (
+        not isinstance(participants, list)
+        or not participants
+        or not all(
+            isinstance(participant, str) and participant for participant in participants
+        )
     ):
-        raise ScenarioValidationError("human_feedback.participants must be non-empty strings")
+        raise ScenarioValidationError(
+            "human_feedback.participants must be non-empty strings"
+        )
     if len(set(participants)) != len(participants):
         raise ScenarioValidationError("human_feedback.participants must be unique")
     if not isinstance(votes, list) or len(votes) != len(participants):
@@ -416,14 +478,27 @@ def _validate_human_feedback(value: Any) -> None:
     normalized_masked_cells: set[str] = set()
     for cell in masked_cells:
         if not isinstance(cell, list) or len(cell) != 2:
-            raise ScenarioValidationError("human_feedback contains an invalid masked cell")
-        participant_index = _json_integer(cell[0], "human_feedback masked participant index")
-        statement_index = _json_integer(cell[1], "human_feedback masked statement index")
-        if not 0 <= participant_index < len(participants) or not 0 <= statement_index < statement_count:
-            raise ScenarioValidationError("human_feedback contains an invalid masked cell")
+            raise ScenarioValidationError(
+                "human_feedback contains an invalid masked cell"
+            )
+        participant_index = _json_integer(
+            cell[0], "human_feedback masked participant index"
+        )
+        statement_index = _json_integer(
+            cell[1], "human_feedback masked statement index"
+        )
+        if (
+            not 0 <= participant_index < len(participants)
+            or not 0 <= statement_index < statement_count
+        ):
+            raise ScenarioValidationError(
+                "human_feedback contains an invalid masked cell"
+            )
         cell_id = f"{participant_index},{statement_index}"
         if cell_id in normalized_masked_cells:
-            raise ScenarioValidationError("human_feedback contains a duplicate masked cell")
+            raise ScenarioValidationError(
+                "human_feedback contains a duplicate masked cell"
+            )
         normalized_masked_cells.add(cell_id)
         if votes[participant_index][statement_index] is not None:
             raise ScenarioValidationError("human_feedback masked votes must be null")
@@ -432,16 +507,29 @@ def _validate_human_feedback(value: Any) -> None:
         raise ScenarioValidationError("human_feedback.held_out must be an object")
     for cell_id, vote in held_out.items():
         if not isinstance(cell_id, str) or not re.fullmatch(r"\d+,\d+", cell_id):
-            raise ScenarioValidationError("human_feedback contains an invalid held-out cell")
-        participant_index, statement_index = (int(index) for index in cell_id.split(","))
-        if not 0 <= participant_index < len(participants) or not 0 <= statement_index < statement_count:
-            raise ScenarioValidationError("human_feedback contains an out-of-bounds held-out cell")
+            raise ScenarioValidationError(
+                "human_feedback contains an invalid held-out cell"
+            )
+        participant_index, statement_index = (
+            int(index) for index in cell_id.split(",")
+        )
+        if (
+            not 0 <= participant_index < len(participants)
+            or not 0 <= statement_index < statement_count
+        ):
+            raise ScenarioValidationError(
+                "human_feedback contains an out-of-bounds held-out cell"
+            )
         if _json_integer(vote, "human_feedback held-out vote") not in {-1, 0, 1}:
-            raise ScenarioValidationError("human_feedback contains an invalid held-out vote")
+            raise ScenarioValidationError(
+                "human_feedback contains an invalid held-out vote"
+            )
     if set(held_out) != normalized_masked_cells:
         raise ScenarioValidationError("human_feedback held_out must match masked_cells")
     clusters = snapshot["clusters"]
-    if not isinstance(clusters, list) or not all(isinstance(cluster, Mapping) for cluster in clusters):
+    if not isinstance(clusters, list) or not all(
+        isinstance(cluster, Mapping) for cluster in clusters
+    ):
         raise ScenarioValidationError("human_feedback.clusters must be an array")
     if not isinstance(snapshot["stats"], Mapping):
         raise ScenarioValidationError("human_feedback.stats must be an object")
@@ -457,7 +545,9 @@ def scenario_id_for(template_id: str, seed: int | float) -> str:
 
     normalized_template_id = _identifier(template_id, "template_id")
     normalized_seed = _json_integer(seed, "seed")
-    digest = hashlib.sha256(f"{normalized_template_id}:{normalized_seed}".encode()).hexdigest()[:12]
+    digest = hashlib.sha256(
+        f"{normalized_template_id}:{normalized_seed}".encode()
+    ).hexdigest()[:12]
     return f"{normalized_template_id}-{digest}"
 
 
@@ -470,7 +560,9 @@ def canonical_date(value: Any) -> str:
     try:
         parsed = date.fromisoformat(text)
     except ValueError as error:
-        raise ScenarioValidationError("provenance.generated_at must be a valid date") from error
+        raise ScenarioValidationError(
+            "provenance.generated_at must be a valid date"
+        ) from error
     if parsed.isoformat() != text:
         raise ScenarioValidationError("provenance.generated_at must use YYYY-MM-DD")
     return text
@@ -478,7 +570,9 @@ def canonical_date(value: Any) -> str:
 
 def _stance_for(prior: float | None, threshold: float, dimension: str) -> str:
     if prior is None:
-        raise ScenarioValidationError(f"faction prior missing target dimension: {dimension}")
+        raise ScenarioValidationError(
+            f"faction prior missing target dimension: {dimension}"
+        )
     if prior >= threshold:
         return "agree"
     if prior <= -threshold:

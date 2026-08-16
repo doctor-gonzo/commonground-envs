@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
 
 from commonground_scenarios import (
     HELDOUT_TEMPLATES,
@@ -13,7 +13,6 @@ from commonground_scenarios import (
     generate_scenario,
     scenario_to_bytes,
 )
-
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT_DIR = (

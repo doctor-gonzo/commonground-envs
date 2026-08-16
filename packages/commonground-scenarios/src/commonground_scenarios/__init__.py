@@ -18,10 +18,10 @@ from commonground_scenarios.validation import (
 __version__ = "0.1.0"
 
 __all__ = [
-    "DomainTemplate",
     "HELDOUT_TEMPLATES",
-    "ScenarioValidationError",
     "TRAIN_TEMPLATES",
+    "DomainTemplate",
+    "ScenarioValidationError",
     "generate_scenario",
     "get_template",
     "is_yes_no_question",

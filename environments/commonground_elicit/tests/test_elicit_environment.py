@@ -7,9 +7,6 @@ from typing import Any
 
 import pytest
 import verifiers as vf
-from commonground_scenarios import HELDOUT_TEMPLATES, generate_scenario
-from verifiers.types import State
-
 from commonground_elicit import (
     ElicitJsonParser,
     finding_f1,
@@ -28,7 +25,8 @@ from commonground_elicit.environment import (
     normalized_quote_overlap,
     scenario_to_row,
 )
-
+from commonground_scenarios import HELDOUT_TEMPLATES, generate_scenario
+from verifiers.types import State
 
 CANONICAL_TASK_COLUMNS = ("prompt", "answer", "info", "example_id")
 QUESTION_RESPONSE_FIELDS = ("doc_id", "quote", "question", "target_stances")
@@ -44,9 +42,9 @@ def test_load_environment_builds_default_heldout_rows() -> None:
     assert {json.loads(row["info"])["template_set"] for row in env.get_dataset()} == {
         "train"
     }
-    assert {json.loads(row["info"])["template_set"] for row in env.get_eval_dataset()} == {
-        "heldout"
-    }
+    assert {
+        json.loads(row["info"])["template_set"] for row in env.get_eval_dataset()
+    } == {"heldout"}
 
 
 @pytest.mark.parametrize("task", ["find", "elicit-ask"])
@@ -120,7 +118,7 @@ def test_bundled_env_args_round_trip_preserves_both_splits() -> None:
 def test_explicit_missing_data_path_is_an_error(tmp_path: Path) -> None:
     missing = tmp_path / "missing.jsonl"
 
-    with pytest.raises(FileNotFoundError, match="missing.jsonl"):
+    with pytest.raises(FileNotFoundError, match=r"missing\.jsonl"):
         load_environment(data_path=missing)
 
 
@@ -153,7 +151,9 @@ def test_rubric_scores_exact_answer_at_one() -> None:
     assert state["metrics"]["question_utility"] > 0.0
 
 
-def test_find_task_companion_question_metric_is_reachable_without_affecting_reward() -> None:
+def test_find_task_companion_question_metric_is_reachable_without_affecting_reward() -> (
+    None
+):
     env = load_environment()
     row = dict(env.get_eval_dataset()[0])
     exact = correct_response_from_row(row)
@@ -168,7 +168,9 @@ def test_find_task_companion_question_metric_is_reachable_without_affecting_rewa
 
 
 @pytest.mark.parametrize("questions", ["invalid", []])
-def test_invalid_or_wrong_k_companion_questions_do_not_zero_t1(questions: object) -> None:
+def test_invalid_or_wrong_k_companion_questions_do_not_zero_t1(
+    questions: object,
+) -> None:
     env = load_environment()
     row = dict(env.get_eval_dataset()[0])
     answer = json.loads(row["answer"])
@@ -212,9 +214,7 @@ def test_ask_task_exact_planted_response_is_positive_and_deterministic() -> None
 
 
 def test_ask_task_env_args_round_trip_preserves_task_and_rows() -> None:
-    env = load_environment(
-        task="elicit-ask", question_count=1, panel_polarization=0.75
-    )
+    env = load_environment(task="elicit-ask", question_count=1, panel_polarization=0.75)
 
     reloaded = load_environment(**env.env_args)
 
@@ -323,27 +323,29 @@ def test_precise_distractor_quote_cannot_receive_planted_question_credit() -> No
         task="elicit-ask",
     )
     planted_question = planted_questions_from_row(row)[0]
-    distractor_candidate = candidate_for_plant(
-        planted_question, quote=distractor_quote
-    )
+    distractor_candidate = candidate_for_plant(planted_question, quote=distractor_quote)
 
-    assert question_utility_score(
-        [distractor_candidate],
-        [planted_question],
-        panel_polarization=1.0,
-        question_count=1,
-    ) == 0.0
-    assert question_utility_score(
-        [candidate_for_plant(planted_question)],
-        [planted_question],
-        panel_polarization=1.0,
-        question_count=1,
-    ) > 0.0
+    assert (
+        question_utility_score(
+            [distractor_candidate],
+            [planted_question],
+            panel_polarization=1.0,
+            question_count=1,
+        )
+        == 0.0
+    )
+    assert (
+        question_utility_score(
+            [candidate_for_plant(planted_question)],
+            [planted_question],
+            panel_polarization=1.0,
+            question_count=1,
+        )
+        > 0.0
+    )
 
     visible_prefix = "Pause a route when conditions become unsafe under the thresholds"
-    truncation_length = document["text"].index(distractor_quote) + len(
-        visible_prefix
-    )
+    truncation_length = document["text"].index(distractor_quote) + len(visible_prefix)
     truncated_row = scenario_to_row(
         scenario,
         docs_count=None,
@@ -357,12 +359,15 @@ def test_precise_distractor_quote_cannot_receive_planted_question_credit() -> No
     truncated_plant = planted_questions_from_row(truncated_row)[0]
 
     assert visible_prefix not in truncated_plant["document_text"]
-    assert question_utility_score(
-        [candidate_for_plant(truncated_plant, quote=visible_prefix)],
-        [truncated_plant],
-        panel_polarization=1.0,
-        question_count=1,
-    ) == 0.0
+    assert (
+        question_utility_score(
+            [candidate_for_plant(truncated_plant, quote=visible_prefix)],
+            [truncated_plant],
+            panel_polarization=1.0,
+            question_count=1,
+        )
+        == 0.0
+    )
 
 
 def test_find_task_caps_companion_k_to_visible_plants() -> None:
@@ -391,9 +396,12 @@ def test_low_specificity_questions_cannot_match_planting(question: str) -> None:
     plant = planted_questions_from_row(dict(env.get_eval_dataset()[0]))[0]
     candidate = candidate_for_plant(plant, question=question)
 
-    assert question_utility_score(
-        [candidate], [plant], panel_polarization=1.0, question_count=1
-    ) == 0.0
+    assert (
+        question_utility_score(
+            [candidate], [plant], panel_polarization=1.0, question_count=1
+        )
+        == 0.0
+    )
 
 
 def test_negating_canonical_question_cannot_retain_lexical_credit() -> None:
@@ -404,9 +412,12 @@ def test_negating_canonical_question_cannot_retain_lexical_credit() -> None:
         question=f"Should we not ask: {plant['question']}",
     )
 
-    assert question_utility_score(
-        [candidate], [plant], panel_polarization=1.0, question_count=1
-    ) == 0.0
+    assert (
+        question_utility_score(
+            [candidate], [plant], panel_polarization=1.0, question_count=1
+        )
+        == 0.0
+    )
 
 
 @pytest.mark.parametrize(
@@ -427,12 +438,15 @@ def test_negation_scope_changes_cannot_match_planting(question: str) -> None:
         == "Should the duty coordinator transfer a load after hours without the assigned dispatcher?"
     )
 
-    assert question_utility_score(
-        [candidate_for_plant(plant, question=question)],
-        [plant],
-        panel_polarization=1.0,
-        question_count=1,
-    ) == 0.0
+    assert (
+        question_utility_score(
+            [candidate_for_plant(plant, question=question)],
+            [plant],
+            panel_polarization=1.0,
+            question_count=1,
+        )
+        == 0.0
+    )
 
 
 @pytest.mark.parametrize(
@@ -450,9 +464,12 @@ def test_word_scrambles_and_opposite_predicates_cannot_match(question: str) -> N
     plant = planted_questions_from_row(dict(env.get_eval_dataset()[0]))[0]
     candidate = candidate_for_plant(plant, question=question)
 
-    assert question_utility_score(
-        [candidate], [plant], panel_polarization=1.0, question_count=1
-    ) == 0.0
+    assert (
+        question_utility_score(
+            [candidate], [plant], panel_polarization=1.0, question_count=1
+        )
+        == 0.0
+    )
 
 
 def test_extra_negation_on_question_with_existing_negation_scores_zero() -> None:
@@ -464,9 +481,12 @@ def test_extra_negation_on_question_with_existing_negation_scores_zero() -> None
         question=plant["question"].replace(" transfer ", " not transfer ", 1),
     )
 
-    assert question_utility_score(
-        [candidate], [plant], panel_polarization=1.0, question_count=1
-    ) == 0.0
+    assert (
+        question_utility_score(
+            [candidate], [plant], panel_polarization=1.0, question_count=1
+        )
+        == 0.0
+    )
 
 
 def test_symbolic_negation_cannot_disappear_during_question_normalization() -> None:
@@ -477,9 +497,12 @@ def test_symbolic_negation_cannot_disappear_during_question_normalization() -> N
         question=plant["question"].replace(" dispatchers ", " dispatchers ¬ ", 1),
     )
 
-    assert question_utility_score(
-        [candidate], [plant], panel_polarization=1.0, question_count=1
-    ) == 0.0
+    assert (
+        question_utility_score(
+            [candidate], [plant], panel_polarization=1.0, question_count=1
+        )
+        == 0.0
+    )
 
 
 @pytest.mark.parametrize("separator", ["\n", "\t", "  "])
@@ -491,9 +514,12 @@ def test_noncanonical_question_whitespace_scores_zero(separator: str) -> None:
         question=plant["question"].replace(" ", separator, 1),
     )
 
-    assert question_utility_score(
-        [candidate], [plant], panel_polarization=1.0, question_count=1
-    ) == 0.0
+    assert (
+        question_utility_score(
+            [candidate], [plant], panel_polarization=1.0, question_count=1
+        )
+        == 0.0
+    )
 
 
 def test_actor_reversal_with_shared_vocabulary_scores_zero() -> None:
@@ -510,9 +536,12 @@ def test_actor_reversal_with_shared_vocabulary_scores_zero() -> None:
         question="Should the assigned dispatcher transfer a load after hours without the duty coordinator?",
     )
 
-    assert question_utility_score(
-        [candidate], [plant], panel_polarization=1.0, question_count=1
-    ) == 0.0
+    assert (
+        question_utility_score(
+            [candidate], [plant], panel_polarization=1.0, question_count=1
+        )
+        == 0.0
+    )
 
 
 def test_fabricated_opposite_quote_cannot_claim_document_grounding() -> None:
@@ -523,9 +552,12 @@ def test_fabricated_opposite_quote_cannot_claim_document_grounding() -> None:
         quote=f"Never {plant['quote'][0].lower()}{plant['quote'][1:]}",
     )
 
-    assert question_utility_score(
-        [candidate], [plant], panel_polarization=1.0, question_count=1
-    ) == 0.0
+    assert (
+        question_utility_score(
+            [candidate], [plant], panel_polarization=1.0, question_count=1
+        )
+        == 0.0
+    )
 
 
 def test_partial_word_quote_cannot_claim_document_grounding() -> None:
@@ -536,9 +568,12 @@ def test_partial_word_quote_cannot_claim_document_grounding() -> None:
         quote="use a route when conditions become unsafe.",
     )
 
-    assert question_utility_score(
-        [candidate], [plant], panel_polarization=1.0, question_count=1
-    ) == 0.0
+    assert (
+        question_utility_score(
+            [candidate], [plant], panel_polarization=1.0, question_count=1
+        )
+        == 0.0
+    )
 
 
 def test_exact_raw_planted_anchor_inside_token_remains_scorable() -> None:
@@ -552,12 +587,15 @@ def test_exact_raw_planted_anchor_inside_token_remains_scorable() -> None:
         "document_text": "xylophone",
     }
 
-    assert question_utility_score(
-        [candidate_for_plant(plant)],
-        [plant],
-        panel_polarization=1.0,
-        question_count=1,
-    ) > 0.0
+    assert (
+        question_utility_score(
+            [candidate_for_plant(plant)],
+            [plant],
+            panel_polarization=1.0,
+            question_count=1,
+        )
+        > 0.0
+    )
 
 
 def test_symbolic_negation_cannot_disappear_from_grounding_quote() -> None:
@@ -565,9 +603,12 @@ def test_symbolic_negation_cannot_disappear_from_grounding_quote() -> None:
     plant = planted_questions_from_row(dict(env.get_eval_dataset()[0]))[0]
     candidate = candidate_for_plant(plant, quote=f"¬{plant['quote']}")
 
-    assert question_utility_score(
-        [candidate], [plant], panel_polarization=1.0, question_count=1
-    ) == 0.0
+    assert (
+        question_utility_score(
+            [candidate], [plant], panel_polarization=1.0, question_count=1
+        )
+        == 0.0
+    )
 
 
 def test_question_reward_requires_matching_planted_target_stances() -> None:
@@ -585,9 +626,12 @@ def test_question_reward_requires_matching_planted_target_stances() -> None:
         "target_stances": wrong_stances,
     }
 
-    assert question_utility_score(
-        [candidate], [plant], panel_polarization=1.0, question_count=1
-    ) == 0.0
+    assert (
+        question_utility_score(
+            [candidate], [plant], panel_polarization=1.0, question_count=1
+        )
+        == 0.0
+    )
 
 
 def test_uniform_or_single_error_stance_vectors_receive_no_credit() -> None:
@@ -602,9 +646,12 @@ def test_uniform_or_single_error_stance_vectors_receive_no_credit() -> None:
 
     for target_stances in (uniform, single_error):
         candidate = candidate_for_plant(plant, target_stances=target_stances)
-        assert question_utility_score(
-            [candidate], [plant], panel_polarization=1.0, question_count=1
-        ) == 0.0
+        assert (
+            question_utility_score(
+                [candidate], [plant], panel_polarization=1.0, question_count=1
+            )
+            == 0.0
+        )
 
 
 def test_question_count_is_strict_for_missing_or_extra_outputs() -> None:
@@ -618,12 +665,16 @@ def test_question_count_is_strict_for_missing_or_extra_outputs() -> None:
         "target_stances": plant["target_stances"],
     }
 
-    assert question_utility_score(
-        [], [plant], panel_polarization=1.0, question_count=1
-    ) == 0.0
-    assert question_utility_score(
-        [candidate, candidate], [plant], panel_polarization=1.0, question_count=1
-    ) == 0.0
+    assert (
+        question_utility_score([], [plant], panel_polarization=1.0, question_count=1)
+        == 0.0
+    )
+    assert (
+        question_utility_score(
+            [candidate, candidate], [plant], panel_polarization=1.0, question_count=1
+        )
+        == 0.0
+    )
 
 
 def test_valid_k_duplicate_questions_are_rejected() -> None:
@@ -631,9 +682,12 @@ def test_valid_k_duplicate_questions_are_rejected() -> None:
     plants = planted_questions_from_row(dict(env.get_eval_dataset()[0]))
     duplicate = candidate_for_plant(plants[0])
 
-    assert question_utility_score(
-        [duplicate, duplicate], plants, panel_polarization=1.0, question_count=2
-    ) == 0.0
+    assert (
+        question_utility_score(
+            [duplicate, duplicate], plants, panel_polarization=1.0, question_count=2
+        )
+        == 0.0
+    )
 
 
 def test_duplicate_question_variants_ignore_ids_quotes_and_stance_predictions() -> None:
@@ -653,12 +707,15 @@ def test_duplicate_question_variants_ignore_ids_quotes_and_stance_predictions() 
         "target_stances": altered_stances,
     }
 
-    assert question_utility_score(
-        [duplicate, disguised_duplicate],
-        plants,
-        panel_polarization=1.0,
-        question_count=2,
-    ) == 0.0
+    assert (
+        question_utility_score(
+            [duplicate, disguised_duplicate],
+            plants,
+            panel_polarization=1.0,
+            question_count=2,
+        )
+        == 0.0
+    )
 
 
 def test_semantic_operators_remain_distinct_during_duplicate_detection() -> None:
@@ -683,12 +740,15 @@ def test_semantic_operators_remain_distinct_during_duplicate_detection() -> None
     ]
     candidates = [candidate_for_plant(plant) for plant in plants]
 
-    assert question_utility_score(
-        candidates,
-        plants,
-        panel_polarization=1.0,
-        question_count=2,
-    ) > 0.0
+    assert (
+        question_utility_score(
+            candidates,
+            plants,
+            panel_polarization=1.0,
+            question_count=2,
+        )
+        > 0.0
+    )
 
 
 @pytest.mark.parametrize(
@@ -710,12 +770,15 @@ def test_semantic_expression_operands_and_order_must_match(question: str) -> Non
         "document_text": "Approval requires threshold >= 5.",
     }
 
-    assert question_utility_score(
-        [candidate_for_plant(plant, question=question)],
-        [plant],
-        panel_polarization=1.0,
-        question_count=1,
-    ) == 0.0
+    assert (
+        question_utility_score(
+            [candidate_for_plant(plant, question=question)],
+            [plant],
+            panel_polarization=1.0,
+            question_count=1,
+        )
+        == 0.0
+    )
 
 
 def test_cross_plant_quote_swaps_receive_no_question_credit() -> None:
@@ -747,12 +810,15 @@ def test_cross_plant_quote_swaps_receive_no_question_credit() -> None:
         candidate_for_plant(plants[1], quote=plants[0]["quote"]),
     ]
 
-    assert question_utility_score(
-        swapped,
-        plants,
-        panel_polarization=1.0,
-        question_count=2,
-    ) == 0.0
+    assert (
+        question_utility_score(
+            swapped,
+            plants,
+            panel_polarization=1.0,
+            question_count=2,
+        )
+        == 0.0
+    )
 
 
 def test_appended_composite_clause_receives_no_question_credit() -> None:
@@ -760,12 +826,15 @@ def test_appended_composite_clause_receives_no_question_credit() -> None:
     plant = planted_questions_from_row(dict(env.get_eval_dataset()[0]))[0]
     question = plant["question"].removesuffix("?") + " and abolish all rules?"
 
-    assert question_utility_score(
-        [candidate_for_plant(plant, question=question)],
-        [plant],
-        panel_polarization=1.0,
-        question_count=1,
-    ) == 0.0
+    assert (
+        question_utility_score(
+            [candidate_for_plant(plant, question=question)],
+            [plant],
+            panel_polarization=1.0,
+            question_count=1,
+        )
+        == 0.0
+    )
 
 
 @pytest.mark.parametrize(
@@ -783,24 +852,30 @@ def test_semantic_substitutions_and_composites_receive_no_question_credit(
     env = load_environment(task="elicit-ask", question_count=1)
     plant = planted_questions_from_row(dict(env.get_eval_dataset()[0]))[0]
 
-    assert question_utility_score(
-        [candidate_for_plant(plant, question=question)],
-        [plant],
-        panel_polarization=1.0,
-        question_count=1,
-    ) == 0.0
+    assert (
+        question_utility_score(
+            [candidate_for_plant(plant, question=question)],
+            [plant],
+            panel_polarization=1.0,
+            question_count=1,
+        )
+        == 0.0
+    )
 
 
 def test_explicit_generator_authored_question_alias_receives_credit() -> None:
     env = load_environment(task="elicit-ask", question_count=1)
     plant = planted_questions_from_row(dict(env.get_eval_dataset()[0]))[0]
 
-    assert question_utility_score(
-        [candidate_for_plant(plant, question=plant["question_aliases"][0])],
-        [plant],
-        panel_polarization=1.0,
-        question_count=1,
-    ) > 0.0
+    assert (
+        question_utility_score(
+            [candidate_for_plant(plant, question=plant["question_aliases"][0])],
+            [plant],
+            panel_polarization=1.0,
+            question_count=1,
+        )
+        > 0.0
+    )
 
 
 @pytest.mark.parametrize(
@@ -814,12 +889,15 @@ def test_unlisted_question_paraphrases_receive_zero(question: str) -> None:
     env = load_environment(task="elicit-ask", question_count=1)
     plant = planted_questions_from_row(dict(env.get_eval_dataset()[0]))[0]
 
-    assert question_utility_score(
-        [candidate_for_plant(plant, question=question)],
-        [plant],
-        panel_polarization=1.0,
-        question_count=1,
-    ) == 0.0
+    assert (
+        question_utility_score(
+            [candidate_for_plant(plant, question=question)],
+            [plant],
+            panel_polarization=1.0,
+            question_count=1,
+        )
+        == 0.0
+    )
 
 
 def test_canonical_and_authored_alias_duplicate_zero_the_whole_response() -> None:
@@ -831,12 +909,15 @@ def test_canonical_and_authored_alias_duplicate_zero_the_whole_response() -> Non
         question=plants[0]["question_aliases"][0],
     )
 
-    assert question_utility_score(
-        [canonical, alias],
-        plants,
-        panel_polarization=1.0,
-        question_count=2,
-    ) == 0.0
+    assert (
+        question_utility_score(
+            [canonical, alias],
+            plants,
+            panel_polarization=1.0,
+            question_count=2,
+        )
+        == 0.0
+    )
 
 
 def test_alias_duplicate_rejection_ignores_claimed_grounding_and_stances() -> None:
@@ -848,12 +929,15 @@ def test_alias_duplicate_rejection_ignores_claimed_grounding_and_stances() -> No
         "question": plants[0]["question_aliases"][0],
     }
 
-    assert question_utility_score(
-        [canonical, disguised_alias],
-        plants,
-        panel_polarization=1.0,
-        question_count=2,
-    ) == 0.0
+    assert (
+        question_utility_score(
+            [canonical, disguised_alias],
+            plants,
+            panel_polarization=1.0,
+            question_count=2,
+        )
+        == 0.0
+    )
 
 
 def test_compatibility_lookalike_quote_cannot_match_planted_anchor() -> None:
@@ -867,12 +951,15 @@ def test_compatibility_lookalike_quote_cannot_match_planted_anchor() -> None:
         "document_text": "Set threshold to 25. Set threshold to 2⁵.",
     }
 
-    assert question_utility_score(
-        [candidate_for_plant(plant, quote="Set threshold to 2⁵.")],
-        [plant],
-        panel_polarization=1.0,
-        question_count=1,
-    ) == 0.0
+    assert (
+        question_utility_score(
+            [candidate_for_plant(plant, quote="Set threshold to 2⁵.")],
+            [plant],
+            panel_polarization=1.0,
+            question_count=1,
+        )
+        == 0.0
+    )
 
 
 def test_one_composite_question_cannot_claim_two_plants() -> None:
@@ -888,9 +975,12 @@ def test_one_composite_question_cannot_claim_two_plants() -> None:
         "target_stances": radio_plants[0]["target_stances"],
     }
 
-    assert question_utility_score(
-        [composite], radio_plants, panel_polarization=1.0, question_count=1
-    ) == 0.0
+    assert (
+        question_utility_score(
+            [composite], radio_plants, panel_polarization=1.0, question_count=1
+        )
+        == 0.0
+    )
 
 
 def test_composite_detection_ignores_claimed_grounding_and_stance_vector() -> None:
@@ -906,9 +996,12 @@ def test_composite_detection_ignores_claimed_grounding_and_stance_vector() -> No
         "target_stances": first["target_stances"],
     }
 
-    assert question_utility_score(
-        [composite], plants, panel_polarization=1.0, question_count=1
-    ) == 0.0
+    assert (
+        question_utility_score(
+            [composite], plants, panel_polarization=1.0, question_count=1
+        )
+        == 0.0
+    )
 
 
 def test_ask_task_rejects_find_task_combined_root() -> None:
@@ -1134,7 +1227,9 @@ def test_duplicate_candidate_is_counted_as_false_positive() -> None:
 
 
 def test_quote_overlap_normalizes_unicode_case_and_punctuation() -> None:
-    overlap = normalized_quote_overlap("CAFÉ—requests: promptly!", "café requests promptly")
+    overlap = normalized_quote_overlap(
+        "CAFÉ—requests: promptly!", "café requests promptly"
+    )
 
     assert overlap == 1.0
 
@@ -1232,9 +1327,7 @@ def test_parser_or_strict_schema_failures_score_zero(content: str) -> None:
 def test_strict_schema_failure_scores_zero_even_with_empty_answer_key() -> None:
     completion = [{"role": "assistant", "content": '{"findings":"invalid"}'}]
 
-    score = asyncio.run(
-        finding_f1(completion, {"findings": []}, ElicitJsonParser())
-    )
+    score = asyncio.run(finding_f1(completion, {"findings": []}, ElicitJsonParser()))
 
     assert score == 0
 
@@ -1242,9 +1335,7 @@ def test_strict_schema_failure_scores_zero_even_with_empty_answer_key() -> None:
 def test_empty_findings_and_empty_answer_key_score_zero() -> None:
     completion = [{"role": "assistant", "content": '{"findings":[]}'}]
 
-    score = asyncio.run(
-        finding_f1(completion, {"findings": []}, ElicitJsonParser())
-    )
+    score = asyncio.run(finding_f1(completion, {"findings": []}, ElicitJsonParser()))
 
     assert score == 0
 
@@ -1360,9 +1451,7 @@ def test_loader_filters_individual_plant_free_rows() -> None:
     env = load_environment(docs_count=1)
 
     assert 0 < len(env.get_eval_dataset()) <= 4
-    assert all(
-        json.loads(row["answer"])["findings"] for row in env.get_eval_dataset()
-    )
+    assert all(json.loads(row["answer"])["findings"] for row in env.get_eval_dataset())
 
 
 def test_distractor_density_removes_hidden_near_miss_passages() -> None:
@@ -1383,7 +1472,9 @@ def test_distractor_density_removes_hidden_near_miss_passages() -> None:
         distractor_density=0.0,
     )
     all_text = " ".join(document["text"] for document in all_documents)
-    no_distractor_text = " ".join(document["text"] for document in no_distractor_documents)
+    no_distractor_text = " ".join(
+        document["text"] for document in no_distractor_documents
+    )
 
     for distractor in scenario["distractors"]:
         assert distractor["anchor_quote"] in all_text
@@ -1417,11 +1508,7 @@ def score_row(
     row: dict[str, Any],
     response: dict[str, Any],
 ) -> dict[str, Any]:
-    task = {
-        key: row[key]
-        for key in CANONICAL_TASK_COLUMNS
-        if key in row
-    }
+    task = {key: row[key] for key in CANONICAL_TASK_COLUMNS if key in row}
     state = State.for_task(task)
     state["completion"] = [
         {"role": "assistant", "content": json.dumps(response, sort_keys=True)}

@@ -3,7 +3,8 @@
 Standalone workspace for Common Ground deliberation and collective-preference
 evaluation environments. The initial release packages two independent Prime
 Intellect Environments Hub IDs through the Verifiers interface:
-`commonground-predict` estimates held-out deliberation votes, while
+`commonground-predict` estimates held-out stakeholder votes on company
+AI-deployment policies, while
 `commonground-elicit` finds planted policy problems and raises the questions
 that expose latent faction disagreement. They are one program with shared data
 and scoring packages, but separate environments because their rubrics are not
@@ -20,8 +21,9 @@ interchangeable.
 
 ## Data Provenance
 
-v0 ships synthetic data only. `commonground-predict` uses seeded synthetic vote
-snapshots and an operator-authored synthetic Context Engine demo corpus.
+v0 ships synthetic data only. `commonground-predict` uses seeded synthetic
+enterprise AI-policy vote snapshots and an operator-authored synthetic Context
+Engine demo corpus.
 `commonground-elicit` is synthetic by design: committed templates plant known
 ambiguities, contradictions, and gaps in fictional policy documents so the
 environment has deterministic ground truth for both finding and question
@@ -75,6 +77,27 @@ Common Ground vote statistics follow open-source Polis math conventions. Polis
 methodology is attributed to the Computational Democracy Project and the broader
 Polis open-source community.
 
+## Baseline Sweep
+
+The checked-in eval config runs both bundled eval splits at three rollouts per
+example. Supply the model on each invocation so results remain separated by the
+saved Prime/Verifiers run metadata:
+
+```bash
+for M in <models>; do
+  prime eval run configs/eval/baseline-sweep.toml -m "$M" --skip-upload
+done
+```
+
+After every requested run is complete, render a deterministic, README-ready
+table from the saved results. An incomplete run is an error and produces no
+partial baseline table:
+
+```bash
+uv run python scripts/aggregate_baselines.py
+uv run python scripts/aggregate_baselines.py --csv /path/to/baselines.csv
+```
+
 ## The `commonground` family
 
 `commonground` is an environment family, not a one-off. v0 ships
@@ -98,3 +121,7 @@ real-human data only after its provenance has been verified.
 
 Live data source: [contextengine.sh](https://contextengine.sh) ·
 [Context Engine repository](https://github.com/AgalmicSoftware/context-engine)
+
+## License
+
+Licensed under the [Apache License 2.0](LICENSE).

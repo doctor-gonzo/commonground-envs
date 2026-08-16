@@ -36,7 +36,9 @@ def test_typescript_parity_fixtures() -> None:
 
 
 def test_fixture_loader_rejects_bare_non_finite_tokens() -> None:
-    fixture_blob = '{"function": "prop_test", "cases": [{"args": [NaN], "expected": 0}]}'
+    fixture_blob = (
+        '{"function": "prop_test", "cases": [{"args": [NaN], "expected": 0}]}'
+    )
 
     with pytest.raises(ValueError, match="NaN"):
         _load_fixture_blob(fixture_blob)
@@ -93,6 +95,5 @@ def _assert_close(
         )
         return
     assert actual == expected, (
-        f"{fixture_path.name} case {case_index}: expected {expected!r}, "
-        f"got {actual!r}"
+        f"{fixture_path.name} case {case_index}: expected {expected!r}, got {actual!r}"
     )

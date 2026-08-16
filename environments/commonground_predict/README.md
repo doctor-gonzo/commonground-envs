@@ -1,8 +1,9 @@
 # commonground-predict
 
 `commonground-predict` is a deterministic Verifiers `SingleTurnEnv` for
-predicting held-out votes in deliberation snapshots. It has no judge model: the
-rubric compares strict JSON predictions against masked ground truth.
+predicting held-out stakeholder votes on company AI-deployment policies. It has
+no judge model: the rubric compares strict JSON predictions against masked
+ground truth.
 
 ## Dataset Card
 
@@ -21,7 +22,8 @@ Each source line is a JSON session snapshot:
 
 Bundled splits:
 
-- `commonground_predict/data/eval_synthetic.jsonl`: 20 seeded synthetic snapshots with coherent
+- `commonground_predict/data/eval_synthetic.jsonl`: 20 seeded synthetic
+  snapshots of fictional enterprise AI-assistant policy votes, with coherent
   planted clusters plus noise (`meta.synthetic: true`).
 - `commonground_predict/data/eval_ce_demo.jsonl`: one operator-authored
   synthetic [Context Engine](https://github.com/AgalmicSoftware/context-engine)
@@ -114,17 +116,23 @@ The rubric uses:
 - `vote_accuracy`, weight `1.0`: exact-match fraction over held-out cells.
 - `brier`, weight `0.0`: logged multiclass Brier metric only.
 
-For the bundled synthetic split with its pre-baked masks, naive floors are
-always-agree `0.425`, per-statement visible-majority `0.494`, and per-snapshot
-best-constant oracle `0.525`. A real model should exceed these floors; see
-Baselines below.
+For the bundled synthetic split with its pre-baked masks, the floor script was
+rerun after the AI-policy statement-bank regeneration and printed:
+
+| Baseline | vote_accuracy |
+| --- | ---: |
+| Always agree | 0.425 |
+| Per-statement visible majority | 0.494 |
+| Per-snapshot best constant oracle | 0.525 |
+
+A real model should exceed these floors; see Baselines below.
 
 ## Baselines
 
-Runs use `prime eval run commonground-predict -m <model> -n 20 -r 3` on the
-bundled synthetic split with its pre-baked masks. Naive floors for reference:
-always-agree `0.425`, visible-majority `0.494`, per-snapshot best-constant
-oracle `0.525`.
+Runs use the repository's multi-environment baseline sweep on the bundled
+synthetic split with its pre-baked masks. See the
+[operator commands](../../README.md#baseline-sweep). The naive floors are the
+recomputed values in [Scoring](#scoring).
 
 | Model | vote_accuracy (mean±std) | brier (mean) |
 | --- | --- | --- |

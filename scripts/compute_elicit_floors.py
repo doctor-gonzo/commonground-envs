@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from collections.abc import Mapping, Sequence
 import json
-from pathlib import Path
 import random
 import re
+from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Any
 
 from commonground_elicit.environment import (
@@ -18,7 +18,6 @@ from commonground_elicit.environment import (
     question_utility,
 )
 from commonground_scenarios import validate_scenario
-
 
 QUESTION_COUNT = 3
 FINDING_BUDGET = 3
@@ -53,7 +52,9 @@ def load_scenarios(path: Path) -> list[dict[str, Any]]:
             scenario = json.loads(line)
             validate_scenario(scenario)
         except (json.JSONDecodeError, TypeError, ValueError) as error:
-            raise ValueError(f"invalid scenario at {path}:{line_number}: {error}") from error
+            raise ValueError(
+                f"invalid scenario at {path}:{line_number}: {error}"
+            ) from error
         scenarios.append(scenario)
     if not scenarios:
         raise ValueError(f"no scenarios loaded from {path}")
@@ -163,9 +164,7 @@ def randomly_targeted_questions(
     ]
     rng.shuffle(visible_spans)
     questions: list[dict[str, Any]] = []
-    for question_index, (doc_id, quote) in enumerate(
-        visible_spans[:question_count]
-    ):
+    for question_index, (doc_id, quote) in enumerate(visible_spans[:question_count]):
         questions.append(
             {
                 "doc_id": doc_id,
@@ -235,11 +234,7 @@ def compute_elicit_floors(path: Path = BUNDLED_EVAL_PATH) -> dict[str, float]:
             asyncio.run(
                 finding_f1(
                     completion_for(
-                        {
-                            "findings": random_span_findings(
-                                documents, random_find_rng
-                            )
-                        }
+                        {"findings": random_span_findings(documents, random_find_rng)}
                     ),
                     answer,
                     ElicitJsonParser(),
@@ -249,9 +244,7 @@ def compute_elicit_floors(path: Path = BUNDLED_EVAL_PATH) -> dict[str, float]:
         totals["find/vague-sounding"] += float(
             asyncio.run(
                 finding_f1(
-                    completion_for(
-                        {"findings": vague_sounding_findings(documents)}
-                    ),
+                    completion_for({"findings": vague_sounding_findings(documents)}),
                     answer,
                     ElicitJsonParser(),
                 )
@@ -294,7 +287,11 @@ def compute_elicit_floors(path: Path = BUNDLED_EVAL_PATH) -> dict[str, float]:
 
 
 def split_sentences(text: str) -> list[str]:
-    return [sentence.strip() for sentence in _SENTENCE_BOUNDARY.split(text) if sentence.strip()]
+    return [
+        sentence.strip()
+        for sentence in _SENTENCE_BOUNDARY.split(text)
+        if sentence.strip()
+    ]
 
 
 def completion_for(response: Mapping[str, Any]) -> list[dict[str, str]]:
