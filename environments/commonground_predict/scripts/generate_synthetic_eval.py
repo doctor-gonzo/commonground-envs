@@ -55,6 +55,15 @@ def main() -> None:
 
 
 def make_snapshot(rng: random.Random, session_index: int) -> dict:
+    snapshot, _ = make_snapshot_with_cluster_patterns(rng, session_index)
+    return snapshot
+
+
+def make_snapshot_with_cluster_patterns(
+    rng: random.Random, session_index: int
+) -> tuple[dict, list[list[int]]]:
+    """Build a snapshot and return its hidden planted cluster patterns."""
+
     cluster_count = rng.choice([2, 3])
     participant_count = rng.randint(cluster_count * K_ANONYMITY, 20)
     statement_count = rng.randint(6, 15)
@@ -76,7 +85,7 @@ def make_snapshot(rng: random.Random, session_index: int) -> dict:
         ][statement_index]
         votes[participant_index][statement_index] = None
 
-    return {
+    snapshot = {
         "session_id": f"synthetic-session-{session_index:03d}",
         "statements": statements,
         "participants": participants,
@@ -90,6 +99,7 @@ def make_snapshot(rng: random.Random, session_index: int) -> dict:
             "synthetic": True,
         },
     }
+    return snapshot, cluster_patterns
 
 
 def balanced_clusters(
