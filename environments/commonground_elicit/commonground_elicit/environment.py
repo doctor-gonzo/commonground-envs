@@ -186,12 +186,25 @@ def _scenario_rows(
     return [
         row
         for row in candidate_rows
-        if json.loads(row["planted_items"])
-        and (
-            task != "elicit-ask"
-            or len(json.loads(row["planted_questions"])) >= question_count
+        if _row_has_required_plants(
+            row,
+            task=task,
+            question_count=question_count,
         )
     ]
+
+
+def _row_has_required_plants(
+    row: Mapping[str, Any], *, task: str, question_count: int
+) -> bool:
+    """Check plant availability through the canonical hidden answer payload."""
+
+    answer = json.loads(str(row["answer"]))
+    findings = answer.get("findings", [])
+    questions = answer.get("questions", [])
+    if task == "elicit-ask":
+        return bool(questions) and len(questions) >= question_count
+    return bool(findings)
 
 
 def scenario_to_row(
@@ -224,9 +237,8 @@ def scenario_to_row(
         }
         for plant in visible_plants
     ]
-    planted_questions = [
+    question_oracle = [
         {
-            "plant_id": plant["plant_id"],
             "doc_id": plant["doc_id"],
             "quote": plant["anchor_quote"],
             "question": plant["canonical_question"],
@@ -240,19 +252,10 @@ def scenario_to_row(
         }
         for plant in visible_plants
     ]
-    question_answer = [
-        {
-            "doc_id": plant["doc_id"],
-            "quote": plant["anchor_quote"],
-            "question": plant["canonical_question"],
-            "target_stances": dict(plant["target_stances"]),
-        }
-        for plant in visible_plants[:effective_question_count]
-    ]
     answer = (
-        {"questions": question_answer}
+        {"questions": question_oracle}
         if task == "elicit-ask"
-        else {"findings": findings_answer, "questions": question_answer}
+        else {"findings": findings_answer, "questions": question_oracle}
     )
     info = {
         "scenario_id": scenario["scenario_id"],
@@ -261,6 +264,9 @@ def scenario_to_row(
         "task_label": task,
         "synthetic": bool(scenario["provenance"]["synthetic"]),
         "template_set": scenario["provenance"]["template_set"],
+        "panel_polarization": panel_polarization,
+        "question_count": effective_question_count,
+        "allow_combined_questions": task == "find",
     }
     return {
         "prompt": [
@@ -280,11 +286,6 @@ def scenario_to_row(
             }
         ],
         "answer": json.dumps(answer, sort_keys=True),
-        "planted_items": json.dumps(findings_answer, sort_keys=True),
-        "planted_questions": json.dumps(planted_questions, sort_keys=True),
-        "panel_polarization": panel_polarization,
-        "question_count": effective_question_count,
-        "allow_combined_questions": task == "find",
         "info": json.dumps(info, sort_keys=True),
     }
 
@@ -459,26 +460,29 @@ def render_ask_prompt(
 
 async def question_utility(
     completion: list[dict[str, Any]],
-    planted_questions: Sequence[Mapping[str, Any]] | str,
-    panel_polarization: float,
-    question_count: int,
+    answer: Mapping[str, Any] | str,
+    info: Mapping[str, Any] | str,
     parser: ElicitJsonParser,
-    allow_combined_questions: bool = False,
 ) -> float:
     """Reward questions that match planted issues and their specific faction split."""
 
+    answer_payload = _parse_mapping_payload(answer)
+    info_payload = _parse_mapping_payload(info)
     parsed = parser.parse_answer(completion)
     candidates = parse_candidate_questions(
-        parsed, allow_findings=allow_combined_questions
+        parsed,
+        allow_findings=bool(info_payload.get("allow_combined_questions", False)),
     )
     if candidates is None:
         return 0.0
-    planted = json.loads(planted_questions) if isinstance(planted_questions, str) else planted_questions
+    planted = answer_payload.get("questions", [])
+    if not isinstance(planted, Sequence) or isinstance(planted, str):
+        return 0.0
     return question_utility_score(
         candidates,
         planted,
-        panel_polarization=panel_polarization,
-        question_count=question_count,
+        panel_polarization=float(info_payload.get("panel_polarization", 0.0)),
+        question_count=int(info_payload.get("question_count", 0)),
     )
 
 
@@ -645,7 +649,7 @@ def _normalized_text(text: str) -> str:
 
 async def finding_f1(
     completion: list[dict[str, Any]],
-    planted_items: Sequence[Mapping[str, str]] | str,
+    answer: Mapping[str, Any] | str,
     parser: ElicitJsonParser,
 ) -> float:
     """Reward strict finding output by one-to-one planted-item F1."""
@@ -654,8 +658,19 @@ async def finding_f1(
     candidates = parse_candidate_findings(parsed)
     if candidates is None:
         return 0.0
-    planted = parse_planted_items(planted_items)
+    answer_payload = _parse_mapping_payload(answer)
+    planted = parse_planted_items(answer_payload.get("findings", []))
     return match_findings(candidates, planted)["f1"]
+
+
+def _parse_mapping_payload(payload: Mapping[str, Any] | str) -> Mapping[str, Any]:
+    """Decode a canonical answer/info payload into a mapping for scoring."""
+
+    try:
+        loaded = json.loads(payload) if isinstance(payload, str) else payload
+    except (json.JSONDecodeError, TypeError):
+        return {}
+    return loaded if isinstance(loaded, Mapping) else {}
 
 
 def parse_candidate_findings(parsed: Any) -> list[dict[str, str]] | None:

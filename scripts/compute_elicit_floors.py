@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 from collections.abc import Mapping, Sequence
 import json
 from pathlib import Path
@@ -12,8 +13,9 @@ from typing import Any
 
 from commonground_elicit.environment import (
     BUNDLED_EVAL_PATH,
-    match_findings,
-    question_utility_score,
+    ElicitJsonParser,
+    finding_f1,
+    question_utility,
 )
 from commonground_scenarios import validate_scenario
 
@@ -210,7 +212,6 @@ def compute_elicit_floors(path: Path = BUNDLED_EVAL_PATH) -> dict[str, float]:
         }
         planted_questions = [
             {
-                "plant_id": str(plant["plant_id"]),
                 "doc_id": str(plant["doc_id"]),
                 "quote": str(plant["anchor_quote"]),
                 "question": str(plant["canonical_question"]),
@@ -220,45 +221,89 @@ def compute_elicit_floors(path: Path = BUNDLED_EVAL_PATH) -> dict[str, float]:
             }
             for plant in scenario["planted_items"]
         ]
+        answer = {
+            "findings": planted_findings,
+            "questions": planted_questions,
+        }
+        info = {
+            "panel_polarization": 1.0,
+            "question_count": QUESTION_COUNT,
+            "allow_combined_questions": False,
+        }
 
         totals["find/random-span"] += float(
-            match_findings(
-                random_span_findings(documents, random_find_rng),
-                planted_findings,
-            )["f1"]
+            asyncio.run(
+                finding_f1(
+                    completion_for(
+                        {
+                            "findings": random_span_findings(
+                                documents, random_find_rng
+                            )
+                        }
+                    ),
+                    answer,
+                    ElicitJsonParser(),
+                )
+            )
         )
         totals["find/vague-sounding"] += float(
-            match_findings(
-                vague_sounding_findings(documents),
-                planted_findings,
-            )["f1"]
+            asyncio.run(
+                finding_f1(
+                    completion_for(
+                        {"findings": vague_sounding_findings(documents)}
+                    ),
+                    answer,
+                    ElicitJsonParser(),
+                )
+            )
         )
-        totals["elicit-ask/template-question"] += question_utility_score(
-            template_questions(
-                documents,
-                factions,
-                question_count=QUESTION_COUNT,
-            ),
-            planted_questions,
-            panel_polarization=1.0,
-            question_count=QUESTION_COUNT,
+        totals["elicit-ask/template-question"] += asyncio.run(
+            question_utility(
+                completion_for(
+                    {
+                        "questions": template_questions(
+                            documents,
+                            factions,
+                            question_count=QUESTION_COUNT,
+                        )
+                    }
+                ),
+                answer,
+                info,
+                ElicitJsonParser("questions"),
+            )
         )
-        totals["elicit-ask/randomly-targeted"] += question_utility_score(
-            randomly_targeted_questions(
-                documents,
-                factions,
-                random_ask_rng,
-                question_count=QUESTION_COUNT,
-            ),
-            planted_questions,
-            panel_polarization=1.0,
-            question_count=QUESTION_COUNT,
+        totals["elicit-ask/randomly-targeted"] += asyncio.run(
+            question_utility(
+                completion_for(
+                    {
+                        "questions": randomly_targeted_questions(
+                            documents,
+                            factions,
+                            random_ask_rng,
+                            question_count=QUESTION_COUNT,
+                        )
+                    }
+                ),
+                answer,
+                info,
+                ElicitJsonParser("questions"),
+            )
         )
     return {name: total / len(scenarios) for name, total in totals.items()}
 
 
 def split_sentences(text: str) -> list[str]:
     return [sentence.strip() for sentence in _SENTENCE_BOUNDARY.split(text) if sentence.strip()]
+
+
+def completion_for(response: Mapping[str, Any]) -> list[dict[str, str]]:
+    return [
+        {
+            "role": "assistant",
+            "content": json.dumps(response, sort_keys=True),
+        }
+    ]
 
 
 def render_markdown(floors: Mapping[str, float]) -> str:

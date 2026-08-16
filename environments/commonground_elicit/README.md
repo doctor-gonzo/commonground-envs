@@ -36,6 +36,13 @@ loading, and scoring do not use the network, wall clock, or a judge model. On
 the find task, a row with fewer visible plants caps its logged companion
 question count to the visible answer-key size.
 
+Rendered Verifiers rows use only the canonical `prompt`, `answer`, `info`, and
+`example_id` columns. The hidden `answer` JSON carries the planted findings and
+question oracle; `info` carries the effective question count, panel
+polarization, and combined-question mode used by scoring. Prompts are rendered
+only from the visible documents and public faction descriptions, never from
+either hidden scoring payload.
+
 ## Bundled splits and floors
 
 `commonground_elicit/data/train_synthetic.jsonl` uses the committed training
