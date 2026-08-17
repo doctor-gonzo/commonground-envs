@@ -67,8 +67,8 @@ def test_bundled_splits_are_synthetic_and_template_separated() -> None:
         scenario["provenance"]["template_id"] for scenario in heldout
     }
 
-    assert len(train) == 8
-    assert len(heldout) == 4
+    assert len(train) == 40
+    assert len(heldout) == 20
     assert train_template_ids == {
         template.template_id for template in generator.TRAIN_TEMPLATES
     }
@@ -118,7 +118,7 @@ def test_compute_elicit_floors_reproduces_published_values() -> None:
     computed = floors.compute_elicit_floors(EVAL_SPLIT)
 
     assert computed == {
-        "find/random-span": 1 / 6,
+        "find/random-span": 3 / 20,
         "find/vague-sounding": 0.5,
         "elicit-ask/template-question": 0.0,
         "elicit-ask/randomly-targeted": 0.0,
@@ -127,7 +127,7 @@ def test_compute_elicit_floors_reproduces_published_values() -> None:
         [
             "| Task | Baseline | mean reward |",
             "| --- | --- | ---: |",
-            "| find | Random visible spans | 0.167 |",
+            "| find | Random visible spans | 0.150 |",
             "| find | Flag vague-sounding spans | 0.500 |",
             "| elicit-ask | Template clarity questions | 0.000 |",
             "| elicit-ask | Randomly targeted questions | 0.000 |",

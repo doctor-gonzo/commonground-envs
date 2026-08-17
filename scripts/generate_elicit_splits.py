@@ -21,7 +21,7 @@ DEFAULT_OUTPUT_DIR = (
 GENERATED_AT = "2026-08-15"
 TRAIN_SEED_BASE = 8100
 EVAL_SEED_BASE = 8200
-REPETITIONS_PER_TEMPLATE = 2
+SCENARIOS_PER_TEMPLATE = 10
 
 
 def build_split_bytes(
@@ -41,7 +41,7 @@ def build_split_bytes(
             )
         )
         for template_index, template in enumerate(templates)
-        for repetition in range(REPETITIONS_PER_TEMPLATE)
+        for repetition in range(SCENARIOS_PER_TEMPLATE)
     )
 
 

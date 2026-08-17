@@ -19,10 +19,15 @@ documents and public faction descriptions but not the answer key or priors.
 
 ## Split separation
 
-`train_synthetic.jsonl` is generated only from template set A.
-`eval_synthetic_heldout.jsonl` is generated only from template set B. The sets
-use disjoint template IDs, sectors, document styles, and planting patterns.
-Tests regenerate both files byte-for-byte and verify that separation.
+| Split | Scenarios | Template set |
+| --- | ---: | --- |
+| `train_synthetic.jsonl` | 40 | A (training) |
+| `eval_synthetic_heldout.jsonl` | 20 | B (held out) |
+
+The sets use disjoint template IDs, sectors, document styles, and planting
+patterns. Each template produces ten scenarios from fixed, non-overlapping
+seed ranges. Tests regenerate both files byte-for-byte and verify that
+separation.
 
 ## Model-free floors
 
@@ -32,7 +37,7 @@ separate step. Running `uv run python scripts/compute_elicit_floors.py` prints:
 
 | Task | Baseline | mean reward |
 | --- | --- | ---: |
-| find | Random visible spans | 0.167 |
+| find | Random visible spans | 0.150 |
 | find | Flag vague-sounding spans | 0.500 |
 | elicit-ask | Template clarity questions | 0.000 |
 | elicit-ask | Randomly targeted questions | 0.000 |

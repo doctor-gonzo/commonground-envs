@@ -90,11 +90,25 @@ done
 ```
 
 After every requested run is complete, render a deterministic, README-ready
-table from the saved results. An incomplete run is an error and produces no
-partial baseline table:
+table from the saved results. Direct `vf-eval` invocations must include
+`--save-results`; without it, Verifiers 0.1.14 creates log-only run directories
+that contain no rewards to aggregate. For example:
+
+```bash
+for M in <models>; do
+  uv run vf-eval commonground-predict -m "$M" -n 20 -r 3 --save-results
+  uv run vf-eval commonground-elicit -m "$M" -n 20 -r 3 --save-results
+done
+```
+
+By default the aggregator selects the newest complete run for each environment
+and model using the `metadata.json` file timestamp, and prints every selected
+run ID in the table. An incomplete run is an error and produces no partial
+baseline table. Use `--all-runs` only when comparing historical runs:
 
 ```bash
 uv run python scripts/aggregate_baselines.py
+uv run python scripts/aggregate_baselines.py --all-runs
 uv run python scripts/aggregate_baselines.py --csv /path/to/baselines.csv
 ```
 

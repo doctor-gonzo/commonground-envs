@@ -17,8 +17,8 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_OUTPUTS_GLOB = "environments/*/outputs/evals/**/results.jsonl"
-METRIC_NAMES = ("brier", "finding_f1", "question_utility")
+DEFAULT_RUN_DIRS_GLOB = "environments/*/outputs/evals/*/*"
+METRIC_NAMES = ("vote_accuracy", "brier", "finding_f1", "question_utility")
 
 
 class InvalidRunError(ValueError):
@@ -29,6 +29,7 @@ class InvalidRunError(ValueError):
 class Summary:
     model: str
     environment: str
+    run_id: str
     rollout_count: int
     reward_mean: float
     reward_std: float
@@ -39,6 +40,8 @@ class Summary:
 class CompleteRun:
     model: str
     environment: str
+    run_id: str
+    metadata_timestamp_ns: int
     rewards: tuple[float, ...]
     metrics: Mapping[str, tuple[float, ...]]
 
@@ -58,53 +61,102 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         type=Path,
         help="Also write machine-readable summary rows to this CSV path.",
     )
+    parser.add_argument(
+        "--all-runs",
+        action="store_true",
+        help="Include every complete run instead of only the newest env/model pair.",
+    )
     return parser.parse_args(argv)
 
 
-def load_summaries(root: Path) -> list[Summary]:
-    result_paths = sorted(
-        root.glob(DEFAULT_OUTPUTS_GLOB), key=lambda path: path.as_posix()
+def discover_result_paths(root: Path) -> list[Path]:
+    """Find saved results and diagnose vf-eval's log-only default."""
+
+    run_dirs = sorted(
+        (path for path in root.glob(DEFAULT_RUN_DIRS_GLOB) if path.is_dir()),
+        key=lambda path: path.as_posix(),
     )
+    result_paths: list[Path] = []
+    partial_run_dirs: list[Path] = []
+    log_only_run_dirs: list[Path] = []
+    for run_dir in run_dirs:
+        metadata_path = run_dir / "metadata.json"
+        result_path = run_dir / "results.jsonl"
+        has_metadata = metadata_path.is_file()
+        has_results = result_path.is_file()
+        if has_metadata and has_results:
+            result_paths.append(result_path)
+        elif has_metadata or has_results:
+            partial_run_dirs.append(run_dir)
+        elif any(run_dir.glob("*.log")):
+            log_only_run_dirs.append(run_dir)
+
+    if partial_run_dirs:
+        rendered = ", ".join(path.as_posix() for path in partial_run_dirs)
+        raise InvalidRunError(f"partially saved eval run(s): {rendered}")
     if not result_paths:
-        raise InvalidRunError(
-            f"no saved eval results found under {root / 'environments'}"
+        message = f"no saved eval results found under {root / 'environments'}"
+        if log_only_run_dirs:
+            message += (
+                f"; found {len(log_only_run_dirs)} log-only run dir(s). "
+                "vf-eval requires --save-results to write metadata.json and "
+                "results.jsonl"
+            )
+        raise InvalidRunError(message)
+    return result_paths
+
+
+def load_summaries(root: Path, *, all_runs: bool = False) -> list[Summary]:
+    result_paths = discover_result_paths(root)
+    runs = [load_complete_run(result_path) for result_path in result_paths]
+    selected_runs = runs if all_runs else newest_runs(runs)
+
+    return [
+        summarize_run(run)
+        for run in sorted(
+            selected_runs,
+            key=lambda run: (
+                run.model.casefold(),
+                run.environment,
+                run.metadata_timestamp_ns,
+                run.run_id,
+            ),
         )
+    ]
 
-    grouped: dict[tuple[str, str], list[CompleteRun]] = {}
-    for result_path in result_paths:
-        run = load_complete_run(result_path)
-        grouped.setdefault((run.model, run.environment), []).append(run)
 
-    summaries: list[Summary] = []
-    for model, environment in sorted(
-        grouped, key=lambda key: (key[0].casefold(), key[1])
-    ):
-        runs = grouped[(model, environment)]
-        metric_keys = {tuple(run.metrics) for run in runs}
-        if len(metric_keys) != 1:
-            raise InvalidRunError(
-                f"{model}/{environment}: complete runs log inconsistent metric sets"
-            )
+def newest_runs(runs: Sequence[CompleteRun]) -> list[CompleteRun]:
+    """Select the latest metadata file per environment/model pair."""
 
-        rewards = tuple(value for run in runs for value in run.rewards)
-        metrics = {
-            metric_name: summarize(
-                value for run in runs for value in run.metrics.get(metric_name, ())
-            )
+    newest: dict[tuple[str, str], CompleteRun] = {}
+    for run in runs:
+        key = (run.environment, run.model)
+        incumbent = newest.get(key)
+        if incumbent is None or (
+            run.metadata_timestamp_ns,
+            run.run_id,
+        ) > (
+            incumbent.metadata_timestamp_ns,
+            incumbent.run_id,
+        ):
+            newest[key] = run
+    return list(newest.values())
+
+
+def summarize_run(run: CompleteRun) -> Summary:
+    return Summary(
+        model=run.model,
+        environment=run.environment,
+        run_id=run.run_id,
+        rollout_count=len(run.rewards),
+        reward_mean=statistics.fmean(run.rewards),
+        reward_std=statistics.pstdev(run.rewards),
+        metrics={
+            metric_name: summarize(run.metrics[metric_name])
             for metric_name in METRIC_NAMES
-            if metric_name in runs[0].metrics
-        }
-        summaries.append(
-            Summary(
-                model=model,
-                environment=environment,
-                rollout_count=len(rewards),
-                reward_mean=statistics.fmean(rewards),
-                reward_std=statistics.pstdev(rewards),
-                metrics=metrics,
-            )
-        )
-    return summaries
+            if metric_name in run.metrics
+        },
+    )
 
 
 def load_complete_run(result_path: Path) -> CompleteRun:
@@ -174,6 +226,8 @@ def load_complete_run(result_path: Path) -> CompleteRun:
     return CompleteRun(
         model=model,
         environment=environment,
+        run_id=result_path.parent.name,
+        metadata_timestamp_ns=metadata_path.stat().st_mtime_ns,
         rewards=tuple(rewards),
         metrics={name: tuple(values) for name, values in metric_values.items()},
     )
@@ -247,9 +301,16 @@ def format_mean_std(mean: float, std: float) -> str:
 
 
 def render_markdown(summaries: Sequence[Summary]) -> str:
-    headers = ["Model", "Environment", "Rollouts", "Reward (mean ± std)"]
+    headers = [
+        "Model",
+        "Environment",
+        "Run ID",
+        "Rollouts",
+        "Reward (mean ± std)",
+    ]
     headers.extend(f"{name} (mean ± std)" for name in METRIC_NAMES)
-    alignments = ["---", "---", "---:", "---:", "---:", "---:", "---:"]
+    alignments = ["---", "---", "---", "---:", "---:"]
+    alignments.extend("---:" for _ in METRIC_NAMES)
     lines = [
         "| " + " | ".join(headers) + " |",
         "| " + " | ".join(alignments) + " |",
@@ -258,6 +319,7 @@ def render_markdown(summaries: Sequence[Summary]) -> str:
         row = [
             summary.model,
             summary.environment,
+            summary.run_id,
             str(summary.rollout_count),
             format_mean_std(summary.reward_mean, summary.reward_std),
         ]
@@ -274,6 +336,7 @@ def write_csv(path: Path, summaries: Sequence[Summary]) -> None:
     fieldnames = [
         "model",
         "environment",
+        "run_id",
         "rollouts",
         "reward_mean",
         "reward_std",
@@ -288,6 +351,7 @@ def write_csv(path: Path, summaries: Sequence[Summary]) -> None:
             row: dict[str, str | int | float] = {
                 "model": summary.model,
                 "environment": summary.environment,
+                "run_id": summary.run_id,
                 "rollouts": summary.rollout_count,
                 "reward_mean": summary.reward_mean,
                 "reward_std": summary.reward_std,
@@ -306,7 +370,7 @@ def write_csv(path: Path, summaries: Sequence[Summary]) -> None:
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     try:
-        summaries = load_summaries(args.root.resolve())
+        summaries = load_summaries(args.root.resolve(), all_runs=args.all_runs)
         markdown = render_markdown(summaries)
         if args.csv is not None:
             write_csv(args.csv.resolve(), summaries)

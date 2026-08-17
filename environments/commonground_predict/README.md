@@ -124,8 +124,11 @@ rerun after the AI-policy statement-bank regeneration and printed:
 | Always agree | 0.425 |
 | Per-statement visible majority | 0.494 |
 | Per-snapshot best constant oracle | 0.525 |
+| Planted cluster-pattern oracle (ceiling) | 0.875 |
 
-A real model should exceed these floors; see Baselines below.
+The ceiling replays the generator's hidden cluster pattern for each masked cell;
+its remaining errors are the generator's injected participant-level vote noise.
+A real model should exceed the three naive floors; see Baselines below.
 
 ## Baselines
 

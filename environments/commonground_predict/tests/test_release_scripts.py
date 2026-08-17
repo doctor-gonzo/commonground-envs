@@ -134,6 +134,7 @@ def test_compute_floors_reproduces_rethemed_synthetic_values() -> None:
         "always-agree": 0.425,
         "visible-majority": 0.49375,
         "best-constant-oracle": 0.525,
+        "cluster-pattern-oracle": 0.875,
     }
     assert render_markdown(floors) == "\n".join(
         [
@@ -142,8 +143,24 @@ def test_compute_floors_reproduces_rethemed_synthetic_values() -> None:
             "| Always agree | 0.425 |",
             "| Per-statement visible majority | 0.494 |",
             "| Per-snapshot best constant oracle | 0.525 |",
+            "| Planted cluster-pattern oracle (ceiling) | 0.875 |",
         ]
     )
+
+
+def test_cluster_pattern_oracle_replays_hidden_generator_signal() -> None:
+    snapshots = [
+        json.loads(line)
+        for line in SYNTHETIC_SPLIT.read_text(encoding="utf-8").splitlines()
+    ]
+    recovered = compute_floors_module.replay_cluster_patterns(snapshots)
+    rng = random.Random(eval_generator_module.SEED)
+    _, expected_first = eval_generator_module.make_snapshot_with_cluster_patterns(
+        rng, 0
+    )
+
+    assert recovered is not None
+    assert recovered[snapshots[0]["session_id"]] == expected_first
 
 
 def test_compute_floors_is_deterministic_for_same_seed(tmp_path: Path) -> None:
@@ -154,6 +171,7 @@ def test_compute_floors_is_deterministic_for_same_seed(tmp_path: Path) -> None:
     second = compute_floors(source, masked_vote_count=4, seed="repeatable")
 
     assert first == second
+    assert "cluster-pattern-oracle" not in first
 
 
 def test_ingest_accepts_real_export_and_writes_manifest_without_touching_bundled_splits(

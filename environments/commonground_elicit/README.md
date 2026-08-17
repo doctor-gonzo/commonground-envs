@@ -45,9 +45,9 @@ either hidden scoring payload.
 
 ## Bundled splits and floors
 
-`commonground_elicit/data/train_synthetic.jsonl` uses the committed training
-template set. `commonground_elicit/data/eval_synthetic_heldout.jsonl` uses the
-disjoint held-out template set. Every scenario is explicitly labeled
+`commonground_elicit/data/train_synthetic.jsonl` contains 40 scenarios from the
+committed training template set. `commonground_elicit/data/eval_synthetic_heldout.jsonl`
+contains 20 scenarios from the disjoint held-out template set. Every scenario is explicitly labeled
 `synthetic: true`; generation uses fixed seeds, an explicit provenance date,
 and templated offline prose. Regenerate both files with:
 
@@ -63,7 +63,7 @@ prints:
 
 | Task | Baseline | mean reward |
 | --- | --- | ---: |
-| find | Random visible spans | 0.167 |
+| find | Random visible spans | 0.150 |
 | find | Flag vague-sounding spans | 0.500 |
 | elicit-ask | Template clarity questions | 0.000 |
 | elicit-ask | Randomly targeted questions | 0.000 |
