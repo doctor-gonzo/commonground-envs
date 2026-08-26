@@ -71,9 +71,7 @@ def test_aggregate_complete_runs_in_deterministic_order() -> None:
     assert summaries[1].metrics["vote_accuracy"] == pytest.approx(
         (2 / 3, math.sqrt(2) / 3)
     )
-    assert summaries[1].metrics["brier"] == pytest.approx(
-        (1 / 3, math.sqrt(2) / 3)
-    )
+    assert summaries[1].metrics["brier"] == pytest.approx((1 / 3, math.sqrt(2) / 3))
 
     assert aggregate.render_markdown(summaries) == "\n".join(
         [
@@ -96,15 +94,11 @@ def test_newest_metadata_timestamp_wins_unless_all_runs_requested(
     newer_run = older_result.parent.parent / "e5f6a7b8"
     shutil.copytree(older_result.parent, newer_run)
     os.utime(older_result.with_name("metadata.json"), ns=(1_000_000_000, 1_000_000_000))
-    os.utime(
-        newer_run / "metadata.json", ns=(2_000_000_000, 2_000_000_000)
-    )
+    os.utime(newer_run / "metadata.json", ns=(2_000_000_000, 2_000_000_000))
 
     newest = aggregate.load_summaries(fixture_copy)
     predict = next(
-        summary
-        for summary in newest
-        if summary.environment == "commonground-predict"
+        summary for summary in newest if summary.environment == "commonground-predict"
     )
     assert predict.run_id == "e5f6a7b8"
 

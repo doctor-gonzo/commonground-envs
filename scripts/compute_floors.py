@@ -46,7 +46,9 @@ def compute_floors(
     target_count = 0
 
     snapshots: list[dict[str, Any]] = []
-    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+    for line_number, line in enumerate(
+        path.read_text(encoding="utf-8").splitlines(), 1
+    ):
         if not line.strip():
             continue
         snapshot = json.loads(line)
@@ -64,7 +66,9 @@ def compute_floors(
         best_constant_correct += max(Counter(snapshot_truth).values())
         target_count += len(snapshot_truth)
         for cell_id, actual_vote in held_out.items():
-            participant_index_text, statement_index_text = cell_id.split(",", maxsplit=1)
+            participant_index_text, statement_index_text = cell_id.split(
+                ",", maxsplit=1
+            )
             participant_index = int(participant_index_text)
             statement_index = int(statement_index_text)
             visible_votes = [
