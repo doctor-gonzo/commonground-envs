@@ -75,7 +75,30 @@ Model baselines use the repository's multi-environment sweep with three
 rollouts per held-out example. The aggregator emits reward, `finding_f1`, and
 `question_utility` mean ± population standard deviation only after every
 expected rollout is present; see the
-[operator commands](../../README.md#baseline-sweep).
+[operator commands](https://github.com/<OWNER>/commonground-envs#baseline-sweep).
+
+Recorded 2026-08-16 via `uv run vf-eval commonground-elicit -m <model> -n 20 -r 3 --save-results`
+against Prime Inference, aggregated by `scripts/aggregate_baselines.py`:
+
+| Model | finding_f1 (mean ± std) | question_utility (mean) |
+| --- | ---: | ---: |
+| anthropic/claude-sonnet-4.5 | 0.524 ± 0.205 | 0.000 |
+| openai/gpt-4.1-mini | 0.502 ± 0.257 | 0.000 |
+| openai/gpt-4.1 | 0.448 ± 0.163 | 0.000 |
+| google/gemini-2.5-flash | 0.405 ± 0.268 | 0.000 |
+| meta-llama/llama-3.3-70b-instruct | 0.294 ± 0.259 | 0.000 |
+
+Reading: only two of five models clear the "flag vague-sounding spans"
+heuristic floor (0.500) — a naive heuristic remains competitive with frontier
+models at strict-F1 issue finding (ambiguities, contradictions, and gaps),
+which is the headroom this environment exists to measure. Scores also reflect
+the strict-compliance design: findings must cite the planted span at the
+planted granularity, so recall-heavy smaller models can edge
+precision-conservative larger ones. `question_utility` at 0.000 across all
+models reflects the deliberately bounded-recall v0 question contract
+(canonical/alias matching); in these recorded default find-task runs it is a
+logged weight-zero companion metric. In the separate `elicit-ask` task mode it
+is the scored reward (weight 1.0) under the same bounded-recall contract.
 
 ## The commonground family and human socket
 

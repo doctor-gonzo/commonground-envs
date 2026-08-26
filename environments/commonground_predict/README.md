@@ -134,14 +134,31 @@ A real model should exceed the three naive floors; see Baselines below.
 
 Runs use the repository's multi-environment baseline sweep on the bundled
 synthetic split with its pre-baked masks. See the
-[operator commands](../../README.md#baseline-sweep). The naive floors are the
+[operator commands](https://github.com/<OWNER>/commonground-envs#baseline-sweep). The naive floors are the
 recomputed values in [Scoring](#scoring).
 
-| Model | vote_accuracy (mean±std) | brier (mean) |
-| --- | --- | --- |
-| _pending — populated from real eval runs only_ | — | — |
+Recorded 2026-08-16 via `uv run vf-eval commonground-predict -m <model> -n 20 -r 3 --save-results`
+against Prime Inference, aggregated by `scripts/aggregate_baselines.py` (newest
+complete run per model; std is across all 60 rollouts).
 
-<!-- Numbers in this table must come from recorded `prime eval` runs. -->
+| Model | vote_accuracy (mean ± std) | brier (mean ± std) |
+| --- | ---: | ---: |
+| openai/gpt-4.1 | 0.571 ± 0.170 | 0.858 ± 0.340 |
+| anthropic/claude-sonnet-4.5 | 0.569 ± 0.171 | 0.863 ± 0.343 |
+| openai/gpt-4.1-mini | 0.548 ± 0.175 | 0.904 ± 0.351 |
+| google/gemini-2.5-flash | 0.500 ± 0.221 | 1.000 ± 0.443 |
+| meta-llama/llama-3.3-70b-instruct | 0.292 ± 0.265 † | 1.044 ± 0.289 |
+
+† llama-3.3-70b frequently keyed predictions as `"p06,0"` instead of the
+specified `"6,0"`, zeroing those rollouts; its score reflects instruction-format
+noncompliance as much as prediction skill.
+
+Reading: every format-compliant model clears the visible-majority floor
+(0.494) and the frontier tier clears the best-constant oracle (0.525), yet the
+best model captures only ~13% of the attainable signal between that floor and
+the 0.875 cluster-pattern ceiling — the task is far from solved.
+
+<!-- Numbers in this table are copied verbatim from saved vf-eval runs. -->
 
 ## The commonground Family
 
@@ -149,7 +166,7 @@ recomputed values in [Scoring](#scoring).
 Predict tests inference over held-out deliberation votes; elicit tests whether a
 model can find policy problems and ask faction-splitting questions. They share
 the score package and provenance conventions while keeping their incompatible
-rubrics separate. See the [repository README](../../README.md) for the program
+rubrics separate. See the [repository README](https://github.com/<OWNER>/commonground-envs) for the program
 and roadmap. The family human-data socket accepts verified, consented session
 exports from [Context Engine](https://contextengine.sh)
 ([source](https://github.com/AgalmicSoftware/context-engine)); v0 contains no
