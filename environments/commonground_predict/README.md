@@ -134,7 +134,7 @@ A real model should exceed the three naive floors; see Baselines below.
 
 Runs use the repository's multi-environment baseline sweep on the bundled
 synthetic split with its pre-baked masks. See the
-[operator commands](https://github.com/<OWNER>/commonground-envs#baseline-sweep). The naive floors are the
+[operator commands](https://github.com/doctor-gonzo/commonground-envs#baseline-sweep). The naive floors are the
 recomputed values in [Scoring](#scoring).
 
 Recorded 2026-08-16 via `uv run vf-eval commonground-predict -m <model> -n 20 -r 3 --save-results`
@@ -166,7 +166,7 @@ the 0.875 cluster-pattern ceiling — the task is far from solved.
 Predict tests inference over held-out deliberation votes; elicit tests whether a
 model can find policy problems and ask faction-splitting questions. They share
 the score package and provenance conventions while keeping their incompatible
-rubrics separate. See the [repository README](https://github.com/<OWNER>/commonground-envs) for the program
+rubrics separate. See the [repository README](https://github.com/doctor-gonzo/commonground-envs) for the program
 and roadmap. The family human-data socket accepts verified, consented session
 exports from [Context Engine](https://contextengine.sh)
 ([source](https://github.com/AgalmicSoftware/context-engine)); v0 contains no

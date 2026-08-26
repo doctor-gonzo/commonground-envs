@@ -21,7 +21,7 @@ dependencies = [
 ]
 
 [project.urls]
-Repository = "https://github.com/<OWNER>/commonground-envs"
+Repository = "https://github.com/doctor-gonzo/commonground-envs"
 
 [build-system]
 requires = ["hatchling>=1.27.0"]

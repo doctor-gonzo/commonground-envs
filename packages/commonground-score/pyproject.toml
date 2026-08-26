@@ -17,7 +17,7 @@ classifiers = [
 dependencies = []
 
 [project.urls]
-Repository = "https://github.com/<OWNER>/commonground-envs"
+Repository = "https://github.com/doctor-gonzo/commonground-envs"
 
 [build-system]
 requires = ["uv_build>=0.8.0,<0.9.0"]

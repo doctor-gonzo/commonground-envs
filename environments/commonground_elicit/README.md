@@ -75,7 +75,7 @@ Model baselines use the repository's multi-environment sweep with three
 rollouts per held-out example. The aggregator emits reward, `finding_f1`, and
 `question_utility` mean ± population standard deviation only after every
 expected rollout is present; see the
-[operator commands](https://github.com/<OWNER>/commonground-envs#baseline-sweep).
+[operator commands](https://github.com/doctor-gonzo/commonground-envs#baseline-sweep).
 
 Recorded 2026-08-16 via `uv run vf-eval commonground-elicit -m <model> -n 20 -r 3 --save-results`
 against Prime Inference, aggregated by `scripts/aggregate_baselines.py`:
