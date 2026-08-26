@@ -43,6 +43,24 @@ polarization, and combined-question mode used by scoring. Prompts are rendered
 only from the visible documents and public faction descriptions, never from
 either hidden scoring payload.
 
+## Configuration
+
+The `split` loader argument selects the bundled rollout/eval file by name:
+`"eval"` (the default held-out scenarios) or `"train"`. An explicit
+`data_path` or `COMMONGROUND_ELICIT_DATA_PATH` takes precedence over `split`;
+`train_data_path` or `COMMONGROUND_ELICIT_TRAIN_DATA_PATH` independently takes
+precedence for the environment's training dataset.
+
+For hosted training against the bundled train split:
+
+```toml
+[[env]]
+id = "charliethompson/commonground-elicit"
+
+[env.args]
+split = "train"
+```
+
 ## Bundled splits and floors
 
 `commonground_elicit/data/train_synthetic.jsonl` contains 40 scenarios from the

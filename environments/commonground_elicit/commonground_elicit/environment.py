@@ -26,6 +26,10 @@ TRAIN_DATA_ENV_VAR = "COMMONGROUND_ELICIT_TRAIN_DATA_PATH"
 DATA_DIR = Path(__file__).resolve().parent / "data"
 BUNDLED_TRAIN_PATH = DATA_DIR / "train_synthetic.jsonl"
 BUNDLED_EVAL_PATH = DATA_DIR / "eval_synthetic_heldout.jsonl"
+BUNDLED_SPLIT_PATHS = {
+    "eval": BUNDLED_EVAL_PATH,
+    "train": BUNDLED_TRAIN_PATH,
+}
 FINDING_TYPES = frozenset({"ambiguity", "contradiction", "gap"})
 QUOTE_OVERLAP_THRESHOLD = 0.5
 VALID_TASKS = frozenset({"find", "elicit-ask"})
@@ -59,6 +63,7 @@ def load_environment(
     panel_polarization: float = 1.0,
     question_count: int = 3,
     train_data_path: str | os.PathLike[str] | None = None,
+    split: str = "eval",
     **kwargs: Any,
 ) -> vf.SingleTurnEnv:
     """Build the deterministic single-turn planted-finding environment."""
@@ -72,10 +77,11 @@ def load_environment(
         question_count=question_count,
         task=task,
     )
+    bundled_eval_path = _bundled_data_path(split)
     configured_eval_path = data_path or os.environ.get(DATA_ENV_VAR)
     configured_train_path = train_data_path or os.environ.get(TRAIN_DATA_ENV_VAR)
     resolved_eval_path = (
-        Path(configured_eval_path) if configured_eval_path else BUNDLED_EVAL_PATH
+        Path(configured_eval_path) if configured_eval_path else bundled_eval_path
     )
     resolved_train_path = (
         Path(configured_train_path) if configured_train_path else BUNDLED_TRAIN_PATH
@@ -125,6 +131,7 @@ def load_environment(
         "question_count": question_count,
         "data_path": str(resolved_eval_path),
         "train_data_path": str(resolved_train_path),
+        "split": split,
     }
     return vf.SingleTurnEnv(
         dataset=dataset,
@@ -135,6 +142,18 @@ def load_environment(
         env_args=env_args,
         **kwargs,
     )
+
+
+def _bundled_data_path(split: str) -> Path:
+    """Resolve a named bundled split to its packaged JSONL path."""
+
+    try:
+        return BUNDLED_SPLIT_PATHS[split]
+    except KeyError:
+        valid_names = ", ".join(BUNDLED_SPLIT_PATHS)
+        raise ValueError(
+            f"unknown split {split!r}; valid splits: {valid_names}"
+        ) from None
 
 
 def load_scenarios(path: Path) -> list[dict[str, Any]]:
