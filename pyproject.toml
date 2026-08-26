@@ -57,6 +57,10 @@ members = [
     "environments/commonground_predict",
 ]
 
+[tool.uv.sources]
+commonground-scenarios = { workspace = true }
+commonground-score = { workspace = true }
+
 [tool.pytest.ini_options]
 testpaths = [
     "tests",

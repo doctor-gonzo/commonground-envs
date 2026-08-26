@@ -1,12 +1,13 @@
 [project]
 name = "commonground-elicit"
-version = "0.1.1"
+version = "0.1.2"
 description = "Common Ground document-grounded ambiguity elicitation environment for Verifiers."
 authors = [{ name = "Common Ground contributors" }]
 license = "Apache-2.0"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 keywords = ["social-reasoning", "elicitation", "deterministic", "single-turn"]
+tags = ["social-reasoning", "elicitation", "document-analysis", "deterministic", "single-turn", "train", "eval"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -37,7 +38,3 @@ include = [
 [tool.verifiers.eval]
 num_examples = 20
 rollouts_per_example = 1
-
-[tool.uv.sources]
-commonground-scenarios = { workspace = true }
-commonground-score = { workspace = true }

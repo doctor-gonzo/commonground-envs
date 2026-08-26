@@ -4,6 +4,7 @@ import copy
 import importlib.util
 import json
 import random
+import tomllib
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[3]
 DATA_DIR = Path(__file__).resolve().parents[1] / "commonground_elicit" / "data"
 TRAIN_SPLIT = DATA_DIR / "train_synthetic.jsonl"
 EVAL_SPLIT = DATA_DIR / "eval_synthetic_heldout.jsonl"
+PYPROJECT = Path(__file__).resolve().parents[1] / "pyproject.toml"
 
 
 def load_script(module_name: str, filename: str) -> Any:
@@ -28,6 +30,19 @@ generator = load_script(
     "commonground_generate_elicit_splits", "generate_elicit_splits.py"
 )
 floors = load_script("commonground_compute_elicit_floors", "compute_elicit_floors.py")
+
+
+def test_hub_pyproject_contract() -> None:
+    document = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))
+    tags = document["project"].get("tags")
+
+    assert isinstance(tags, list)
+    assert tags
+    assert all(isinstance(tag, str) and tag.strip() for tag in tags)
+
+    # PI's Hub action installs the pushed env directory in isolation, where
+    # workspace sources make the otherwise portable package uninstallable.
+    assert "sources" not in document.get("tool", {}).get("uv", {})
 
 
 def test_bundled_splits_reproduce_generator_bytes() -> None:

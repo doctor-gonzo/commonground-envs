@@ -5,6 +5,7 @@ import hashlib
 import importlib.util
 import json
 import random
+import tomllib
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[3]
 DATA_DIR = Path(__file__).resolve().parents[1] / "commonground_predict" / "data"
 SYNTHETIC_SPLIT = DATA_DIR / "eval_synthetic.jsonl"
 TRAIN_SPLIT = DATA_DIR / "train_synthetic.jsonl"
+PYPROJECT = Path(__file__).resolve().parents[1] / "pyproject.toml"
 
 
 def load_module(module_name: str, path: Path) -> Any:
@@ -50,6 +52,19 @@ train_generator_module = load_module(
 compute_floors = compute_floors_module.compute_floors
 render_markdown = compute_floors_module.render_markdown
 ingest_main = ingest_snapshots_module.main
+
+
+def test_hub_pyproject_contract() -> None:
+    document = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))
+    tags = document["project"].get("tags")
+
+    assert isinstance(tags, list)
+    assert tags
+    assert all(isinstance(tag, str) and tag.strip() for tag in tags)
+
+    # PI's Hub action installs the pushed env directory in isolation, where
+    # workspace sources make the otherwise portable package uninstallable.
+    assert "sources" not in document.get("tool", {}).get("uv", {})
 
 
 def test_statement_bank_is_enterprise_ai_policy() -> None:

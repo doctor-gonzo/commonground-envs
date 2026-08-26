@@ -52,7 +52,7 @@ def _data_files(source_dir: Path, package_name: str) -> frozenset[str]:
 TARGETS = (
     WheelTarget(
         name="commonground-predict",
-        version="0.1.1",
+        version="0.1.2",
         source_dir=ROOT / "environments" / "commonground_predict",
         requirements=frozenset({"commonground-score<0.2,>=0.1.0", "verifiers==0.1.14"}),
         bundled_files=_data_files(
@@ -61,7 +61,7 @@ TARGETS = (
     ),
     WheelTarget(
         name="commonground-elicit",
-        version="0.1.1",
+        version="0.1.2",
         source_dir=ROOT / "environments" / "commonground_elicit",
         requirements=frozenset(
             {
