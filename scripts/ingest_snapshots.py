@@ -6,15 +6,19 @@ import argparse
 import hashlib
 import json
 import os
-import re
 import shutil
 import sys
 import tempfile
-import unicodedata
 from collections.abc import Mapping, Sequence
-from math import isfinite
 from pathlib import Path
 from typing import Any
+
+from commonground_scenarios.snapshot_validation import (
+    HUMAN_SNAPSHOT_SCHEMA_VERSION,
+    HumanSnapshotValidationError,
+    contains_direct_identifier,
+    validate_human_snapshot,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = (
@@ -23,316 +27,22 @@ DATA_DIR = (
 DEFAULT_OUTPUT = DATA_DIR / "eval_real.jsonl"
 DEFAULT_MANIFEST = DATA_DIR / "eval_real.manifest.json"
 PROTECTED_SPLITS = {"eval_synthetic.jsonl", "eval_ce_demo.jsonl"}
-VALID_VOTES = {-1, 0, 1}
-MIN_K_ANONYMITY = 5
-TOP_LEVEL_FIELDS = {
-    "session_id",
-    "statements",
-    "participants",
-    "votes",
-    "masked_cells",
-    "held_out",
-    "clusters",
-    "stats",
-    "meta",
-}
-STATEMENT_FIELDS = {"index", "text"}
-CLUSTER_FIELDS = {"id", "members", "member_indices", "center"}
-META_FIELDS = {"k_anonymity", "source", "synthetic", "seed"}
-COMMENT_STAT_FIELDS = {
-    "commentIndex",
-    "agrees",
-    "disagrees",
-    "unsure",
-    "total",
-    "responded",
-    "extremity",
-    "divisiveness",
-}
+MAX_INPUT_LINE_BYTES = 4 * 1024 * 1024
+MANIFEST_VERSION = 2
 
-ADDRESS_PATTERN = re.compile(r"0x[0-9a-f]{40}", re.IGNORECASE)
-EMAIL_PATTERN = re.compile(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", re.IGNORECASE)
-ENS_PATTERN = re.compile(r"[^\s@.]+(?:\.[^\s@.]+)*\.eth\b", re.IGNORECASE)
-
-
-class SnapshotValidationError(ValueError):
-    """Raised when an exported snapshot is unsafe or malformed."""
+# Compatibility aliases for callers of the original intake module. The
+# implementation is shared with the elicit human-data socket to prevent drift.
+SnapshotValidationError = HumanSnapshotValidationError
 
 
 def contains_identifier(text: str) -> bool:
-    normalized = unicodedata.normalize("NFKC", text)
-    return bool(
-        ADDRESS_PATTERN.search(normalized)
-        or EMAIL_PATTERN.search(normalized)
-        or ENS_PATTERN.search(normalized)
-    )
+    return contains_direct_identifier(text)
 
 
 def validate_snapshot(snapshot: Any) -> dict[str, Any]:
-    if not isinstance(snapshot, dict):
-        raise SnapshotValidationError("snapshot must be a JSON object")
-    _require_exact_fields(snapshot, TOP_LEVEL_FIELDS, "snapshot")
+    """Validate one human snapshot through the canonical shared contract."""
 
-    session_id = snapshot.get("session_id")
-    if (
-        not isinstance(session_id, str)
-        or not session_id.strip()
-        or session_id != session_id.strip()
-    ):
-        raise SnapshotValidationError("session_id must be a non-empty string")
-    if contains_identifier(session_id):
-        raise SnapshotValidationError(
-            "session_id contains a redacted identifier pattern"
-        )
-
-    statements = snapshot.get("statements")
-    participants = snapshot.get("participants")
-    votes = snapshot.get("votes")
-    if not isinstance(statements, list) or not statements:
-        raise SnapshotValidationError("statements must be a non-empty list")
-    if not isinstance(participants, list) or not participants:
-        raise SnapshotValidationError("participants must be a non-empty list")
-    if not isinstance(votes, list):
-        raise SnapshotValidationError("votes must be a participant-major list")
-
-    expected_participants = [
-        f"p{participant_index:03d}" for participant_index in range(len(participants))
-    ]
-    if participants != expected_participants:
-        raise SnapshotValidationError(
-            "participants must use positional pseudonyms p000, p001, ..."
-        )
-
-    for statement_index, statement in enumerate(statements):
-        if not isinstance(statement, Mapping):
-            raise SnapshotValidationError(
-                f"statement {statement_index} must be an object"
-            )
-        _require_exact_fields(
-            statement, STATEMENT_FIELDS, f"statement {statement_index}"
-        )
-        actual_index = statement.get("index")
-        if type(actual_index) is not int or actual_index != statement_index:
-            raise SnapshotValidationError(
-                f"statement {statement_index} must use positional index {statement_index}"
-            )
-        text = statement.get("text")
-        if not isinstance(text, str) or not text.strip():
-            raise SnapshotValidationError(f"statement {statement_index} must have text")
-        if contains_identifier(text):
-            raise SnapshotValidationError(
-                f"statement {statement_index} contains a redacted identifier pattern"
-            )
-
-    if len(votes) != len(participants):
-        raise SnapshotValidationError(
-            "votes must be participant-major: "
-            f"rows={len(votes)} participants={len(participants)}"
-        )
-    for participant_index, row in enumerate(votes):
-        if not isinstance(row, list) or len(row) != len(statements):
-            row_length = len(row) if isinstance(row, list) else "not-a-list"
-            raise SnapshotValidationError(
-                f"votes row {participant_index} is ragged: "
-                f"length={row_length} statements={len(statements)}"
-            )
-        for statement_index, vote in enumerate(row):
-            if vote is not None and (type(vote) is not int or vote not in VALID_VOTES):
-                raise SnapshotValidationError(
-                    f"invalid vote at {participant_index},{statement_index}: {vote!r}"
-                )
-
-    masked_cells = snapshot.get("masked_cells")
-    if masked_cells != []:
-        raise SnapshotValidationError("real intake requires empty masked_cells")
-    held_out = snapshot.get("held_out")
-    if held_out != {}:
-        raise SnapshotValidationError("real intake requires empty held_out labels")
-
-    meta = snapshot.get("meta")
-    if not isinstance(meta, Mapping):
-        raise SnapshotValidationError("meta must be an object")
-    _require_exact_fields(meta, META_FIELDS, "meta")
-    k_anonymity = meta.get("k_anonymity")
-    if (
-        isinstance(k_anonymity, bool)
-        or not isinstance(k_anonymity, int)
-        or k_anonymity < MIN_K_ANONYMITY
-    ):
-        raise SnapshotValidationError(
-            f"meta.k_anonymity must be at least {MIN_K_ANONYMITY}"
-        )
-    if meta.get("synthetic") is not False:
-        raise SnapshotValidationError("real intake requires meta.synthetic=false")
-    if meta.get("source") != "context-engine-session":
-        raise SnapshotValidationError(
-            'real intake requires meta.source="context-engine-session"'
-        )
-    seed = meta.get("seed")
-    if type(seed) is not int:
-        raise SnapshotValidationError("meta.seed must be an integer")
-
-    cluster_sizes = validate_clusters(snapshot.get("clusters"), participants)
-    small_clusters = sorted(size for size in cluster_sizes if size < k_anonymity)
-    if small_clusters:
-        raise SnapshotValidationError(
-            f"cluster size below k={k_anonymity}: {small_clusters}"
-        )
-    stats = validate_stats(snapshot.get("stats"), len(statements))
-    return {
-        "session_id": session_id,
-        "statements": [
-            {"index": statement["index"], "text": statement["text"]}
-            for statement in statements
-        ],
-        "participants": list(expected_participants),
-        "votes": [list(row) for row in votes],
-        "masked_cells": [],
-        "held_out": {},
-        "clusters": [
-            {
-                "id": cluster["id"],
-                "members": list(cluster["members"]),
-                "member_indices": list(cluster["member_indices"]),
-                "center": list(cluster["center"]),
-            }
-            for cluster in snapshot["clusters"]
-        ],
-        "stats": stats,
-        "meta": {
-            "k_anonymity": k_anonymity,
-            "source": "context-engine-session",
-            "synthetic": False,
-            "seed": seed,
-        },
-    }
-
-
-def validate_clusters(clusters: Any, participants: Sequence[str]) -> list[int]:
-    if not isinstance(clusters, list) or not clusters:
-        raise SnapshotValidationError("clusters must be a non-empty list")
-    if not all(isinstance(cluster, Mapping) for cluster in clusters):
-        raise SnapshotValidationError("clusters must use exporter cluster objects")
-
-    member_indices: list[int] = []
-    sizes: list[int] = []
-    cluster_ids: set[int] = set()
-    for cluster_index, cluster in enumerate(clusters):
-        _require_exact_fields(cluster, CLUSTER_FIELDS, f"cluster {cluster_index}")
-        cluster_id = cluster.get("id")
-        if type(cluster_id) is not int or cluster_id in cluster_ids:
-            raise SnapshotValidationError(
-                f"cluster {cluster_index} requires a unique integer id"
-            )
-        cluster_ids.add(cluster_id)
-        raw_indices = cluster.get("member_indices")
-        if not isinstance(raw_indices, list):
-            raise SnapshotValidationError(
-                f"cluster {cluster_index} requires member_indices"
-            )
-        if any(type(index) is not int for index in raw_indices):
-            raise SnapshotValidationError(
-                f"cluster {cluster_index} has invalid member_indices"
-            )
-        raw_members = cluster.get("members")
-        if not isinstance(raw_members, list) or len(raw_members) != len(raw_indices):
-            raise SnapshotValidationError(
-                f"cluster {cluster_index} members must match member_indices"
-            )
-        expected_members = [
-            participants[index]
-            for index in raw_indices
-            if 0 <= index < len(participants)
-        ]
-        if len(expected_members) != len(raw_indices) or raw_members != expected_members:
-            raise SnapshotValidationError(
-                f"cluster {cluster_index} members do not match participant indices"
-            )
-        center = cluster.get("center")
-        if not isinstance(center, list) or any(
-            isinstance(value, bool)
-            or not isinstance(value, (int, float))
-            or not isfinite(value)
-            for value in center
-        ):
-            raise SnapshotValidationError(
-                f"cluster {cluster_index} center must contain finite numbers"
-            )
-        member_indices.extend(raw_indices)
-        sizes.append(len(raw_indices))
-
-    if sorted(member_indices) != list(range(len(participants))):
-        raise SnapshotValidationError(
-            "cluster member_indices must partition all participants exactly once"
-        )
-    return sizes
-
-
-def validate_stats(stats: Any, statement_count: int) -> dict[str, Any]:
-    if not isinstance(stats, Mapping):
-        raise SnapshotValidationError("stats must be an object")
-    _require_exact_fields(stats, {"comment"}, "stats")
-    comments = stats.get("comment")
-    if not isinstance(comments, list) or len(comments) != statement_count:
-        raise SnapshotValidationError(
-            f"stats.comment must contain {statement_count} entries"
-        )
-
-    validated_comments: list[dict[str, int | float]] = []
-    integer_fields = {
-        "commentIndex",
-        "agrees",
-        "disagrees",
-        "unsure",
-        "total",
-        "responded",
-    }
-    for comment_index, comment in enumerate(comments):
-        if not isinstance(comment, Mapping):
-            raise SnapshotValidationError(
-                f"stats.comment {comment_index} must be an object"
-            )
-        _require_exact_fields(
-            comment, COMMENT_STAT_FIELDS, f"stats.comment {comment_index}"
-        )
-        if (
-            type(comment.get("commentIndex")) is not int
-            or comment["commentIndex"] != comment_index
-        ):
-            raise SnapshotValidationError(
-                f"stats.comment {comment_index} must use positional commentIndex"
-            )
-        for field in integer_fields - {"commentIndex"}:
-            if type(comment.get(field)) is not int or comment[field] < 0:
-                raise SnapshotValidationError(
-                    f"stats.comment {comment_index}.{field} must be a non-negative integer"
-                )
-        for field in {"extremity", "divisiveness"}:
-            value = comment.get(field)
-            if (
-                isinstance(value, bool)
-                or not isinstance(value, (int, float))
-                or not isfinite(value)
-            ):
-                raise SnapshotValidationError(
-                    f"stats.comment {comment_index}.{field} must be finite"
-                )
-        validated_comments.append(
-            {field: comment[field] for field in COMMENT_STAT_FIELDS}
-        )
-    return {"comment": validated_comments}
-
-
-def _require_exact_fields(
-    value: Mapping[str, Any], expected: set[str], label: str
-) -> None:
-    actual = set(value)
-    if actual != expected:
-        missing = sorted(expected - actual)
-        unexpected = sorted(actual - expected)
-        raise SnapshotValidationError(
-            f"{label} fields mismatch: missing={missing} unexpected={unexpected}"
-        )
+    return validate_human_snapshot(snapshot)
 
 
 def _reject_json_constant(value: str) -> None:
@@ -358,21 +68,29 @@ def ingest_files(
         for line_number, line in enumerate(lines, start=1):
             if not line.strip():
                 continue
+            if len(line.encode("utf-8")) > MAX_INPUT_LINE_BYTES:
+                errors.append(
+                    f"{input_path}:{line_number}: input row exceeds "
+                    f"{MAX_INPUT_LINE_BYTES} bytes"
+                )
+                continue
             try:
                 snapshot = json.loads(line, parse_constant=_reject_json_constant)
-                if not isinstance(snapshot, dict):
-                    raise SnapshotValidationError("snapshot must be a JSON object")
-                session_id = snapshot.get("session_id")
-                if isinstance(session_id, str) and session_id in seen_session_ids:
-                    raise SnapshotValidationError(f"duplicate session_id: {session_id}")
-                if isinstance(session_id, str):
-                    seen_session_ids.add(session_id)
                 validated = validate_snapshot(snapshot)
-            except (json.JSONDecodeError, SnapshotValidationError) as error:
+                session_id = validated["session_id"]
+                if session_id in seen_session_ids:
+                    raise SnapshotValidationError(f"duplicate session_id: {session_id}")
+            except (
+                json.JSONDecodeError,
+                RecursionError,
+                SnapshotValidationError,
+            ) as error:
                 errors.append(f"{input_path}:{line_number}: {error}")
                 continue
 
+            seen_session_ids.add(session_id)
             accepted.append(validated)
+            meta = validated["meta"]
             manifest_entries.append(
                 {
                     "source_index": source_index,
@@ -381,12 +99,16 @@ def ingest_files(
                     "session_id": validated["session_id"],
                     "participant_count": len(validated["participants"]),
                     "statement_count": len(validated["statements"]),
-                    "cluster_count": len(
-                        validate_clusters(
-                            validated["clusters"], validated["participants"]
-                        )
-                    ),
-                    "k_anonymity": validated["meta"]["k_anonymity"],
+                    "cluster_count": len(validated["clusters"]),
+                    "k_anonymity": meta["k_anonymity"],
+                    "consent_scope": meta["consent_scope"],
+                    "redistribution_rights_approved": meta[
+                        "redistribution_rights_approved"
+                    ],
+                    "schema_version": meta["schema_version"],
+                    "exporter_version": meta["exporter_version"],
+                    "source_commit": meta["source_commit"],
+                    "privacy_review": meta["privacy_review"],
                 }
             )
     return accepted, manifest_entries, errors
@@ -406,6 +128,8 @@ def write_outputs(
             )
     if str(output_path.resolve()).casefold() == str(manifest_path.resolve()).casefold():
         raise ValueError("output and manifest paths must be different")
+    if not snapshots:
+        raise ValueError("refusing to publish an empty real-data split")
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
@@ -415,8 +139,10 @@ def write_outputs(
         for snapshot in snapshots
     )
     manifest = {
-        "version": 1,
+        "version": MANIFEST_VERSION,
+        "contract": HUMAN_SNAPSHOT_SCHEMA_VERSION,
         "output_file": output_path.name,
+        "output_sha256": hashlib.sha256(jsonl.encode("utf-8")).hexdigest(),
         "snapshot_count": len(snapshots),
         "snapshots": list(manifest_entries),
     }

@@ -2,6 +2,36 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.0 - 2026-08-26
+
+- Migrate both environments from deprecated Verifiers v0 to native v1 tasksets,
+  rewards, metrics, harnesses, and trace scoring on `verifiers==0.3.0`.
+- Redesign the elicit held-out corpus as twenty unique authored semantic tasks
+  and require every submitted finding quote to be an ordered contiguous span of
+  its claimed visible document with substantial planted-anchor coverage and no
+  normalization of meaning-changing symbolic operators.
+- Add bounded, fail-closed completion parsing and adversarial reward regressions
+  for oversized, deeply nested, fabricated, reordered, and meaning-changing
+  output.
+- Separate predict training and evaluation policy-text banks, strictly validate
+  all snapshot dimensions, masks, labels, votes, clusters, and metadata, and
+  remove hidden labels from auxiliary task state.
+- Centralize a strict human-snapshot contract with positional pseudonyms,
+  k-anonymous cluster partitions, recomputed counts, identifier screening, and
+  consent, rights, source, schema, exporter, and privacy-review attestations;
+  apply it to every non-synthetic Predict input path before masking. Bound
+  snapshot sizes and reject unverified PCA-derived centers and comment metrics.
+- Prepare corrected shared packages as 0.1.1 and exactly pin them from the
+  0.2.0 environments.
+- Include complete license files in every artifact and preserve the Context
+  Engine demo fixture's MPL-2.0 notice, immutable source, and hashes.
+- Remove colliding top-level project files from wheels, update the lock to
+  patched dependencies, ignore local Prime/output trees, and strengthen archive
+  and release verification.
+- Mark public evaluation answers and the synthetic/human-validity boundary
+  explicitly. Historical elicit baselines are not comparable to 0.2.0 and must
+  be rerun before a public performance claim.
+
 ## 0.1.2 - 2026-08-25
 
 - Make env packages standalone-installable for Hub actions by moving workspace

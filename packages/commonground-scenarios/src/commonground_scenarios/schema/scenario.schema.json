@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://contextengine.sh/schemas/commonground-scenario.json",
+  "$id": "urn:commonground:schema:scenario:1",
   "title": "Common Ground planted policy scenario",
   "type": "object",
   "additionalProperties": false,
@@ -192,6 +192,7 @@
         "statements": {
           "type": "array",
           "minItems": 1,
+          "maxItems": 1000,
           "items": {
             "type": "object",
             "additionalProperties": false,
@@ -202,24 +203,85 @@
             }
           }
         },
-        "participants": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
-        "votes": {"type": "array", "minItems": 1, "items": {"type": "array", "items": {"enum": [-1, 0, 1, null]}}},
-        "masked_cells": {
+        "participants": {
           "type": "array",
+          "minItems": 5,
+          "maxItems": 10000,
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^p[0-9]{3,}$"}
+        },
+        "votes": {"type": "array", "minItems": 5, "maxItems": 10000, "items": {"type": "array", "minItems": 1, "maxItems": 1000, "items": {"enum": [-1, 0, 1, null]}}},
+        "masked_cells": {"type": "array", "maxItems": 0},
+        "held_out": {"type": "object", "maxProperties": 0},
+        "clusters": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100,
           "items": {
-            "type": "array",
-            "prefixItems": [{"type": "integer", "minimum": 0}, {"type": "integer", "minimum": 0}],
-            "minItems": 2,
-            "maxItems": 2
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "members", "member_indices", "center"],
+            "properties": {
+              "id": {"type": "integer"},
+              "members": {"type": "array", "minItems": 5, "items": {"type": "string", "pattern": "^p[0-9]{3,}$"}},
+              "member_indices": {"type": "array", "minItems": 5, "items": {"type": "integer", "minimum": 0}},
+              "center": {"type": "array", "maxItems": 0}
+            }
           }
         },
-        "held_out": {"type": "object", "additionalProperties": {"enum": [-1, 0, 1]}},
-        "clusters": {"type": "array", "items": {"type": "object"}},
-        "stats": {"type": "object"},
+        "stats": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["comment"],
+          "properties": {
+            "comment": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["commentIndex", "agrees", "disagrees", "unsure", "total", "responded", "extremity", "divisiveness"],
+                "properties": {
+                  "commentIndex": {"type": "integer", "minimum": 0},
+                  "agrees": {"type": "integer", "minimum": 0},
+                  "disagrees": {"type": "integer", "minimum": 0},
+                  "unsure": {"type": "integer", "minimum": 0},
+                  "total": {"type": "integer", "minimum": 0},
+                  "responded": {"type": "integer", "minimum": 0},
+                  "extremity": {"type": "null"},
+                  "divisiveness": {"type": "null"}
+                }
+              }
+            }
+          }
+        },
         "meta": {
           "type": "object",
-          "required": ["synthetic"],
-          "properties": {"synthetic": {"const": false}}
+          "additionalProperties": false,
+          "required": ["synthetic", "k_anonymity", "source", "seed", "consent_scope", "redistribution_rights_approved", "schema_version", "exporter_version", "source_commit", "privacy_review"],
+          "properties": {
+            "synthetic": {"const": false},
+            "k_anonymity": {"type": "integer", "minimum": 5},
+            "source": {"const": "context-engine-session"},
+            "seed": {"type": "integer"},
+            "consent_scope": {"const": "public-benchmark"},
+            "redistribution_rights_approved": {"const": true},
+            "schema_version": {"const": "commonground-human-snapshot-v2"},
+            "exporter_version": {"type": "string", "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)([-+][0-9A-Za-z.-]+)?$"},
+            "source_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+            "privacy_review": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["attested", "reviewed_at", "checks"],
+              "properties": {
+                "attested": {"const": true},
+                "reviewed_at": {"type": "string", "format": "date"},
+                "checks": {
+                  "const": ["direct-identifiers", "free-text", "participant-pseudonyms"]
+                }
+              }
+            }
+          }
         }
       }
     }

@@ -8,7 +8,19 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[3]
+REPOSITORY_SCRIPTS = (
+    ROOT / "scripts" / "generate_elicit_splits.py",
+    ROOT / "scripts" / "compute_elicit_floors.py",
+)
+if not all(path.is_file() for path in REPOSITORY_SCRIPTS):
+    pytest.skip(
+        "repository-only release tests require the complete monorepo checkout",
+        allow_module_level=True,
+    )
+
 DATA_DIR = Path(__file__).resolve().parents[1] / "commonground_elicit" / "data"
 TRAIN_SPLIT = DATA_DIR / "train_synthetic.jsonl"
 EVAL_SPLIT = DATA_DIR / "eval_synthetic_heldout.jsonl"
@@ -96,6 +108,21 @@ def test_bundled_splits_are_synthetic_and_template_separated() -> None:
         and scenario["provenance"]["generated_at"] == generator.GENERATED_AT
         for scenario in train + heldout
     )
+    train_semantic_keys = [
+        generator.scenario_semantic_key(scenario) for scenario in train
+    ]
+    semantic_keys = [generator.scenario_semantic_key(scenario) for scenario in heldout]
+    assert len(train_semantic_keys) == len(set(train_semantic_keys)) == 40
+    assert len(semantic_keys) == len(set(semantic_keys)) == 20
+
+
+def test_generator_rejects_duplicate_semantic_tasks() -> None:
+    scenario = read_jsonl(EVAL_SPLIT)[0]
+    duplicate = copy.deepcopy(scenario)
+    duplicate["scenario_id"] = "different-seed-only"
+
+    with pytest.raises(ValueError, match="duplicate semantic task"):
+        generator.assert_unique_semantic_tasks([scenario, duplicate])
 
 
 def test_baseline_generation_depends_only_on_public_projections() -> None:
@@ -133,8 +160,8 @@ def test_compute_elicit_floors_reproduces_published_values() -> None:
     computed = floors.compute_elicit_floors(EVAL_SPLIT)
 
     assert computed == {
-        "find/random-span": 3 / 20,
-        "find/vague-sounding": 0.5,
+        "find/random-span": 2 / 15,
+        "find/vague-sounding": 39 / 200,
         "elicit-ask/template-question": 0.0,
         "elicit-ask/randomly-targeted": 0.0,
     }
@@ -142,8 +169,8 @@ def test_compute_elicit_floors_reproduces_published_values() -> None:
         [
             "| Task | Baseline | mean reward |",
             "| --- | --- | ---: |",
-            "| find | Random visible spans | 0.150 |",
-            "| find | Flag vague-sounding spans | 0.500 |",
+            "| find | Random visible spans | 0.133 |",
+            "| find | Flag vague-sounding spans | 0.195 |",
             "| elicit-ask | Template clarity questions | 0.000 |",
             "| elicit-ask | Randomly targeted questions | 0.000 |",
         ]

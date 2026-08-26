@@ -1,9 +1,10 @@
 [project]
 name = "commonground-predict"
-version = "0.1.2"
+version = "0.2.0"
 description = "Common Ground masked-vote prediction environment for Verifiers."
 authors = [{ name = "Common Ground contributors" }]
-license = "Apache-2.0"
+license = "Apache-2.0 AND MPL-2.0"
+license-files = ["LICENSE", "LICENSES/MPL-2.0.txt", "NOTICE"]
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 keywords = ["social-reasoning", "prediction", "deterministic", "single-turn"]
@@ -17,8 +18,10 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
-    "commonground-score>=0.1.0,<0.2",
-    "verifiers==0.1.14",
+    "commonground-scenarios==0.1.1",
+    "commonground-score==0.1.1",
+    "datasets>=5.0.1,<6.0.0",
+    "verifiers==0.3.0",
 ]
 
 [project.urls]
@@ -31,7 +34,6 @@ build-backend = "hatchling.build"
 [tool.hatch.build]
 include = [
     "commonground_predict/**",
-    "pyproject.toml",
 ]
 
 [tool.verifiers.eval]

@@ -12,6 +12,11 @@ from importlib.resources import files
 from math import isfinite
 from typing import Any
 
+from commonground_scenarios.snapshot_validation import (
+    HumanSnapshotValidationError,
+    validate_human_snapshot,
+)
+
 SCENARIO_FIELDS = {
     "scenario_id",
     "organization",
@@ -426,118 +431,10 @@ def _validate_provenance(value: Any, scenario_id: str) -> dict[str, Any]:
 
 
 def _validate_human_feedback(value: Any) -> None:
-    snapshot = _exact_object(value, CE_SNAPSHOT_FIELDS, "human_feedback")
-    _nonempty_text(snapshot["session_id"], "human_feedback.session_id")
-    statements = snapshot["statements"]
-    participants = snapshot["participants"]
-    votes = snapshot["votes"]
-    if not isinstance(statements, list) or not statements:
-        raise ScenarioValidationError("human_feedback.statements must be non-empty")
-    for index, statement in enumerate(statements):
-        statement_object = _exact_object(
-            statement, {"index", "text"}, f"human_feedback.statements[{index}]"
-        )
-        if (
-            _json_integer(
-                statement_object["index"], f"human_feedback.statements[{index}].index"
-            )
-            != index
-        ):
-            raise ScenarioValidationError(
-                "human_feedback statement indices must be positional"
-            )
-        _nonempty_text(
-            statement_object["text"], f"human_feedback.statements[{index}].text"
-        )
-    if (
-        not isinstance(participants, list)
-        or not participants
-        or not all(
-            isinstance(participant, str) and participant for participant in participants
-        )
-    ):
-        raise ScenarioValidationError(
-            "human_feedback.participants must be non-empty strings"
-        )
-    if len(set(participants)) != len(participants):
-        raise ScenarioValidationError("human_feedback.participants must be unique")
-    if not isinstance(votes, list) or len(votes) != len(participants):
-        raise ScenarioValidationError("human_feedback.votes must be participant-major")
-    statement_count = len(statements)
-    for row in votes:
-        if not isinstance(row, list) or len(row) != statement_count:
-            raise ScenarioValidationError("human_feedback.votes must be rectangular")
-        for vote in row:
-            if vote is None:
-                continue
-            if _json_integer(vote, "human_feedback vote") not in {-1, 0, 1}:
-                raise ScenarioValidationError("human_feedback contains an invalid vote")
-    masked_cells = snapshot["masked_cells"]
-    if not isinstance(masked_cells, list):
-        raise ScenarioValidationError("human_feedback.masked_cells must be an array")
-    normalized_masked_cells: set[str] = set()
-    for cell in masked_cells:
-        if not isinstance(cell, list) or len(cell) != 2:
-            raise ScenarioValidationError(
-                "human_feedback contains an invalid masked cell"
-            )
-        participant_index = _json_integer(
-            cell[0], "human_feedback masked participant index"
-        )
-        statement_index = _json_integer(
-            cell[1], "human_feedback masked statement index"
-        )
-        if (
-            not 0 <= participant_index < len(participants)
-            or not 0 <= statement_index < statement_count
-        ):
-            raise ScenarioValidationError(
-                "human_feedback contains an invalid masked cell"
-            )
-        cell_id = f"{participant_index},{statement_index}"
-        if cell_id in normalized_masked_cells:
-            raise ScenarioValidationError(
-                "human_feedback contains a duplicate masked cell"
-            )
-        normalized_masked_cells.add(cell_id)
-        if votes[participant_index][statement_index] is not None:
-            raise ScenarioValidationError("human_feedback masked votes must be null")
-    held_out = snapshot["held_out"]
-    if not isinstance(held_out, Mapping):
-        raise ScenarioValidationError("human_feedback.held_out must be an object")
-    for cell_id, vote in held_out.items():
-        if not isinstance(cell_id, str) or not re.fullmatch(r"\d+,\d+", cell_id):
-            raise ScenarioValidationError(
-                "human_feedback contains an invalid held-out cell"
-            )
-        participant_index, statement_index = (
-            int(index) for index in cell_id.split(",")
-        )
-        if (
-            not 0 <= participant_index < len(participants)
-            or not 0 <= statement_index < statement_count
-        ):
-            raise ScenarioValidationError(
-                "human_feedback contains an out-of-bounds held-out cell"
-            )
-        if _json_integer(vote, "human_feedback held-out vote") not in {-1, 0, 1}:
-            raise ScenarioValidationError(
-                "human_feedback contains an invalid held-out vote"
-            )
-    if set(held_out) != normalized_masked_cells:
-        raise ScenarioValidationError("human_feedback held_out must match masked_cells")
-    clusters = snapshot["clusters"]
-    if not isinstance(clusters, list) or not all(
-        isinstance(cluster, Mapping) for cluster in clusters
-    ):
-        raise ScenarioValidationError("human_feedback.clusters must be an array")
-    if not isinstance(snapshot["stats"], Mapping):
-        raise ScenarioValidationError("human_feedback.stats must be an object")
-    meta = snapshot["meta"]
-    if not isinstance(meta, Mapping):
-        raise ScenarioValidationError("human_feedback.meta must be an object")
-    if meta.get("synthetic") is not False:
-        raise ScenarioValidationError("human_feedback.meta.synthetic must be false")
+    try:
+        validate_human_snapshot(value)
+    except HumanSnapshotValidationError as error:
+        raise ScenarioValidationError(f"invalid human_feedback: {error}") from error
 
 
 def scenario_id_for(template_id: str, seed: int | float) -> str:

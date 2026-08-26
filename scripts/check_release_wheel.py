@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import email
 import subprocess
+import sys
+import tarfile
 import tempfile
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+CANONICAL_LICENSE = ROOT / "LICENSE"
 REQUIRES_PYTHON_PARTS = frozenset({">=3.12", "<3.13"})
 EXPECTED_AUTHOR = "Common Ground contributors"
 EXPECTED_LICENSE = "Apache-2.0"
@@ -30,6 +33,19 @@ REPOSITORY_TOOLING = frozenset(
         "baseline-sweep.toml",
     }
 )
+DEPENDENCY_MANIFEST_NAME = "dependency-manifest.txt"
+DEPENDENCY_MANIFEST_PATHS = (
+    ROOT
+    / "environments"
+    / "commonground_predict"
+    / "commonground_predict"
+    / DEPENDENCY_MANIFEST_NAME,
+    ROOT
+    / "environments"
+    / "commonground_elicit"
+    / "commonground_elicit"
+    / DEPENDENCY_MANIFEST_NAME,
+)
 
 
 @dataclass(frozen=True)
@@ -39,6 +55,8 @@ class WheelTarget:
     source_dir: Path
     requirements: frozenset[str]
     bundled_files: frozenset[str]
+    license_expression: str = EXPECTED_LICENSE
+    legal_files: frozenset[str] = frozenset({"LICENSE"})
 
 
 def _data_files(source_dir: Path, package_name: str) -> frozenset[str]:
@@ -52,44 +70,72 @@ def _data_files(source_dir: Path, package_name: str) -> frozenset[str]:
 TARGETS = (
     WheelTarget(
         name="commonground-predict",
-        version="0.1.2",
+        version="0.2.0",
         source_dir=ROOT / "environments" / "commonground_predict",
-        requirements=frozenset({"commonground-score<0.2,>=0.1.0", "verifiers==0.1.14"}),
+        requirements=frozenset(
+            {
+                "commonground-scenarios==0.1.1",
+                "commonground-score==0.1.1",
+                "datasets<6.0.0,>=5.0.1",
+                "verifiers==0.3.0",
+            }
+        ),
         bundled_files=_data_files(
             ROOT / "environments" / "commonground_predict", "commonground_predict"
-        ),
+        )
+        | frozenset({f"commonground_predict/{DEPENDENCY_MANIFEST_NAME}"}),
+        license_expression="Apache-2.0 AND MPL-2.0",
+        legal_files=frozenset({"LICENSE", "LICENSES/MPL-2.0.txt", "NOTICE"}),
     ),
     WheelTarget(
         name="commonground-elicit",
-        version="0.1.2",
+        version="0.2.0",
         source_dir=ROOT / "environments" / "commonground_elicit",
         requirements=frozenset(
             {
-                "commonground-scenarios<0.2,>=0.1.0",
-                "commonground-score<0.2,>=0.1.0",
-                "verifiers==0.1.14",
+                "commonground-scenarios==0.1.1",
+                "commonground-score==0.1.1",
+                "datasets<6.0.0,>=5.0.1",
+                "verifiers==0.3.0",
             }
         ),
         bundled_files=_data_files(
             ROOT / "environments" / "commonground_elicit", "commonground_elicit"
         )
-        | frozenset({"commonground_elicit/data/README.md"}),
+        | frozenset(
+            {
+                "commonground_elicit/data/README.md",
+                f"commonground_elicit/{DEPENDENCY_MANIFEST_NAME}",
+            }
+        ),
     ),
     WheelTarget(
         name="commonground-scenarios",
-        version="0.1.0",
+        version="0.1.1",
         source_dir=ROOT / "packages" / "commonground-scenarios",
         requirements=frozenset(),
         bundled_files=frozenset({"commonground_scenarios/schema/scenario.schema.json"}),
     ),
     WheelTarget(
         name="commonground-score",
-        version="0.1.0",
+        version="0.1.1",
         source_dir=ROOT / "packages" / "commonground-score",
         requirements=frozenset(),
         bundled_files=frozenset(),
     ),
 )
+
+
+def _bundled_source_path(target: WheelTarget, relative_path: str) -> Path:
+    direct_path = target.source_dir / relative_path
+    if direct_path.is_file():
+        return direct_path
+    src_path = target.source_dir / "src" / relative_path
+    if src_path.is_file():
+        return src_path
+    raise AssertionError(
+        f"{target.name}: bundled source file does not exist: {relative_path}"
+    )
 
 
 def _normalized_requirement(requirement: str) -> str:
@@ -125,9 +171,9 @@ def _inspect_wheel(target: WheelTarget, wheel_path: Path) -> int:
                 f"found {metadata['Author']!r}"
             )
         license_value = metadata["License-Expression"] or metadata["License"]
-        if license_value != EXPECTED_LICENSE:
+        if license_value != target.license_expression:
             raise AssertionError(
-                f"{target.name}: expected license {EXPECTED_LICENSE!r}; "
+                f"{target.name}: expected license {target.license_expression!r}; "
                 f"found {license_value!r}"
             )
         classifiers = frozenset(metadata.get_all("Classifier", []))
@@ -171,11 +217,67 @@ def _inspect_wheel(target: WheelTarget, wheel_path: Path) -> int:
                 f"{target.name}: wheel contains a local dependency reference: "
                 f"{requirements!r}"
             )
+        pyproject_files = sorted(
+            name for name in names if Path(name).name == "pyproject.toml"
+        )
+        if pyproject_files:
+            raise AssertionError(
+                f"{target.name}: wheel contains project configuration: "
+                f"{pyproject_files!r}"
+            )
+        license_prefixes = {
+            name[: name.index(".dist-info/licenses/") + len(".dist-info/licenses/")]
+            for name in names
+            if ".dist-info/licenses/" in name
+        }
+        if len(license_prefixes) != 1:
+            raise AssertionError(
+                f"{target.name}: expected one dist-info license directory; "
+                f"found {sorted(license_prefixes)!r}"
+            )
+        license_prefix = next(iter(license_prefixes))
+        expected_legal_members = {
+            f"{license_prefix}{relative_path}" for relative_path in target.legal_files
+        }
+        actual_legal_members = {
+            name
+            for name in names
+            if name.startswith(license_prefix) and not name.endswith("/")
+        }
+        if actual_legal_members != expected_legal_members:
+            raise AssertionError(
+                f"{target.name}: expected wheel legal files "
+                f"{sorted(expected_legal_members)!r}; found "
+                f"{sorted(actual_legal_members)!r}"
+            )
+        for relative_path in target.legal_files:
+            if (
+                wheel.read(f"{license_prefix}{relative_path}")
+                != (target.source_dir / relative_path).read_bytes()
+            ):
+                raise AssertionError(
+                    f"{target.name}: wheel {relative_path} differs from Hub source"
+                )
+        metadata_license_files = frozenset(metadata.get_all("License-File", []))
+        if metadata_license_files != target.legal_files:
+            raise AssertionError(
+                f"{target.name}: expected License-File metadata "
+                f"{sorted(target.legal_files)!r}; found "
+                f"{sorted(metadata_license_files)!r}"
+            )
         missing_files = sorted(target.bundled_files - names)
         if missing_files:
             raise AssertionError(
                 f"{target.name}: release wheel is missing bundled files: {missing_files!r}"
             )
+        for relative_path in target.bundled_files:
+            if (
+                wheel.read(relative_path)
+                != _bundled_source_path(target, relative_path).read_bytes()
+            ):
+                raise AssertionError(
+                    f"{target.name}: wheel {relative_path} differs from Hub source"
+                )
         if target.name in {"commonground-predict", "commonground-elicit"} and not any(
             name.endswith(".jsonl") for name in target.bundled_files
         ):
@@ -191,16 +293,137 @@ def _inspect_wheel(target: WheelTarget, wheel_path: Path) -> int:
         return len(target.bundled_files)
 
 
+def _inspect_sdist(target: WheelTarget, sdist_path: Path) -> None:
+    with tarfile.open(sdist_path, "r:gz") as archive:
+        members = {member.name: member for member in archive.getmembers()}
+        for relative_path in target.legal_files:
+            legal_names = sorted(
+                name for name in members if name.endswith(f"/{relative_path}")
+            )
+            if len(legal_names) != 1:
+                raise AssertionError(
+                    f"{target.name}: expected one sdist {relative_path}; "
+                    f"found {legal_names!r}"
+                )
+            legal_file = archive.extractfile(members[legal_names[0]])
+            if (
+                legal_file is None
+                or legal_file.read() != (target.source_dir / relative_path).read_bytes()
+            ):
+                raise AssertionError(
+                    f"{target.name}: sdist {relative_path} differs from Hub source"
+                )
+        for relative_path in target.bundled_files:
+            bundled_names = sorted(
+                name for name in members if name.endswith(f"/{relative_path}")
+            )
+            if len(bundled_names) != 1:
+                raise AssertionError(
+                    f"{target.name}: expected one sdist {relative_path}; "
+                    f"found {bundled_names!r}"
+                )
+            bundled_file = archive.extractfile(members[bundled_names[0]])
+            if (
+                bundled_file is None
+                or bundled_file.read()
+                != _bundled_source_path(target, relative_path).read_bytes()
+            ):
+                raise AssertionError(
+                    f"{target.name}: sdist {relative_path} differs from Hub source"
+                )
+
+
+def _fresh_install(wheel_paths: list[Path], output_dir: Path) -> None:
+    """Install built wheels together and load every taskset outside the source tree."""
+
+    venv_dir = output_dir / "fresh-install"
+    subprocess.run(
+        ["uv", "venv", "--python", "3.12", str(venv_dir)],
+        cwd=output_dir,
+        check=True,
+    )
+    venv_python = venv_dir / (
+        "Scripts/python.exe" if sys.platform == "win32" else "bin/python"
+    )
+    subprocess.run(
+        [
+            "uv",
+            "pip",
+            "install",
+            "--python",
+            str(venv_python),
+            "--find-links",
+            str(output_dir),
+            *(
+                argument
+                for manifest_path in DEPENDENCY_MANIFEST_PATHS
+                for argument in ("--requirement", str(manifest_path))
+            ),
+            *(str(path) for path in wheel_paths),
+        ],
+        cwd=output_dir,
+        check=True,
+    )
+    probe = """
+from importlib.metadata import version
+
+import commonground_elicit
+import commonground_predict
+import commonground_scenarios
+import commonground_score
+
+assert version("commonground-predict") == "0.2.0"
+assert version("commonground-elicit") == "0.2.0"
+assert version("commonground-scenarios") == "0.1.1"
+assert version("commonground-score") == "0.1.1"
+assert len(commonground_predict.load_environment().load()) == 20
+assert len(commonground_elicit.load_environment().load()) == 20
+assert len(commonground_elicit.load_environment(task="elicit-ask").load()) == 20
+"""
+    subprocess.run(
+        [str(venv_python), "-I", "-c", probe],
+        cwd=output_dir,
+        check=True,
+    )
+
+
 def main() -> None:
+    subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts" / "check_dependency_manifests.py"),
+            "--check",
+        ],
+        cwd=ROOT,
+        check=True,
+    )
     summaries: list[str] = []
     with tempfile.TemporaryDirectory(prefix="commonground-wheel-") as temporary_dir:
         output_dir = Path(temporary_dir)
+        wheel_paths: list[Path] = []
         for target in TARGETS:
+            source_license = target.source_dir / "LICENSE"
+            if source_license.read_bytes() != CANONICAL_LICENSE.read_bytes():
+                raise AssertionError(
+                    f"{target.name}: Hub source LICENSE differs from repository"
+                )
             subprocess.run(
                 [
                     "uv",
                     "build",
                     "--wheel",
+                    "--out-dir",
+                    str(output_dir),
+                    str(target.source_dir),
+                ],
+                cwd=ROOT,
+                check=True,
+            )
+            subprocess.run(
+                [
+                    "uv",
+                    "build",
+                    "--sdist",
                     "--out-dir",
                     str(output_dir),
                     str(target.source_dir),
@@ -214,14 +437,24 @@ def main() -> None:
                 raise AssertionError(
                     f"{target.name}: expected one release wheel, found {len(wheels)}"
                 )
+            wheel_paths.append(wheels[0])
             bundled_count = _inspect_wheel(target, wheels[0])
+            sdists = sorted(output_dir.glob(f"{wheel_prefix}*.tar.gz"))
+            if len(sdists) != 1:
+                raise AssertionError(
+                    f"{target.name}: expected one release sdist, found {len(sdists)}"
+                )
+            _inspect_sdist(target, sdists[0])
             summaries.append(
-                f"{wheels[0].name} ({bundled_count} required bundled files)"
+                f"{wheels[0].name} + {sdists[0].name} "
+                f"({bundled_count} required bundled files)"
             )
+        _fresh_install(wheel_paths, output_dir)
 
     print(
-        "release wheel check passed (repository tooling excluded): "
-        + "; ".join(summaries)
+        "release artifact check passed (licenses present; project configuration and "
+        "repository tooling excluded; exact-manifest fresh wheel install and taskset "
+        "loads passed): " + "; ".join(summaries)
     )
 
 

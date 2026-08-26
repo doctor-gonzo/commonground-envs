@@ -1,9 +1,9 @@
 # commonground-elicit
 
-`commonground-elicit` is a deterministic Verifiers `SingleTurnEnv` for finding
-planted ambiguities, contradictions, and gaps in small sets of fictional policy
-documents. Its v0 scenarios are synthetic, generated offline from committed
-templates, and carry explicit provenance.
+`commonground-elicit` 0.2.0 is a deterministic native Verifiers v1 taskset for
+finding planted ambiguities, contradictions, and gaps in small sets of
+fictional policy documents. Its scenarios are synthetic, generated offline
+from committed templates, and carry explicit provenance.
 
 The find task accepts strict JSON containing `findings` and `questions`:
 
@@ -11,10 +11,18 @@ The find task accepts strict JSON containing `findings` and `questions`:
 {"findings":[{"doc_id":"policy","quote":"ambiguous passage","type":"ambiguity"}],"questions":[{"doc_id":"policy","quote":"ambiguous passage","question":"Should this threshold be made explicit?","target_stances":{"operations":"agree","risk":"disagree","support":"pass"}}]}
 ```
 
-The reward is one-to-one finding F1 against the planted answer key. A candidate
-must match the document, finding type, and normalized quote at the configured
-overlap threshold. Extra findings therefore reduce precision. Question utility
-is computed beside finding F1 as a logged metric with weight zero.
+The reward is global one-to-one finding F1 against the planted answer key. A
+candidate quote must first be a normalized ordered contiguous token span of the
+claimed visible document. It must then match the document, finding type, and
+planted anchor with at least 80% contiguous anchor coverage and a
+longest-common-contiguous-token F1 of at least 0.5. This permits a close quote
+or modest surrounding context without letting a tiny anchor fragment count as
+a full true positive. Semantic operators are preserved during normalization,
+so symbolic negation, inequality, sign, and percentage changes cannot inherit
+the original quote's grounding. Reordered tokens, fabricated spans,
+paraphrases, and actor/object reversals likewise receive no credit. Extra
+findings reduce precision. Question utility is computed beside finding F1 as a
+logged metric with weight zero.
 
 Set `task="elicit-ask"` for the question-raising split. It requires exactly K
 strict-JSON questions with a quote copied from the visible document and a
@@ -24,9 +32,10 @@ canonical question or a finite generator-authored alias under NFC
 normalization, and the complete planted target-stance vector matches.
 Duplicates targeting the same planting are rejected even when one uses an
 alias. Unlisted paraphrases, composites, and reversals receive zero. This
-bounded-recall v0 contract avoids rewarding lexical fragments without a judge
-model. Disagreement is the mean of normalized vote entropy and faction-pair separation from
-`commonground-score`. Generic divisiveness does not match a planting.
+bounded-recall contract avoids rewarding lexical fragments without a judge
+model. Disagreement is the mean of normalized vote entropy and faction-pair
+separation from `commonground-score`. Generic divisiveness does not match a
+planting.
 Questions are yes/no propositions: `agree` predicts yes, `disagree` predicts
 no, and `pass` means that faction takes no position.
 
@@ -36,12 +45,12 @@ loading, and scoring do not use the network, wall clock, or a judge model. On
 the find task, a row with fewer visible plants caps its logged companion
 question count to the visible answer-key size.
 
-Rendered Verifiers rows use only the canonical `prompt`, `answer`, `info`, and
-`example_id` columns. The hidden `answer` JSON carries the planted findings and
-question oracle; `info` carries the effective question count, panel
-polarization, and combined-question mode used by scoring. Prompts are rendered
-only from the visible documents and public faction descriptions, never from
-either hidden scoring payload.
+Native Verifiers rows use typed `TaskData` with only the model prompt and
+scoring-side answer/info fields. The hidden answer carries the planted findings
+and question oracle; prompts are rendered only from visible documents and
+public faction descriptions. Completion parsing is bounded to 32,768
+characters, 64 object starts, depth 32, and 10,000 decoded nodes. Malformed or
+over-limit output fails closed to zero reward.
 
 ## Configuration
 
@@ -51,23 +60,35 @@ The `split` loader argument selects the bundled rollout/eval file by name:
 `train_data_path` or `COMMONGROUND_ELICIT_TRAIN_DATA_PATH` independently takes
 precedence for the environment's training dataset.
 
-For hosted training against the bundled train split:
+Validate the native v1 training taskset without a model:
 
-```toml
-[[env]]
-id = "charliethompson/commonground-elicit"
+```bash
+uv run validate commonground-elicit --taskset.split train \
+  --runtime.type subprocess --rich false
+```
 
-[env.args]
-split = "train"
+The packaged `commonground_elicit/dependency-manifest.txt` records the exact
+no-dev resolution used for this 0.2.0 candidate, including the root `uv.lock`
+SHA-256, Python scope, and uv generator version. Workspace sources appear as
+immutable distribution pins; the manifest is provenance rather than a
+cross-platform installer.
+
+For model evaluation, taskset controls live below `env.taskset`:
+
+```bash
+uv run eval commonground-elicit --env.taskset.split train -m MODEL --no-push
+uv run eval commonground-elicit --env.taskset.task-mode elicit-ask -m MODEL --no-push
 ```
 
 ## Bundled splits and floors
 
-`commonground_elicit/data/train_synthetic.jsonl` contains 40 scenarios from the
-committed training template set. `commonground_elicit/data/eval_synthetic_heldout.jsonl`
-contains 20 scenarios from the disjoint held-out template set. Every scenario is explicitly labeled
-`synthetic: true`; generation uses fixed seeds, an explicit provenance date,
-and templated offline prose. Regenerate both files with:
+`commonground_elicit/data/train_synthetic.jsonl` contains 40 semantically
+unique scenarios across four committed training templates and ten operative
+contexts each. `commonground_elicit/data/eval_synthetic_heldout.jsonl`
+contains 20 semantically unique scenarios across twenty disjoint held-out
+domains. Fingerprints cover document and answer-key semantics while ignoring
+seed, organization name, and document order; generation fails on duplicates.
+Every row is explicitly labeled `synthetic: true`. Regenerate both files with:
 
 ```bash
 uv run python scripts/generate_elicit_splits.py
@@ -81,42 +102,22 @@ prints:
 
 | Task | Baseline | mean reward |
 | --- | --- | ---: |
-| find | Random visible spans | 0.150 |
-| find | Flag vague-sounding spans | 0.500 |
+| find | Random visible spans | 0.133 |
+| find | Flag vague-sounding spans | 0.195 |
 | elicit-ask | Template clarity questions | 0.000 |
 | elicit-ask | Randomly targeted questions | 0.000 |
 
 See the bundled data directory's dataset card for the planting and separation
 methodology.
 
-Model baselines use the repository's multi-environment sweep with three
-rollouts per held-out example. The aggregator emits reward, `finding_f1`, and
-`question_utility` mean ± population standard deviation only after every
-expected rollout is present; see the
-[operator commands](https://github.com/doctor-gonzo/commonground-envs#baseline-sweep).
+The 0.1.x model table is intentionally removed: 0.2.0 replaced both the held-out
+semantic corpus and the quote-grounding reward, so those historical scores are
+not comparable. Fresh baselines must be run on the exact private 0.2.0
+candidate before any public performance claim.
 
-Recorded 2026-08-16 via `uv run vf-eval commonground-elicit -m <model> -n 20 -r 3 --save-results`
-against Prime Inference, aggregated by `scripts/aggregate_baselines.py`:
-
-| Model | finding_f1 (mean ± std) | question_utility (mean) |
-| --- | ---: | ---: |
-| anthropic/claude-sonnet-4.5 | 0.524 ± 0.205 | 0.000 |
-| openai/gpt-4.1-mini | 0.502 ± 0.257 | 0.000 |
-| openai/gpt-4.1 | 0.448 ± 0.163 | 0.000 |
-| google/gemini-2.5-flash | 0.405 ± 0.268 | 0.000 |
-| meta-llama/llama-3.3-70b-instruct | 0.294 ± 0.259 | 0.000 |
-
-Reading: only two of five models clear the "flag vague-sounding spans"
-heuristic floor (0.500) — a naive heuristic remains competitive with frontier
-models at strict-F1 issue finding (ambiguities, contradictions, and gaps),
-which is the headroom this environment exists to measure. Scores also reflect
-the strict-compliance design: findings must cite the planted span at the
-planted granularity, so recall-heavy smaller models can edge
-precision-conservative larger ones. `question_utility` at 0.000 across all
-models reflects the deliberately bounded-recall v0 question contract
-(canonical/alias matching); in these recorded default find-task runs it is a
-logged weight-zero companion metric. In the separate `elicit-ask` task mode it
-is the scored reward (weight 1.0) under the same bounded-recall contract.
+The public package contains every planted answer key for reproducibility and
+open training. It is not contamination-resistant. A leaderboard or
+consequential comparison needs a private server-side evaluation split.
 
 ## The commonground family and human socket
 
@@ -126,20 +127,28 @@ finding and question raising. They share `commonground-score` and the same
 synthetic-versus-human provenance boundary without combining incompatible
 rubrics behind a mode flag.
 
-The scenario schema reserves `human_feedback` for a validated, consented
-Context Engine snapshot. On that future path, real votes replace the persona
-panel and provenance must be marked human and non-synthetic. The bundled elicit
-release uses planted synthetic scenarios only; it makes no real-human-data
-claim.
+The scenario schema reserves `human_feedback` for a reviewed, consented
+Context Engine snapshot. It uses the same strict validator as predict intake:
+positional pseudonyms, exact clusters with `k >= 5`, consistent vote statistics,
+no held-out labels, and explicit source, rights, schema-version, exporter, and
+privacy-review attestations. Automated identifier screening is limited and
+never replaces human review. The bundled elicit release uses synthetic
+scenarios only.
 
 ## Evaluation
 
-After installing the locked workspace dependencies, run a local Verifiers
-evaluation with:
+After installing the locked workspace dependencies, run the model-free native
+v1 validation gate:
 
 ```bash
-uv run vf-eval commonground-elicit
+uv run validate commonground-elicit --runtime.type subprocess --rich false
 ```
 
-The test suite, split generator, rewards, and floor baselines are hermetic and
-require no API key.
+Run a model evaluation without uploading results with:
+
+```bash
+uv run eval commonground-elicit -m MODEL --no-push
+```
+
+The test suite, split generator, rewards, validation, and floor baselines are
+hermetic and require no API key.

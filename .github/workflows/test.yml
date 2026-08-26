@@ -16,6 +16,7 @@ jobs:
       - name: Install uv and Python
         uses: astral-sh/setup-uv@e92bafb6253dcd438e0484186d7669ea7a8ca1cc # v6.4.3
         with:
+          version: "0.10.9"
           python-version: "3.12"
       - name: Sync locked workspace
         run: uv sync --all-packages --locked
@@ -32,11 +33,33 @@ jobs:
       - name: Install uv and Python
         uses: astral-sh/setup-uv@e92bafb6253dcd438e0484186d7669ea7a8ca1cc # v6.4.3
         with:
+          version: "0.10.9"
           python-version: "3.12"
       - name: Sync locked workspace
         run: uv sync --all-packages --locked
       - name: Run mypy
         run: uv run mypy
+
+  dependency-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@e92bafb6253dcd438e0484186d7669ea7a8ca1cc # v6.4.3
+        with:
+          version: "0.10.9"
+          python-version: "3.12"
+      - name: Export locked third-party requirements
+        run: >-
+          uv export --locked --all-packages --no-dev --no-emit-workspace
+          --format requirements.txt
+          --output-file /tmp/commonground-audit-requirements.txt
+      - name: Audit locked dependencies
+        run: >-
+          uvx --from pip-audit==2.10.1 pip-audit
+          --requirement /tmp/commonground-audit-requirements.txt
+          --no-deps --disable-pip
 
   test:
     runs-on: ubuntu-latest
@@ -46,9 +69,12 @@ jobs:
       - name: Install uv and Python
         uses: astral-sh/setup-uv@e92bafb6253dcd438e0484186d7669ea7a8ca1cc # v6.4.3
         with:
+          version: "0.10.9"
           python-version: "3.12"
       - name: Sync locked workspace
         run: uv sync --all-packages --locked
+      - name: Verify release dependency manifests
+        run: uv run python scripts/check_dependency_manifests.py --check
       - name: Run tests
         run: uv run pytest
       - name: Verify release wheel

@@ -324,6 +324,7 @@ def test_packaged_json_schema_names_every_top_level_field() -> None:
     schema = load_scenario_schema()
 
     assert schema["$schema"] == "https://json-schema.org/draft/2020-12/schema"
+    assert schema["$id"] == "urn:commonground:schema:scenario:1"
     assert set(schema["required"]) == {
         "scenario_id",
         "organization",
@@ -393,9 +394,9 @@ def test_valid_human_socket_replaces_panel_and_declares_real_provenance() -> Non
 @pytest.mark.parametrize(
     ("field", "value", "error"),
     [
-        ("masked_cells", "not-an-array", "masked_cells must be an array"),
-        ("held_out", [], "held_out must be an object"),
-        ("clusters", {}, "clusters must be an array"),
+        ("masked_cells", "not-an-array", "requires empty masked_cells"),
+        ("held_out", [], "requires empty held_out"),
+        ("clusters", {}, "clusters must be a non-empty list"),
         ("stats", [], "stats must be an object"),
         ("meta", [], "meta must be an object"),
     ],
@@ -435,10 +436,6 @@ def test_schema_and_manual_validator_share_integral_number_semantics() -> None:
     )
     scenario = as_human_scenario(generate_scenario(42, TRAIN_TEMPLATES[0]))
     scenario["provenance"]["seed"] = 42.0
-    scenario["human_feedback"]["statements"][0]["index"] = 0.0
-    scenario["human_feedback"]["votes"] = [[None], [-1.0], [0.0]]
-    scenario["human_feedback"]["masked_cells"] = [[0.0, 0.0]]
-    scenario["human_feedback"]["held_out"] = {"0,0": 1.0}
 
     validate_scenario(scenario)
     assert list(schema_validator.iter_errors(scenario)) == []
@@ -449,12 +446,6 @@ def test_schema_and_manual_validator_share_integral_number_semantics() -> None:
             "index", 0.5
         ),
         lambda candidate: candidate["human_feedback"]["votes"][1].__setitem__(0, -0.5),
-        lambda candidate: candidate["human_feedback"]["masked_cells"][0].__setitem__(
-            0, 0.5
-        ),
-        lambda candidate: candidate["human_feedback"]["held_out"].__setitem__(
-            "0,0", 0.5
-        ),
     )
     for mutation in mutations:
         invalid = copy.deepcopy(scenario)
@@ -471,12 +462,6 @@ def test_schema_and_manual_validator_share_integral_number_semantics() -> None:
         ].__setitem__("index", value),
         lambda candidate, value: candidate["human_feedback"]["votes"][1].__setitem__(
             0, value
-        ),
-        lambda candidate, value: candidate["human_feedback"]["masked_cells"][
-            0
-        ].__setitem__(0, value),
-        lambda candidate, value: candidate["human_feedback"]["held_out"].__setitem__(
-            "0,0", value
         ),
     )
     for mutation in numeric_field_mutations:
@@ -508,18 +493,65 @@ def as_human_scenario(scenario: dict[str, object]) -> dict[str, object]:
     scenario["persona_panel"] = None
     scenario["provenance"]["synthetic"] = False
     scenario["provenance"]["generation_mode"] = "human"
+    participants = [f"p{index:03d}" for index in range(10)]
+    votes = [[1] if index % 2 == 0 else [-1] for index in range(10)]
     scenario["human_feedback"] = {
         "session_id": "verified-session",
         "statements": [
             {"index": 0, "text": "Should the proposed interpretation apply?"}
         ],
-        "participants": ["p000", "p001", "p002"],
-        "votes": [[1], [-1], [0]],
+        "participants": participants,
+        "votes": votes,
         "masked_cells": [],
         "held_out": {},
-        "clusters": [],
-        "stats": {},
-        "meta": {"synthetic": False},
+        "clusters": [
+            {
+                "id": 0,
+                "members": participants[:5],
+                "member_indices": list(range(5)),
+                "center": [],
+            },
+            {
+                "id": 1,
+                "members": participants[5:],
+                "member_indices": list(range(5, 10)),
+                "center": [],
+            },
+        ],
+        "stats": {
+            "comment": [
+                {
+                    "commentIndex": 0,
+                    "agrees": 5,
+                    "disagrees": 5,
+                    "unsure": 0,
+                    "total": 10,
+                    "responded": 10,
+                    "extremity": None,
+                    "divisiveness": None,
+                }
+            ]
+        },
+        "meta": {
+            "synthetic": False,
+            "k_anonymity": 5,
+            "source": "context-engine-session",
+            "seed": 42,
+            "consent_scope": "public-benchmark",
+            "redistribution_rights_approved": True,
+            "schema_version": "commonground-human-snapshot-v2",
+            "exporter_version": "1.2.0",
+            "source_commit": "a" * 40,
+            "privacy_review": {
+                "attested": True,
+                "reviewed_at": "2026-08-26",
+                "checks": [
+                    "direct-identifiers",
+                    "free-text",
+                    "participant-pseudonyms",
+                ],
+            },
+        },
     }
     return scenario
 

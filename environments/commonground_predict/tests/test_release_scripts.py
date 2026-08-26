@@ -12,6 +12,21 @@ from typing import Any
 import pytest
 
 ROOT = Path(__file__).resolve().parents[3]
+REPOSITORY_SCRIPTS = (
+    ROOT / "scripts" / "compute_floors.py",
+    ROOT / "scripts" / "ingest_snapshots.py",
+    ROOT
+    / "environments"
+    / "commonground_predict"
+    / "scripts"
+    / "generate_synthetic_eval.py",
+)
+if not all(path.is_file() for path in REPOSITORY_SCRIPTS):
+    pytest.skip(
+        "repository-only release tests require the complete monorepo checkout",
+        allow_module_level=True,
+    )
+
 DATA_DIR = Path(__file__).resolve().parents[1] / "commonground_predict" / "data"
 SYNTHETIC_SPLIT = DATA_DIR / "eval_synthetic.jsonl"
 TRAIN_SPLIT = DATA_DIR / "train_synthetic.jsonl"
@@ -109,6 +124,7 @@ def test_bundled_eval_split_matches_seeded_policy_generator() -> None:
         seed=eval_generator_module.SEED,
         snapshot_count=eval_generator_module.SNAPSHOT_COUNT,
         session_index_offset=0,
+        statement_bank=eval_generator_module.STATEMENT_BANK,
     )
 
     assert SYNTHETIC_SPLIT.read_bytes() == expected
@@ -119,16 +135,23 @@ def test_bundled_train_split_matches_seeded_policy_generator() -> None:
         seed=train_generator_module.TRAIN_SEED,
         snapshot_count=train_generator_module.TRAIN_SNAPSHOT_COUNT,
         session_index_offset=train_generator_module.SESSION_INDEX_OFFSET,
+        statement_bank=train_generator_module.TRAIN_STATEMENT_BANK,
     )
 
     assert TRAIN_SPLIT.read_bytes() == expected
 
 
 def render_generated_split(
-    *, seed: int, snapshot_count: int, session_index_offset: int
+    *,
+    seed: int,
+    snapshot_count: int,
+    session_index_offset: int,
+    statement_bank: list[str],
 ) -> bytes:
     original_seed = eval_generator_module.SEED
+    original_statement_bank = eval_generator_module.STATEMENT_BANK
     eval_generator_module.SEED = seed
+    eval_generator_module.STATEMENT_BANK = statement_bank
     try:
         rng = random.Random(seed)
         snapshots = [
@@ -137,6 +160,7 @@ def render_generated_split(
         ]
     finally:
         eval_generator_module.SEED = original_seed
+        eval_generator_module.STATEMENT_BANK = original_statement_bank
     return "".join(
         json.dumps(snapshot, separators=(",", ":")) + "\n" for snapshot in snapshots
     ).encode()
@@ -207,21 +231,37 @@ def test_ingest_accepts_real_export_and_writes_manifest_without_touching_bundled
         json.loads(output.read_text(encoding="utf-8"))["session_id"] == "real-session-a"
     )
     assert json.loads(manifest.read_text(encoding="utf-8")) == {
+        "contract": "commonground-human-snapshot-v2",
         "output_file": "eval_real.jsonl",
+        "output_sha256": hashlib.sha256(output.read_bytes()).hexdigest(),
         "snapshot_count": 1,
         "snapshots": [
             {
                 "cluster_count": 2,
+                "consent_scope": "public-benchmark",
+                "exporter_version": "1.2.3",
                 "k_anonymity": 5,
                 "participant_count": 10,
+                "privacy_review": {
+                    "attested": True,
+                    "checks": [
+                        "direct-identifiers",
+                        "free-text",
+                        "participant-pseudonyms",
+                    ],
+                    "reviewed_at": "2026-08-26",
+                },
+                "redistribution_rights_approved": True,
+                "schema_version": "commonground-human-snapshot-v2",
                 "session_id": "real-session-a",
+                "source_commit": "a" * 40,
                 "source_index": 0,
                 "source_line": 1,
                 "source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
                 "statement_count": 2,
             }
         ],
-        "version": 1,
+        "version": 2,
     }
     assert (DATA_DIR / "eval_synthetic.jsonl").read_bytes() == synthetic_before
     assert (DATA_DIR / "eval_ce_demo.jsonl").read_bytes() == demo_before
@@ -247,9 +287,7 @@ def test_ingest_rejects_each_statement_pii_pattern(
     result = run_rejected_ingest(tmp_path, snapshot)
 
     assert result == 1, label
-    assert (
-        "statement 0 contains a redacted identifier pattern" in capsys.readouterr().err
-    )
+    assert "statement 0.text contains" in capsys.readouterr().err
 
 
 def test_ingest_rejects_meta_k_below_floor(
@@ -269,7 +307,7 @@ def test_ingest_rejects_cluster_below_declared_k(
     move_participant(snapshot, participant_index=4, from_cluster=0, to_cluster=1)
 
     assert run_rejected_ingest(tmp_path, snapshot) == 1
-    assert "cluster size below k=5: [4]" in capsys.readouterr().err
+    assert "cluster 0 must contain at least k=5" in capsys.readouterr().err
 
 
 def test_ingest_rejects_ragged_vote_matrix(
@@ -279,7 +317,7 @@ def test_ingest_rejects_ragged_vote_matrix(
     snapshot["votes"][0].pop()
 
     assert run_rejected_ingest(tmp_path, snapshot) == 1
-    assert "votes row 0 is ragged" in capsys.readouterr().err
+    assert "votes row 0 must contain 2 cells" in capsys.readouterr().err
 
 
 def test_ingest_rejects_transposed_vote_matrix(
@@ -301,7 +339,7 @@ def test_ingest_rejects_nonempty_masked_cells(
     snapshot["masked_cells"] = [[0, 0]]
 
     assert run_rejected_ingest(tmp_path, snapshot) == 1
-    assert "real intake requires empty masked_cells" in capsys.readouterr().err
+    assert "human snapshot requires empty masked_cells" in capsys.readouterr().err
 
 
 def test_ingest_rejects_duplicate_session_ids(
@@ -348,7 +386,7 @@ def test_ingest_skip_invalid_writes_only_valid_snapshots(
     )
 
     assert result == 0
-    assert "real intake requires empty masked_cells" in capsys.readouterr().err
+    assert "human snapshot requires empty masked_cells" in capsys.readouterr().err
     assert [
         json.loads(line)["session_id"] for line in output.read_text().splitlines()
     ] == ["real-session-a"]
@@ -361,7 +399,7 @@ def test_ingest_rejects_synthetic_provenance(
     snapshot["meta"]["synthetic"] = True
 
     assert run_rejected_ingest(tmp_path, snapshot) == 1
-    assert "real intake requires meta.synthetic=false" in capsys.readouterr().err
+    assert "meta.synthetic must be false" in capsys.readouterr().err
 
 
 def test_ingest_rejects_identifier_shaped_participant(
@@ -395,7 +433,7 @@ def test_ingest_rejects_unknown_nested_fields_instead_of_republishing_them(
         ),
         (
             lambda snapshot: snapshot.__setitem__("clusters", [0] * 5 + [1] * 5),
-            "exporter cluster objects",
+            "cluster 0 must be an object",
         ),
         (
             lambda snapshot: snapshot["votes"][0].__setitem__(0, 2),
@@ -617,15 +655,29 @@ def valid_real_snapshot() -> dict[str, Any]:
                     "unsure": 0,
                     "total": 10,
                     "responded": 10,
-                    "extremity": 1.0,
-                    "divisiveness": 1.0,
+                    "extremity": None,
+                    "divisiveness": None,
                 }
                 for statement_index in range(2)
             ]
         },
         "meta": {
+            "consent_scope": "public-benchmark",
+            "exporter_version": "1.2.3",
             "k_anonymity": 5,
+            "privacy_review": {
+                "attested": True,
+                "checks": [
+                    "direct-identifiers",
+                    "free-text",
+                    "participant-pseudonyms",
+                ],
+                "reviewed_at": "2026-08-26",
+            },
+            "redistribution_rights_approved": True,
+            "schema_version": "commonground-human-snapshot-v2",
             "source": "context-engine-session",
+            "source_commit": "a" * 40,
             "synthetic": False,
             "seed": 42,
         },

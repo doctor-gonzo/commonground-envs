@@ -4,7 +4,9 @@ version = "0.0.0"
 description = "Workspace for Common Ground deliberation evaluation environments."
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
-dependencies = []
+dependencies = [
+    "commonground-scenarios==0.1.1",
+]
 
 [dependency-groups]
 dev = [
@@ -46,8 +48,11 @@ warn_unused_configs = true
 warn_unused_ignores = true
 
 [[tool.mypy.overrides]]
-module = ["datasets", "verifiers"]
+module = ["datasets", "verifiers", "verifiers.*"]
 ignore_missing_imports = true
+
+[tool.uv]
+required-version = "==0.10.9"
 
 [tool.uv.workspace]
 members = [

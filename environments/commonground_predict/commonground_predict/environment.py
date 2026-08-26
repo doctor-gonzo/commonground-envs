@@ -6,15 +6,19 @@ import copy
 import hashlib
 import json
 import os
+import re
 from collections.abc import Mapping
 from math import isfinite
 from pathlib import Path
-from typing import Any
+from typing import Any, Never
 
-import verifiers as vf
+import verifiers.v1 as vf
+from commonground_scenarios import (
+    HumanSnapshotValidationError,
+    validate_human_snapshot,
+)
 from commonground_score import brier_score as score_brier_score
 from commonground_score import vote_accuracy as score_vote_accuracy
-from datasets import Dataset
 
 ENV_ID = "commonground-predict"
 DATA_ENV_VAR = "COMMONGROUND_DATA_PATH"
@@ -30,19 +34,94 @@ BUNDLED_SPLIT_PATHS = {
 VALID_VOTES = {-1, 0, 1}
 LABEL_TO_VOTE = {"agree": 1, "disagree": -1, "pass": 0}
 VOTE_TO_LABEL = {vote: label for label, vote in LABEL_TO_VOTE.items()}
+MAX_COMPLETION_CHARS = 65_536
+MAX_JSON_NESTING = 64
+MAX_JSON_CANDIDATES = 128
+CELL_ID_PATTERN = re.compile(r"(0|[1-9]\d*),(0|[1-9]\d*)")
 
 
-class PredictionJsonParser(vf.Parser):
+class PredictionJsonParser:
     """Extract the last predictions JSON object from a completion."""
 
     def parse(self, text: str) -> dict[str, Any]:
         try:
             parsed = extract_json_object(text)
-        except ValueError:
+        except (RecursionError, ValueError):
             return {}
         if isinstance(parsed, dict):
             return parsed
         return {}
+
+    def parse_answer(self, completion: Any) -> dict[str, Any]:
+        """Parse the last assistant message for compatibility with local helpers."""
+
+        if isinstance(completion, str):
+            return self.parse(completion)
+        if not isinstance(completion, list):
+            return {}
+        for message in reversed(completion):
+            if isinstance(message, Mapping):
+                role = message.get("role")
+                content = message.get("content")
+            else:
+                role = getattr(message, "role", None)
+                content = getattr(message, "content", None)
+            if role == "assistant" and isinstance(content, str):
+                return self.parse(content)
+        return {}
+
+
+class PredictionTaskData(vf.TaskData):
+    """One immutable masked-vote task and its scoring-side reference data."""
+
+    answer: dict[str, int]
+    info: dict[str, Any]
+    snapshot: dict[str, Any]
+
+
+class PredictionTask(vf.Task[PredictionTaskData]):
+    """Native Verifiers v1 prediction task."""
+
+    @vf.reward
+    async def vote_accuracy(self, trace: vf.Trace) -> float:
+        predictions = parse_prediction_text(trace.last_reply)
+        return float(
+            score_vote_accuracy(coerce_point_predictions(predictions), self.data.answer)
+        )
+
+    @vf.metric
+    async def brier(self, trace: vf.Trace) -> float:
+        predictions = parse_prediction_text(trace.last_reply)
+        return float(
+            score_brier_score(coerce_brier_predictions(predictions), self.data.answer)
+        )
+
+
+class CommonGroundPredictConfig(vf.TasksetConfig):
+    """Public load-time controls for the prediction taskset."""
+
+    masked_vote_count: int | None = None
+    min_cluster_count: int | None = None
+    data_path: Path | None = None
+    split: str = "eval"
+
+
+class CommonGroundPredictTaskset(vf.Taskset[PredictionTask, CommonGroundPredictConfig]):
+    """Load deterministic masked-vote tasks through the Verifiers v1 API."""
+
+    def load(self) -> list[PredictionTask]:
+        bundled_path = _bundled_data_path(self.config.split)
+        configured_path = self.config.data_path or os.environ.get(DATA_ENV_VAR)
+        resolved_path = Path(configured_path) if configured_path else bundled_path
+        snapshots = load_snapshots(
+            resolved_path,
+            masked_vote_count=self.config.masked_vote_count,
+            min_cluster_count=self.config.min_cluster_count,
+        )
+        return [
+            PredictionTask(snapshot_to_task_data(snapshot, index), self.config.task)
+            for index, snapshot in enumerate(snapshots)
+        ]
 
 
 def load_environment(
@@ -50,35 +129,19 @@ def load_environment(
     min_cluster_count: int | None = None,
     data_path: str | os.PathLike[str] | None = None,
     split: str = "eval",
-    **kwargs: Any,
-) -> vf.SingleTurnEnv:
-    """Build the deterministic single-turn masked-vote prediction environment."""
+    **config_kwargs: Any,
+) -> CommonGroundPredictTaskset:
+    """Build the native v1 taskset with the legacy factory's load controls."""
 
-    bundled_path = _bundled_data_path(split)
-    configured_path = data_path or os.environ.get(DATA_ENV_VAR)
-    resolved_path = Path(configured_path) if configured_path else bundled_path
-    snapshots = load_snapshots(
-        resolved_path,
-        masked_vote_count=masked_vote_count,
-        min_cluster_count=min_cluster_count,
-    )
-    dataset = Dataset.from_list([snapshot_to_row(snapshot) for snapshot in snapshots])
-    parser = PredictionJsonParser()
-    rubric = vf.Rubric(funcs=[vote_accuracy, brier], weights=[1.0, 0.0], parser=parser)
-    env_args = {
-        "masked_vote_count": masked_vote_count,
-        "min_cluster_count": min_cluster_count,
-        "data_path": str(resolved_path),
-        "split": split,
-    }
-    return vf.SingleTurnEnv(
-        dataset=dataset,
-        eval_dataset=dataset,
-        parser=parser,
-        rubric=rubric,
-        env_id=ENV_ID,
-        env_args=env_args,
-        **kwargs,
+    return CommonGroundPredictTaskset(
+        CommonGroundPredictConfig(
+            id=ENV_ID,
+            masked_vote_count=masked_vote_count,
+            min_cluster_count=min_cluster_count,
+            data_path=Path(data_path) if data_path is not None else None,
+            split=split,
+            **config_kwargs,
+        )
     )
 
 
@@ -101,6 +164,11 @@ def load_snapshots(
 ) -> list[dict[str, Any]]:
     """Load JSONL snapshots and apply deterministic difficulty filters."""
 
+    if masked_vote_count is not None and type(masked_vote_count) is not int:
+        raise ValueError("masked_vote_count must be an integer or null")
+    if min_cluster_count is not None and type(min_cluster_count) is not int:
+        raise ValueError("min_cluster_count must be an integer or null")
+
     snapshots = []
     for line_number, line in enumerate(
         path.read_text(encoding="utf-8").splitlines(), start=1
@@ -108,6 +176,20 @@ def load_snapshots(
         if not line.strip():
             continue
         snapshot = json.loads(line)
+        if (
+            isinstance(snapshot, Mapping)
+            and isinstance(snapshot.get("meta"), Mapping)
+            and snapshot["meta"].get("synthetic") is False
+        ):
+            try:
+                snapshot = validate_human_snapshot(snapshot)
+            except HumanSnapshotValidationError as error:
+                _raise_snapshot_error(
+                    snapshot,
+                    path,
+                    line_number,
+                    f"human snapshot governance validation failed: {error}",
+                )
         validate_snapshot_dimensions(snapshot, path, line_number)
         if min_cluster_count is not None:
             cluster_count = snapshot_cluster_count(snapshot)
@@ -127,61 +209,229 @@ def load_snapshots(
 
 
 def validate_snapshot_dimensions(
-    snapshot: Mapping[str, Any],
+    snapshot: Any,
     path: Path,
     line_number: int,
 ) -> None:
-    """Reject snapshots whose participant-major dimensions are inconsistent."""
+    """Reject structurally or semantically inconsistent prediction snapshots."""
+
+    if not isinstance(snapshot, Mapping):
+        _raise_snapshot_error(snapshot, path, line_number, "snapshot must be an object")
+    required_fields = {
+        "session_id",
+        "statements",
+        "participants",
+        "votes",
+        "masked_cells",
+        "held_out",
+        "clusters",
+        "meta",
+    }
+    missing_fields = sorted(required_fields - set(snapshot))
+    if missing_fields:
+        _raise_snapshot_error(
+            snapshot,
+            path,
+            line_number,
+            f"missing fields={','.join(missing_fields)}",
+        )
+
+    session_id = snapshot["session_id"]
+    if not isinstance(session_id, str) or not session_id.strip():
+        _raise_snapshot_error(
+            snapshot, path, line_number, "session_id must be a non-empty string"
+        )
 
     participants = snapshot["participants"]
-    statements = snapshot["statements"]
-    votes = snapshot["votes"]
-    clusters = snapshot.get("clusters", [])
+    if (
+        not isinstance(participants, list)
+        or not participants
+        or not all(
+            isinstance(participant, str) and participant.strip()
+            for participant in participants
+        )
+    ):
+        _raise_snapshot_error(
+            snapshot,
+            path,
+            line_number,
+            "participants must be a non-empty list of strings",
+        )
+    if len(set(participants)) != len(participants):
+        _raise_snapshot_error(
+            snapshot, path, line_number, "participants must be unique"
+        )
 
+    statements = snapshot["statements"]
+    if not isinstance(statements, list) or not statements:
+        _raise_snapshot_error(
+            snapshot, path, line_number, "statements must be a non-empty list"
+        )
+    bad_statement_indices = []
+    for statement_position, statement in enumerate(statements):
+        if not isinstance(statement, Mapping):
+            _raise_snapshot_error(
+                snapshot,
+                path,
+                line_number,
+                f"statement {statement_position} must be an object",
+            )
+        actual_index = statement.get("index", "<missing>")
+        if type(actual_index) is not int or actual_index != statement_position:
+            bad_statement_indices.append(f"{statement_position}:{actual_index}")
+        text = statement.get("text")
+        if not isinstance(text, str) or not text.strip():
+            _raise_snapshot_error(
+                snapshot,
+                path,
+                line_number,
+                f"statement {statement_position} must have non-empty text",
+            )
+    if bad_statement_indices:
+        _raise_snapshot_error(
+            snapshot,
+            path,
+            line_number,
+            "statements indices="
+            f"{','.join(bad_statement_indices[:5])} expected positional",
+        )
+
+    votes = snapshot["votes"]
+    if not isinstance(votes, list):
+        _raise_snapshot_error(
+            snapshot, path, line_number, "votes must be a participant-major list"
+        )
     participant_count = len(participants)
     statement_count = len(statements)
-    errors = []
-
+    dimension_errors = []
     if len(votes) != participant_count:
-        errors.append(f"votes rows={len(votes)} participants={participant_count}")
-
+        dimension_errors.append(
+            f"votes rows={len(votes)} participants={participant_count}"
+        )
     bad_vote_rows = [
-        f"{row_index}:{len(row)}"
+        f"{row_index}:{len(row) if isinstance(row, list) else '<invalid>'}"
         for row_index, row in enumerate(votes)
-        if len(row) != statement_count
+        if not isinstance(row, list) or len(row) != statement_count
     ]
     if bad_vote_rows:
-        errors.append(
+        dimension_errors.append(
             "votes row_lengths="
             f"{','.join(bad_vote_rows[:5])} statements={statement_count}"
         )
+    if dimension_errors:
+        _raise_snapshot_error(snapshot, path, line_number, "; ".join(dimension_errors))
+    for participant_index, row in enumerate(votes):
+        for statement_index, vote in enumerate(row):
+            if vote is not None and (type(vote) is not int or vote not in VALID_VOTES):
+                _raise_snapshot_error(
+                    snapshot,
+                    path,
+                    line_number,
+                    f"invalid vote at {participant_index},{statement_index}: {vote!r}",
+                )
 
-    bad_statement_indices = []
-    for statement_position, statement in enumerate(statements):
-        actual_index = (
-            statement.get("index", "<missing>")
-            if isinstance(statement, Mapping)
-            else "<invalid>"
+    masked_cells = snapshot["masked_cells"]
+    if not isinstance(masked_cells, list):
+        _raise_snapshot_error(
+            snapshot, path, line_number, "masked_cells must be an array"
         )
-        if actual_index != statement_position:
-            bad_statement_indices.append(f"{statement_position}:{actual_index}")
-    if bad_statement_indices:
-        errors.append(
-            "statements indices="
-            f"{','.join(bad_statement_indices[:5])} expected positional"
+    normalized_masked_cells: set[str] = set()
+    for cell in masked_cells:
+        if not isinstance(cell, list) or len(cell) != 2:
+            _raise_snapshot_error(
+                snapshot, path, line_number, "invalid masked cell shape"
+            )
+        participant_index, statement_index = cell
+        if type(participant_index) is not int or type(statement_index) is not int:
+            _raise_snapshot_error(
+                snapshot,
+                path,
+                line_number,
+                "masked cell indices must be integers",
+            )
+        if (
+            not 0 <= participant_index < participant_count
+            or not 0 <= statement_index < statement_count
+        ):
+            _raise_snapshot_error(
+                snapshot,
+                path,
+                line_number,
+                f"out-of-bounds masked cell {participant_index},{statement_index}",
+            )
+        cell_id = f"{participant_index},{statement_index}"
+        if cell_id in normalized_masked_cells:
+            _raise_snapshot_error(
+                snapshot, path, line_number, f"duplicate masked cell {cell_id}"
+            )
+        normalized_masked_cells.add(cell_id)
+        if votes[participant_index][statement_index] is not None:
+            _raise_snapshot_error(
+                snapshot,
+                path,
+                line_number,
+                f"masked vote {cell_id} must be null",
+            )
+
+    held_out = snapshot["held_out"]
+    if not isinstance(held_out, Mapping):
+        _raise_snapshot_error(snapshot, path, line_number, "held_out must be an object")
+    for cell_id, vote in held_out.items():
+        if not isinstance(cell_id, str) or CELL_ID_PATTERN.fullmatch(cell_id) is None:
+            _raise_snapshot_error(
+                snapshot, path, line_number, f"invalid held-out cell {cell_id!r}"
+            )
+        participant_index, statement_index = map(int, cell_id.split(","))
+        if (
+            not 0 <= participant_index < participant_count
+            or not 0 <= statement_index < statement_count
+        ):
+            _raise_snapshot_error(
+                snapshot,
+                path,
+                line_number,
+                f"out-of-bounds held-out cell {cell_id}",
+            )
+        if type(vote) is not int or vote not in VALID_VOTES:
+            _raise_snapshot_error(
+                snapshot,
+                path,
+                line_number,
+                f"invalid held-out vote at {cell_id}: {vote!r}",
+            )
+    if set(held_out) != normalized_masked_cells:
+        _raise_snapshot_error(
+            snapshot, path, line_number, "held_out must match masked_cells"
         )
 
-    cluster_error = snapshot_cluster_dimension_error(clusters, participants)
+    cluster_error = snapshot_cluster_dimension_error(snapshot["clusters"], participants)
     if cluster_error is not None:
-        errors.append(cluster_error)
+        _raise_snapshot_error(snapshot, path, line_number, cluster_error)
 
-    if errors:
-        session_id = snapshot.get("session_id", "<unknown>")
-        joined_errors = "; ".join(errors)
-        raise ValueError(
-            f"invalid snapshot dimensions at {path}:{line_number} "
-            f"session_id={session_id}: {joined_errors}"
+    meta = snapshot["meta"]
+    if not isinstance(meta, Mapping):
+        _raise_snapshot_error(snapshot, path, line_number, "meta must be an object")
+    if type(meta.get("synthetic")) is not bool:
+        _raise_snapshot_error(
+            snapshot, path, line_number, "meta.synthetic must be boolean"
         )
+
+
+def _raise_snapshot_error(
+    snapshot: Any,
+    path: Path,
+    line_number: int,
+    detail: str,
+) -> Never:
+    session_id = (
+        snapshot.get("session_id", "<unknown>")
+        if isinstance(snapshot, Mapping)
+        else "<unknown>"
+    )
+    raise ValueError(
+        f"invalid snapshot dimensions or values at {path}:{line_number} "
+        f"session_id={session_id}: {detail}"
+    )
 
 
 def snapshot_cluster_dimension_error(
@@ -191,45 +441,69 @@ def snapshot_cluster_dimension_error(
     """Return a dimension error for supported cluster encodings, if any."""
 
     participant_count = len(participants)
-    if (
-        isinstance(clusters, list)
-        and clusters
-        and all(isinstance(cluster, Mapping) for cluster in clusters)
-    ):
-        member_indices = [
-            int(member_index)
-            for cluster in clusters
-            for member_index in cluster.get("member_indices", [])
-        ]
+    if not isinstance(clusters, list) or not clusters:
+        cluster_count = len(clusters) if isinstance(clusters, list) else "<invalid>"
+        return f"clusters={cluster_count} participants={participant_count}"
+    object_encoding = [isinstance(cluster, Mapping) for cluster in clusters]
+    if any(object_encoding) and not all(object_encoding):
+        return "clusters must not mix assignment IDs and cluster objects"
+    if all(object_encoding):
+        member_indices: list[int] = []
+        member_ids: list[str] = []
+        for cluster_index, cluster in enumerate(clusters):
+            indices = cluster.get("member_indices", [])
+            members = cluster.get("members", [])
+            if not isinstance(indices, list) or not isinstance(members, list):
+                return f"cluster {cluster_index} members must be arrays"
+            if any(type(member_index) is not int for member_index in indices):
+                return f"cluster {cluster_index} member_indices must be integers"
+            if any(
+                member_index < 0 or member_index >= participant_count
+                for member_index in indices
+            ):
+                return f"cluster {cluster_index} contains out-of-bounds member_indices"
+            if any(not isinstance(member_id, str) for member_id in members):
+                return f"cluster {cluster_index} members must be strings"
+            if (
+                indices
+                and members
+                and {participants[member_index] for member_index in indices}
+                != set(members)
+            ):
+                return f"cluster {cluster_index} members disagree with member_indices"
+            member_indices.extend(indices)
+            member_ids.extend(members)
+        expected_indices = set(range(participant_count))
         if member_indices:
-            expected_indices = set(range(participant_count))
             unique_indices = set(member_indices)
             if unique_indices != expected_indices or len(member_indices) != len(
                 unique_indices
             ):
                 return (
-                    f"clusters member_indices={len(unique_indices)} unique/{len(member_indices)} total "
-                    f"participants={participant_count}"
+                    f"clusters member_indices={len(unique_indices)} unique/"
+                    f"{len(member_indices)} total participants={participant_count}"
                 )
-            return None
-
-        member_ids = [
-            str(member_id)
-            for cluster in clusters
-            for member_id in cluster.get("members", [])
-        ]
         if member_ids:
-            expected_ids = {str(participant_id) for participant_id in participants}
+            expected_ids = set(participants)
             unique_ids = set(member_ids)
             if unique_ids != expected_ids or len(member_ids) != len(unique_ids):
                 return (
-                    f"clusters members={len(unique_ids)} unique/{len(member_ids)} total "
-                    f"participants={participant_count}"
+                    f"clusters members={len(unique_ids)} unique/{len(member_ids)} "
+                    f"total participants={participant_count}"
                 )
-            return None
+        if not member_indices and not member_ids:
+            return "cluster objects must contain members or member_indices"
+        return None
 
     if len(clusters) != participant_count:
         return f"clusters={len(clusters)} participants={participant_count}"
+    if any(
+        isinstance(cluster_id, bool)
+        or not isinstance(cluster_id, (int, str))
+        or (isinstance(cluster_id, str) and not cluster_id.strip())
+        for cluster_id in clusters
+    ):
+        return "cluster assignments must be integer or non-empty string IDs"
     return None
 
 
@@ -324,7 +598,12 @@ def snapshot_cluster_count(snapshot: Mapping[str, Any]) -> int:
     return len(cluster_ids)
 
 
-def snapshot_to_row(snapshot: Mapping[str, Any]) -> dict[str, Any]:
+def snapshot_to_task_data(
+    snapshot: Mapping[str, Any],
+    index: int,
+) -> PredictionTaskData:
+    """Build typed task data without duplicating hidden labels in snapshot state."""
+
     held_out = {
         str(cell_id): int(vote) for cell_id, vote in snapshot["held_out"].items()
     }
@@ -334,12 +613,16 @@ def snapshot_to_row(snapshot: Mapping[str, Any]) -> dict[str, Any]:
         "cluster_count": snapshot_cluster_count(snapshot),
         "synthetic": bool(snapshot["meta"].get("synthetic")),
     }
-    return {
-        "prompt": [{"role": "user", "content": render_prompt(snapshot)}],
-        "answer": json.dumps(held_out, sort_keys=True),
-        "info": json.dumps(info, sort_keys=True),
-        "snapshot": json.dumps(snapshot, sort_keys=True),
-    }
+    public_snapshot = copy.deepcopy(dict(snapshot))
+    public_snapshot.pop("held_out", None)
+    return PredictionTaskData(
+        idx=index,
+        name=str(snapshot["session_id"]),
+        prompt=render_prompt(snapshot),
+        answer=held_out,
+        info=info,
+        snapshot=public_snapshot,
+    )
 
 
 def render_prompt(snapshot: Mapping[str, Any]) -> str:
@@ -391,7 +674,7 @@ async def vote_accuracy(
 
     parsed = parse_completion_predictions(completion, parser)
     point_predictions = coerce_point_predictions(parsed)
-    return score_vote_accuracy(point_predictions, parse_held_out(answer))
+    return float(score_vote_accuracy(point_predictions, parse_held_out(answer)))
 
 
 async def brier(
@@ -403,7 +686,7 @@ async def brier(
 
     parsed = parse_completion_predictions(completion, parser)
     brier_predictions = coerce_brier_predictions(parsed)
-    return score_brier_score(brier_predictions, parse_held_out(answer))
+    return float(score_brier_score(brier_predictions, parse_held_out(answer)))
 
 
 def parse_completion_predictions(
@@ -411,20 +694,26 @@ def parse_completion_predictions(
     parser: PredictionJsonParser,
 ) -> Mapping[str, Any]:
     parsed = parser.parse_answer(completion)
-    if not isinstance(parsed, Mapping):
-        return {}
     predictions = parsed.get("predictions", {})
     if not isinstance(predictions, Mapping):
         return {}
     return predictions
 
 
+def parse_prediction_text(text: str) -> Mapping[str, Any]:
+    """Return the predictions mapping from one bounded completion string."""
+
+    parsed = PredictionJsonParser().parse(text)
+    predictions = parsed.get("predictions", {})
+    return predictions if isinstance(predictions, Mapping) else {}
+
+
 def parse_held_out(held_out: Mapping[str, int] | str) -> dict[str, int]:
     loaded = json.loads(held_out) if isinstance(held_out, str) else held_out
     return {
-        str(cell_id): int(vote)
+        str(cell_id): vote
         for cell_id, vote in loaded.items()
-        if int(vote) in VALID_VOTES
+        if type(vote) is int and vote in VALID_VOTES
     }
 
 
@@ -501,16 +790,23 @@ def coerce_class_label(key: Any) -> str | None:
 
 
 def extract_json_object(text: str) -> Any:
+    """Decode bounded JSON candidates without suffix copies or parser crashes."""
+
+    if not isinstance(text, str):
+        raise ValueError("completion must be text")
+    if len(text) > MAX_COMPLETION_CHARS:
+        raise ValueError(
+            f"completion exceeds {MAX_COMPLETION_CHARS} character JSON limit"
+        )
+
     decoder = json.JSONDecoder()
     last_decodable: Any = None
     last_with_predictions: dict[str, Any] | None = None
     found_decodable = False
-    for index, character in enumerate(text):
-        if character != "{":
-            continue
+    for index in _json_candidate_indices(text):
         try:
-            parsed, _ = decoder.raw_decode(text[index:])
-        except json.JSONDecodeError:
+            parsed, _ = decoder.raw_decode(text, index)
+        except (json.JSONDecodeError, RecursionError):
             continue
         found_decodable = True
         last_decodable = parsed
@@ -521,6 +817,47 @@ def extract_json_object(text: str) -> Any:
     if found_decodable:
         return last_decodable
     raise ValueError("no JSON object found")
+
+
+def _json_candidate_indices(text: str) -> list[int]:
+    """Find object starts in one pass while enforcing depth and work bounds."""
+
+    candidates: list[int] = []
+    stack: list[str] = []
+    in_string = False
+    escaped = False
+    pairs = {"}": "{", "]": "["}
+    for index, character in enumerate(text):
+        if in_string:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                in_string = False
+            continue
+        if character == '"':
+            in_string = True
+            continue
+        if character in "{[":
+            stack.append(character)
+            if len(stack) > MAX_JSON_NESTING:
+                raise ValueError(
+                    f"JSON nesting exceeds maximum depth {MAX_JSON_NESTING}"
+                )
+            if character == "{":
+                candidates.append(index)
+                if len(candidates) > MAX_JSON_CANDIDATES:
+                    raise ValueError(
+                        f"completion exceeds {MAX_JSON_CANDIDATES} JSON candidates"
+                    )
+            continue
+        if character in "}]" and stack:
+            if stack[-1] == pairs[character]:
+                stack.pop()
+            else:
+                stack.clear()
+    return candidates
 
 
 def _vote_symbol(vote: Any) -> str:

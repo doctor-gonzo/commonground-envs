@@ -25,9 +25,14 @@ documents and public faction descriptions but not the answer key or priors.
 | `eval_synthetic_heldout.jsonl` | 20 | B (held out) |
 
 The sets use disjoint template IDs, sectors, document styles, and planting
-patterns. Each template produces ten scenarios from fixed, non-overlapping
-seed ranges. Tests regenerate both files byte-for-byte and verify that
-separation.
+patterns. Training contains ten deterministic semantic contexts for each of
+four templates; the context changes the operative scope of every planted
+passage and question rather than merely changing presentation order. Held-out
+evaluation contains one task from each of twenty authored domains. A
+semantic-key release check rejects rows in either split that differ only by
+seed, organization name, or document order. Tests regenerate both files
+byte-for-byte and verify all forty training keys and all twenty held-out keys
+are unique.
 
 ## Model-free floors
 
@@ -37,8 +42,8 @@ separate step. Running `uv run python scripts/compute_elicit_floors.py` prints:
 
 | Task | Baseline | mean reward |
 | --- | --- | ---: |
-| find | Random visible spans | 0.150 |
-| find | Flag vague-sounding spans | 0.500 |
+| find | Random visible spans | 0.133 |
+| find | Flag vague-sounding spans | 0.195 |
 | elicit-ask | Template clarity questions | 0.000 |
 | elicit-ask | Randomly targeted questions | 0.000 |
 

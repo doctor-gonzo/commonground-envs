@@ -6,9 +6,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-import verifiers as vf
+import verifiers.v1 as vf1
 from commonground_elicit import (
     ElicitJsonParser,
+    ElicitTaskset,
     finding_f1,
     load_environment,
     panel_disagreement,
@@ -35,7 +36,8 @@ QUESTION_RESPONSE_FIELDS = ("doc_id", "quote", "question", "target_stances")
 def test_load_environment_builds_default_heldout_rows() -> None:
     env = load_environment()
 
-    assert isinstance(env, vf.SingleTurnEnv)
+    assert isinstance(env, ElicitTaskset)
+    assert isinstance(env, vf1.Taskset)
     assert env.env_id == "commonground-elicit"
     assert len(env.get_dataset()) == 40
     assert len(env.get_eval_dataset()) == 20
@@ -45,6 +47,31 @@ def test_load_environment_builds_default_heldout_rows() -> None:
     assert {
         json.loads(row["info"])["template_set"] for row in env.get_eval_dataset()
     } == {"heldout"}
+
+
+def test_native_v1_taskset_scores_a_trace_without_the_legacy_bridge() -> None:
+    taskset = load_environment()
+    task = next(iter(taskset))
+    row = taskset.get_eval_dataset()[0]
+    response = correct_response_from_row(row)
+    trace = vf1.Trace(
+        task=vf1.TraceTask(type=type(task).__name__, data=task.data),
+        agent=vf1.AgentInfo(config=vf1.AgentConfig()),
+        nodes=[
+            vf1.MessageNode(
+                message=vf1.AssistantMessage(
+                    content=json.dumps(response, sort_keys=True)
+                ),
+                sampled=True,
+            )
+        ],
+    )
+
+    asyncio.run(task.score(trace))
+
+    assert trace.reward == 1.0
+    assert trace.rewards["finding_f1"].score == 1.0
+    assert trace.metrics["question_utility"] > 0.0
 
 
 @pytest.mark.parametrize(
@@ -245,7 +272,13 @@ def test_invalid_or_wrong_k_companion_questions_do_not_zero_t1(
     env = load_environment()
     row = dict(env.get_eval_dataset()[0])
     answer = json.loads(row["answer"])
-    response = {"findings": answer["findings"], "questions": questions}
+    response = {
+        "findings": [
+            {field: finding[field] for field in ("doc_id", "quote", "type")}
+            for finding in answer["findings"]
+        ],
+        "questions": questions,
+    }
 
     state = score_row(env, row, response)
 
@@ -1200,7 +1233,7 @@ def test_false_positive_strictly_reduces_precision_and_f1() -> None:
     assert 0 < score < 1
 
 
-def test_paraphrased_quote_matches_when_document_and_type_match() -> None:
+def test_paraphrased_quote_cannot_claim_verbatim_document_evidence() -> None:
     planted = [
         {
             "doc_id": "service-policy",
@@ -1218,12 +1251,87 @@ def test_paraphrased_quote_matches_when_document_and_type_match() -> None:
 
     result = match_findings(candidates, planted)
 
-    assert result == {
-        "true_positive": 1,
-        "false_positive": 0,
-        "false_negative": 0,
-        "f1": 1.0,
+    assert result["true_positive"] == 0
+    assert result["f1"] == 0.0
+
+
+@pytest.mark.parametrize(
+    "meaning_changing_quote",
+    [
+        "¬The threshold is 25 units.",
+        "!The threshold is 25 units.",
+        "The threshold is ≠25 units.",
+        "The threshold is ≤25 units.",
+        "The threshold is +25 units.",
+        "The threshold is -25 units.",
+        "The threshold is \N{MINUS SIGN}25 units.",
+        "The threshold is ~25 units.",
+        "The threshold is $25 units.",
+        "The threshold is 25% units.",
+    ],
+)
+def test_finding_reward_rejects_symbolic_changes_to_exact_grounding(
+    meaning_changing_quote: str,
+) -> None:
+    answer = {
+        "findings": [
+            {
+                "doc_id": "policy",
+                "quote": "The threshold is 25 units.",
+                "type": "ambiguity",
+                "document_text": "The threshold is 25 units.",
+            }
+        ]
     }
+    completion = [
+        {
+            "role": "assistant",
+            "content": json.dumps(
+                {
+                    "findings": [
+                        {
+                            "doc_id": "policy",
+                            "quote": meaning_changing_quote,
+                            "type": "ambiguity",
+                        }
+                    ]
+                }
+            ),
+        }
+    ]
+
+    score = asyncio.run(finding_f1(completion, answer, ElicitJsonParser()))
+
+    assert score == 0.0
+
+
+def test_alphabetized_anchor_tokens_absent_from_document_score_zero() -> None:
+    quote = (
+        "Agents may issue a small goodwill credit when a customer has experienced "
+        "material inconvenience."
+    )
+    planted = [
+        {
+            "doc_id": "service-policy",
+            "quote": quote,
+            "type": "ambiguity",
+            "document_text": f"{quote} Credits are recorded before closure.",
+        }
+    ]
+    word_salad = " ".join(sorted(quote.casefold().replace(".", "").split()))
+    candidate = [
+        {
+            "doc_id": "service-policy",
+            "quote": word_salad,
+            "type": "ambiguity",
+        }
+    ]
+
+    result = match_findings(candidate, planted)
+
+    assert result["true_positive"] == 0
+    assert result["false_positive"] == 1
+    assert result["f1"] == 0.0
 
 
 @pytest.mark.parametrize(
@@ -1242,22 +1350,28 @@ def test_wrong_document_or_type_cannot_match(field: str, wrong_value: str) -> No
 
 
 def test_overlapping_plants_use_one_to_one_matching() -> None:
+    document_text = (
+        "Requests should receive a prompt and complete response. "
+        "A prompt and complete response should resolve each request."
+    )
     planted = [
         {
             "doc_id": "policy",
             "quote": "Requests should receive a prompt and complete response.",
             "type": "ambiguity",
+            "document_text": document_text,
         },
         {
             "doc_id": "policy",
             "quote": "A prompt and complete response should resolve each request.",
             "type": "ambiguity",
+            "document_text": document_text,
         },
     ]
     candidate = [
         {
             "doc_id": "policy",
-            "quote": "Each request should receive a prompt and complete response.",
+            "quote": "Requests should receive a prompt and complete response.",
             "type": "ambiguity",
         }
     ]
@@ -1270,27 +1384,30 @@ def test_overlapping_plants_use_one_to_one_matching() -> None:
 
 
 def test_matching_finds_global_maximum_instead_of_greedy_local_choice() -> None:
+    document_text = "alpha beta gamma delta epsilon zeta"
     planted = [
         {
             "doc_id": "policy",
-            "quote": "alpha beta gamma delta",
+            "quote": "alpha beta gamma delta epsilon",
             "type": "ambiguity",
+            "document_text": document_text,
         },
         {
             "doc_id": "policy",
-            "quote": "alpha beta gamma epsilon zeta eta theta",
+            "quote": "beta gamma delta epsilon zeta",
             "type": "ambiguity",
+            "document_text": document_text,
         },
     ]
     candidates = [
         {
             "doc_id": "policy",
-            "quote": "alpha beta gamma delta",
+            "quote": "alpha beta gamma delta epsilon zeta",
             "type": "ambiguity",
         },
         {
             "doc_id": "policy",
-            "quote": "gamma delta",
+            "quote": "alpha beta gamma delta",
             "type": "ambiguity",
         },
     ]
@@ -1299,6 +1416,89 @@ def test_matching_finds_global_maximum_instead_of_greedy_local_choice() -> None:
 
     assert result["true_positive"] == 2
     assert result["f1"] == 1.0
+
+
+@pytest.mark.parametrize(
+    ("anchor", "candidate", "expected_true_positive"),
+    [
+        ("alpha beta", "alpha beta", 1),
+        ("alpha beta", "alpha", 0),
+        ("alpha beta gamma delta", "beta gamma", 0),
+        ("alpha beta gamma delta", "alpha beta gamma", 0),
+        ("alpha beta gamma delta epsilon", "beta gamma delta epsilon", 1),
+        (
+            "alpha beta gamma delta epsilon zeta eta theta iota kappa",
+            "gamma delta",
+            0,
+        ),
+        (
+            "alpha beta gamma delta epsilon zeta eta theta iota kappa",
+            "alpha beta gamma delta epsilon zeta eta theta",
+            1,
+        ),
+        (
+            "alpha beta gamma delta",
+            "before alpha beta gamma delta after",
+            1,
+        ),
+    ],
+)
+def test_quote_match_requires_substantial_contiguous_plant_coverage(
+    anchor: str,
+    candidate: str,
+    expected_true_positive: int,
+) -> None:
+    document_text = f"before {anchor} after"
+    planted = [
+        {
+            "doc_id": "policy",
+            "quote": anchor,
+            "type": "ambiguity",
+            "document_text": document_text,
+        }
+    ]
+
+    result = match_findings(
+        [{"doc_id": "policy", "quote": candidate, "type": "ambiguity"}],
+        planted,
+    )
+
+    assert result["true_positive"] == expected_true_positive
+
+
+def test_tiny_fragment_cannot_turn_partial_output_credit_into_a_second_match() -> None:
+    document_text = "alpha beta gamma delta epsilon. lima mike november oscar papa."
+    planted = [
+        {
+            "doc_id": "policy",
+            "quote": "alpha beta gamma delta epsilon",
+            "type": "ambiguity",
+            "document_text": document_text,
+        },
+        {
+            "doc_id": "policy",
+            "quote": "lima mike november oscar papa",
+            "type": "gap",
+            "document_text": document_text,
+        },
+    ]
+    candidates = [
+        {
+            "doc_id": "policy",
+            "quote": "alpha beta gamma delta epsilon",
+            "type": "ambiguity",
+        },
+        {"doc_id": "policy", "quote": "lima mike", "type": "gap"},
+    ]
+
+    result = match_findings(candidates, planted)
+
+    assert result == {
+        "true_positive": 1,
+        "false_positive": 1,
+        "false_negative": 1,
+        "f1": 0.5,
+    }
 
 
 def test_duplicate_candidate_is_counted_as_false_positive() -> None:
@@ -1337,6 +1537,22 @@ def test_parser_prefers_last_object_with_findings() -> None:
     )
 
     assert len(parsed["findings"]) == 1
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "x" * 32_769,
+        "{" + '"findings":' + "[" * 1_500 + "]" * 1_500 + "}",
+        "{" * 65,
+    ],
+)
+def test_parser_fails_closed_on_oversized_or_adversarial_nesting(
+    content: str,
+) -> None:
+    parser = ElicitJsonParser()
+
+    assert parser.parse(content) == {}
 
 
 def test_ask_parser_prefers_last_object_with_questions() -> None:
@@ -1598,7 +1814,7 @@ def dataset_rows_bytes(dataset: Any) -> bytes:
 
 
 def score_row(
-    env: vf.SingleTurnEnv,
+    env: Any,
     row: dict[str, Any],
     response: dict[str, Any],
 ) -> dict[str, Any]:
@@ -1624,7 +1840,10 @@ def correct_response_from_row(row: dict[str, Any]) -> dict[str, Any]:
     ]
     response: dict[str, Any] = {"questions": questions}
     if info["allow_combined_questions"]:
-        response["findings"] = answer["findings"]
+        response["findings"] = [
+            {field: finding[field] for field in ("doc_id", "quote", "type")}
+            for finding in answer["findings"]
+        ]
     return response
 
 

@@ -17,6 +17,18 @@ from commonground_scenarios.validation import (
 )
 
 DEFAULT_GENERATED_AT = "2026-08-15"
+SEMANTIC_SCOPES: tuple[str | None, ...] = (
+    None,
+    "for after-hours requests",
+    "when the primary owner is unavailable",
+    "for cases spanning two service regions",
+    "when a documented safety risk is active",
+    "for first-time participants",
+    "during peak-demand periods",
+    "when an accessibility accommodation is active",
+    "for requests received through an offline channel",
+    "while a formal appeal is pending",
+)
 
 
 def generate_scenario(
@@ -44,6 +56,10 @@ def generate_scenario(
     rng = random.Random(seed)
 
     documents = copy.deepcopy(list(template.documents))
+    planted_items = copy.deepcopy(list(template.planted_items))
+    semantic_scope = SEMANTIC_SCOPES[seed % len(SEMANTIC_SCOPES)]
+    if semantic_scope is not None:
+        _apply_semantic_scope(documents, planted_items, semantic_scope)
     rng.shuffle(documents)
     if prose_polisher is not None:
         for document in documents:
@@ -53,7 +69,6 @@ def generate_scenario(
             document["text"] = polished
 
     factions = copy.deepcopy(list(template.factions))
-    planted_items = copy.deepcopy(list(template.planted_items))
     for planted in planted_items:
         dimension = planted["target_dimension"]
         planted["target_stances"] = {
@@ -115,3 +130,26 @@ def _stance_for(prior: float) -> str:
     if prior <= -PASS_THRESHOLD:
         return "disagree"
     return "pass"
+
+
+def _apply_semantic_scope(
+    documents: list[dict[str, str]],
+    planted_items: list[dict[str, Any]],
+    scope: str,
+) -> None:
+    """Author a substantive, deterministic scope variant into every planted task."""
+
+    documents_by_id = {document["doc_id"]: document for document in documents}
+    for plant in planted_items:
+        old_anchor = plant["anchor_quote"]
+        new_anchor = f"{old_anchor.removesuffix('.')} {scope}."
+        document = documents_by_id[plant["doc_id"]]
+        document["text"] = document["text"].replace(old_anchor, new_anchor, 1)
+        plant["anchor_quote"] = new_anchor
+        plant["canonical_question"] = (
+            f"{plant['canonical_question'].removesuffix('?')} {scope}?"
+        )
+        plant["canonical_question_aliases"] = [
+            f"{alias.removesuffix('?')} {scope}?"
+            for alias in plant["canonical_question_aliases"]
+        ]

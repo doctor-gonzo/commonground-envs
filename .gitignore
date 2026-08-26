@@ -6,5 +6,7 @@
 __pycache__/
 *.pyc
 .pytest_cache/
+.prime/
+outputs/
 dist/
 *.egg-info/

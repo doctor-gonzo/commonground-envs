@@ -1,9 +1,10 @@
 [project]
 name = "commonground-scenarios"
-version = "0.1.0"
+version = "0.1.1"
 description = "Deterministic planted-scenario generation for Common Ground environments."
 authors = [{ name = "Common Ground contributors" }]
 license = "Apache-2.0"
+license-files = ["LICENSE"]
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 classifiers = [

@@ -1,5 +1,7 @@
 """Scoring utilities for Common Ground deliberation evaluations."""
 
+from importlib.metadata import PackageNotFoundError, version
+
 from commonground_score.scoring import (
     brier_score,
     cluster_separation,
@@ -11,7 +13,10 @@ from commonground_score.scoring import (
     vote_entropy,
 )
 
-__version__ = "0.1.0"
+try:
+    __version__ = version("commonground-score")
+except PackageNotFoundError:  # pragma: no cover - source tree without installation
+    __version__ = "0+unknown"
 
 __all__ = [
     "brier_score",

@@ -9,16 +9,19 @@ import re
 import unicodedata
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
-import verifiers as vf
+import verifiers.v1 as vf
 from commonground_scenarios import (
     is_yes_no_question,
     question_fingerprint,
     validate_scenario,
 )
-from commonground_score import cluster_separation, vote_entropy
-from datasets import Dataset
+from commonground_score import (
+    cluster_separation,
+    vote_entropy,
+)
+from verifiers.v1.harnesses.null import NullHarness
 
 ENV_ID = "commonground-elicit"
 DATA_ENV_VAR = "COMMONGROUND_ELICIT_DATA_PATH"
@@ -32,24 +35,224 @@ BUNDLED_SPLIT_PATHS = {
 }
 FINDING_TYPES = frozenset({"ambiguity", "contradiction", "gap"})
 QUOTE_OVERLAP_THRESHOLD = 0.5
+PLANT_COVERAGE_THRESHOLD = 0.8
+MAX_COMPLETION_CHARS = 32_768
+MAX_JSON_STARTS = 64
+MAX_JSON_DEPTH = 32
+MAX_JSON_NODES = 10_000
 VALID_TASKS = frozenset({"find", "elicit-ask"})
 STANCE_TO_VOTE = {"agree": 1, "disagree": -1, "pass": 0}
-_TOKEN_PATTERN = re.compile(r"[^\W_]+", flags=re.UNICODE)
+_TOKEN_PATTERN = re.compile(
+    r"(?:!=|<=|>=|==)|[!~](?=\s*[^\W_])|-(?=\s*\d)|[^\W_]+|"
+    r"[¬≠≤≥=<>±+\N{MINUS SIGN}%$€£¥∉∈∧\N{LOGICAL OR}]",
+    flags=re.UNICODE,
+)
 
 
-class ElicitJsonParser(vf.Parser):
+class ElicitJsonParser:
     """Extract the last task-specific JSON object from a completion."""
 
     def __init__(self, preferred_key: str = "findings") -> None:
-        super().__init__()
         self.preferred_key = preferred_key
 
     def parse(self, text: str) -> dict[str, Any]:
         try:
             parsed = extract_json_object(text, preferred_key=self.preferred_key)
-        except ValueError:
+        except (RecursionError, ValueError):
             return {}
         return parsed if isinstance(parsed, dict) else {}
+
+    def parse_answer(self, completion: Sequence[Any]) -> dict[str, Any]:
+        """Parse the last assistant message from legacy or v1 message carriers."""
+
+        for message in reversed(completion):
+            role = (
+                message.get("role")
+                if isinstance(message, Mapping)
+                else getattr(message, "role", None)
+            )
+            if role != "assistant":
+                continue
+            content = (
+                message.get("content")
+                if isinstance(message, Mapping)
+                else getattr(message, "content", None)
+            )
+            return self.parse(content if isinstance(content, str) else "")
+        return {}
+
+
+class ElicitTaskData(vf.TaskData):
+    """One native Verifiers v1 task row and its hidden deterministic oracle."""
+
+    answer: dict[str, Any]
+    info: dict[str, Any]
+
+
+class ElicitTask(vf.Task[ElicitTaskData]):
+    """Score one single-turn completion through native v1 reward decorators."""
+
+    @vf.reward(weight=1.0)
+    async def task_reward(self, trace: vf.Trace) -> Mapping[str, float]:
+        completion = [{"role": "assistant", "content": trace.last_reply}]
+        if self.data.info["task_label"] == "elicit-ask":
+            score = await question_utility(
+                completion,
+                self.data.answer,
+                self.data.info,
+                ElicitJsonParser("questions"),
+            )
+            return {"question_utility": score}
+        score = await finding_f1(
+            completion,
+            self.data.answer,
+            ElicitJsonParser("findings"),
+        )
+        return {"finding_f1": score}
+
+    @vf.metric
+    async def companion_metrics(self, trace: vf.Trace) -> Mapping[str, float]:
+        if self.data.info["task_label"] != "find":
+            return {}
+        score = await question_utility(
+            [{"role": "assistant", "content": trace.last_reply}],
+            self.data.answer,
+            self.data.info,
+            ElicitJsonParser("findings"),
+        )
+        return {"question_utility": score}
+
+
+class ElicitTasksetConfig(vf.TasksetConfig):
+    """Load-time difficulty and split controls for the v1 taskset."""
+
+    docs_count: int | None = None
+    docs_length: int | None = None
+    planted_density: float = 1.0
+    distractor_density: float = 1.0
+    data_path: Path | None = None
+    train_data_path: Path | None = None
+    task_mode: Literal["find", "elicit-ask"] = "find"
+    panel_polarization: float = 1.0
+    question_count: int = 3
+    split: Literal["eval", "train"] = "eval"
+
+
+class ElicitHarness(NullHarness):
+    """The built-in pure-chat harness, namespaced with this taskset plugin."""
+
+
+class _CompatibilityRubric:
+    """Small adapter for existing local score probes; native runs use ElicitTask."""
+
+    async def score_rollout(self, state: Mapping[str, Any]) -> None:
+        completion = state["completion"]
+        answer = state["answer"]
+        info = state["info"]
+        parsed_info = _parse_mapping_payload(info)
+        metrics: dict[str, float] = {}
+        if parsed_info.get("task_label") == "elicit-ask":
+            reward = await question_utility(
+                completion, answer, info, ElicitJsonParser("questions")
+            )
+            metrics["question_utility"] = reward
+        else:
+            reward = await finding_f1(completion, answer, ElicitJsonParser("findings"))
+            metrics["finding_f1"] = reward
+            metrics["question_utility"] = await question_utility(
+                completion, answer, info, ElicitJsonParser("findings")
+            )
+        state["metrics"] = metrics  # type: ignore[index]
+        state["reward"] = reward  # type: ignore[index]
+
+
+class ElicitTaskset(vf.Taskset[ElicitTask, ElicitTasksetConfig]):
+    """Native Verifiers v1 taskset for both Common Ground Elicit modes."""
+
+    def __init__(self, config: ElicitTasksetConfig) -> None:
+        super().__init__(config)
+        validate_difficulty_args(
+            docs_count=config.docs_count,
+            docs_length=config.docs_length,
+            planted_density=config.planted_density,
+            distractor_density=config.distractor_density,
+            panel_polarization=config.panel_polarization,
+            question_count=config.question_count,
+            task=config.task_mode,
+        )
+        bundled_eval_path = _bundled_data_path(config.split)
+        configured_eval_path = config.data_path or os.environ.get(DATA_ENV_VAR)
+        configured_train_path = config.train_data_path or os.environ.get(
+            TRAIN_DATA_ENV_VAR
+        )
+        self.eval_path = (
+            Path(configured_eval_path) if configured_eval_path else bundled_eval_path
+        )
+        self.train_path = (
+            Path(configured_train_path) if configured_train_path else BUNDLED_TRAIN_PATH
+        )
+        self._train_rows = _scenario_rows(
+            load_scenarios(self.train_path),
+            docs_count=config.docs_count,
+            docs_length=config.docs_length,
+            planted_density=config.planted_density,
+            distractor_density=config.distractor_density,
+            panel_polarization=config.panel_polarization,
+            question_count=config.question_count,
+            task=config.task_mode,
+        )
+        self._eval_rows = _scenario_rows(
+            load_scenarios(self.eval_path),
+            docs_count=config.docs_count,
+            docs_length=config.docs_length,
+            planted_density=config.planted_density,
+            distractor_density=config.distractor_density,
+            panel_polarization=config.panel_polarization,
+            question_count=config.question_count,
+            task=config.task_mode,
+        )
+        if not self._train_rows or not self._eval_rows:
+            raise ValueError(
+                "difficulty arguments remove all planted items from the dataset"
+            )
+        self.env_id = ENV_ID
+        self.rubric = _CompatibilityRubric()
+        self.env_args = {
+            "task": config.task_mode,
+            "docs_count": config.docs_count,
+            "docs_length": config.docs_length,
+            "planted_density": config.planted_density,
+            "distractor_density": config.distractor_density,
+            "panel_polarization": config.panel_polarization,
+            "question_count": config.question_count,
+            "data_path": str(self.eval_path),
+            "train_data_path": str(self.train_path),
+            "split": config.split,
+        }
+
+    def load(self) -> Sequence[ElicitTask]:
+        return [
+            ElicitTask(
+                ElicitTaskData(
+                    idx=index,
+                    name=str(json.loads(row["info"])["scenario_id"]),
+                    prompt=row["prompt"],
+                    answer=json.loads(row["answer"]),
+                    info=json.loads(row["info"]),
+                )
+            )
+            for index, row in enumerate(self._eval_rows)
+        ]
+
+    def get_dataset(self) -> list[dict[str, Any]]:
+        """Return canonical training rows for local compatibility probes."""
+
+        return list(self._train_rows)
+
+    def get_eval_dataset(self) -> list[dict[str, Any]]:
+        """Return the selected native-v1 task rows for local compatibility probes."""
+
+        return list(self._eval_rows)
 
 
 def load_environment(
@@ -65,8 +268,8 @@ def load_environment(
     train_data_path: str | os.PathLike[str] | None = None,
     split: str = "eval",
     **kwargs: Any,
-) -> vf.SingleTurnEnv:
-    """Build the deterministic single-turn planted-finding environment."""
+) -> ElicitTaskset:
+    """Build the native Verifiers v1 taskset with a compatibility inspection API."""
 
     validate_difficulty_args(
         docs_count=docs_count,
@@ -77,70 +280,25 @@ def load_environment(
         question_count=question_count,
         task=task,
     )
-    bundled_eval_path = _bundled_data_path(split)
-    configured_eval_path = data_path or os.environ.get(DATA_ENV_VAR)
-    configured_train_path = train_data_path or os.environ.get(TRAIN_DATA_ENV_VAR)
-    resolved_eval_path = (
-        Path(configured_eval_path) if configured_eval_path else bundled_eval_path
-    )
-    resolved_train_path = (
-        Path(configured_train_path) if configured_train_path else BUNDLED_TRAIN_PATH
-    )
-    train_rows = _scenario_rows(
-        load_scenarios(resolved_train_path),
-        docs_count=docs_count,
-        docs_length=docs_length,
-        planted_density=planted_density,
-        distractor_density=distractor_density,
-        panel_polarization=panel_polarization,
-        question_count=question_count,
-        task=task,
-    )
-    eval_rows = _scenario_rows(
-        load_scenarios(resolved_eval_path),
-        docs_count=docs_count,
-        docs_length=docs_length,
-        planted_density=planted_density,
-        distractor_density=distractor_density,
-        panel_polarization=panel_polarization,
-        question_count=question_count,
-        task=task,
-    )
-    if not train_rows or not eval_rows:
-        raise ValueError(
-            "difficulty arguments remove all planted items from the dataset"
+    _bundled_data_path(split)
+    if kwargs:
+        raise TypeError(f"unknown taskset arguments: {sorted(kwargs)}")
+    return ElicitTaskset(
+        ElicitTasksetConfig(
+            id=ENV_ID,
+            docs_count=docs_count,
+            docs_length=docs_length,
+            planted_density=planted_density,
+            distractor_density=distractor_density,
+            data_path=Path(data_path) if data_path is not None else None,
+            train_data_path=(
+                Path(train_data_path) if train_data_path is not None else None
+            ),
+            task_mode=task,
+            panel_polarization=panel_polarization,
+            question_count=question_count,
+            split=split,
         )
-    dataset = Dataset.from_list(train_rows)
-    eval_dataset = Dataset.from_list(eval_rows)
-    parser = ElicitJsonParser("questions" if task == "elicit-ask" else "findings")
-    if task == "elicit-ask":
-        rubric = vf.Rubric(funcs=[question_utility], weights=[1.0], parser=parser)
-    else:
-        rubric = vf.Rubric(
-            funcs=[finding_f1, question_utility],
-            weights=[1.0, 0.0],
-            parser=parser,
-        )
-    env_args = {
-        "task": task,
-        "docs_count": docs_count,
-        "docs_length": docs_length,
-        "planted_density": planted_density,
-        "distractor_density": distractor_density,
-        "panel_polarization": panel_polarization,
-        "question_count": question_count,
-        "data_path": str(resolved_eval_path),
-        "train_data_path": str(resolved_train_path),
-        "split": split,
-    }
-    return vf.SingleTurnEnv(
-        dataset=dataset,
-        eval_dataset=eval_dataset,
-        parser=parser,
-        rubric=rubric,
-        env_id=ENV_ID,
-        env_args=env_args,
-        **kwargs,
     )
 
 
@@ -258,6 +416,11 @@ def scenario_to_row(
             "doc_id": plant["doc_id"],
             "quote": plant["anchor_quote"],
             "type": plant["type"],
+            "document_text": next(
+                document["text"]
+                for document in documents
+                if document["doc_id"] == plant["doc_id"]
+            ),
         }
         for plant in visible_plants
     ]
@@ -311,6 +474,7 @@ def scenario_to_row(
         ],
         "answer": json.dumps(answer, sort_keys=True),
         "info": json.dumps(info, sort_keys=True),
+        "example_id": str(scenario["scenario_id"]),
     }
 
 
@@ -676,7 +840,7 @@ def panel_disagreement(target_stances: Mapping[str, str]) -> float:
     votes: list[int | None] = [
         STANCE_TO_VOTE[stance] for stance in target_stances.values()
     ]
-    return (vote_entropy(votes) + cluster_separation(votes)) / 2
+    return float((vote_entropy(votes) + cluster_separation(votes)) / 2)
 
 
 def _normalized_text(text: str) -> str:
@@ -704,8 +868,9 @@ def _parse_mapping_payload(payload: Mapping[str, Any] | str) -> Mapping[str, Any
     """Decode a canonical answer/info payload into a mapping for scoring."""
 
     try:
-        loaded = json.loads(payload) if isinstance(payload, str) else payload
-    except (json.JSONDecodeError, TypeError):
+        loaded = _load_bounded_json(payload) if isinstance(payload, str) else payload
+        _validate_json_shape(loaded)
+    except (RecursionError, TypeError, ValueError):
         return {}
     return loaded if isinstance(loaded, Mapping) else {}
 
@@ -748,13 +913,20 @@ def parse_planted_items(
     planted_items: Sequence[Mapping[str, str]] | str,
 ) -> list[dict[str, str]]:
     loaded = (
-        json.loads(planted_items) if isinstance(planted_items, str) else planted_items
+        _load_bounded_json(planted_items)
+        if isinstance(planted_items, str)
+        else planted_items
     )
     return [
         {
             "doc_id": str(item["doc_id"]),
             "quote": str(item.get("quote", item.get("anchor_quote", ""))),
             "type": str(item["type"]),
+            "document_text": str(
+                item.get(
+                    "document_text", item.get("quote", item.get("anchor_quote", ""))
+                )
+            ),
         }
         for item in loaded
     ]
@@ -765,6 +937,7 @@ def match_findings(
     planted: Sequence[Mapping[str, str]],
     *,
     quote_overlap_threshold: float = QUOTE_OVERLAP_THRESHOLD,
+    plant_coverage_threshold: float = PLANT_COVERAGE_THRESHOLD,
 ) -> dict[str, float | int]:
     """Globally match eligible candidates once each and return F1 counts."""
 
@@ -776,6 +949,16 @@ def match_findings(
             if candidate.get("doc_id") != plant.get("doc_id"):
                 continue
             if candidate.get("type") != plant.get("type"):
+                continue
+            if not normalized_contiguous_quote(
+                candidate.get("quote", ""),
+                plant.get("document_text", plant.get("quote", "")),
+            ):
+                continue
+            plant_coverage = normalized_plant_coverage(
+                candidate.get("quote", ""), plant.get("quote", "")
+            )
+            if plant_coverage < plant_coverage_threshold:
                 continue
             overlap = normalized_quote_overlap(
                 candidate.get("quote", ""), plant.get("quote", "")
@@ -818,26 +1001,59 @@ def match_findings(
 
 
 def normalized_quote_overlap(left: str, right: str) -> float:
-    """Return multiset token F1 after Unicode, case, and punctuation folding."""
+    """Return ordered, longest-contiguous-token F1 after conservative folding."""
 
-    return _token_f1(normalized_tokens(left), normalized_tokens(right))
-
-
-def normalized_tokens(text: str) -> dict[str, int]:
-    counts: dict[str, int] = {}
-    normalized = unicodedata.normalize("NFKC", text).casefold()
-    for token in _TOKEN_PATTERN.findall(normalized):
-        counts[token] = counts.get(token, 0) + 1
-    return counts
-
-
-def _token_f1(left_tokens: Mapping[str, int], right_tokens: Mapping[str, int]) -> float:
+    left_tokens = normalized_tokens(left)
+    right_tokens = normalized_tokens(right)
     if not left_tokens or not right_tokens:
         return 0.0
-    shared = sum(
-        min(count, right_tokens.get(token, 0)) for token, count in left_tokens.items()
+    longest = _longest_common_contiguous_span(left_tokens, right_tokens)
+    return 2 * longest / (len(left_tokens) + len(right_tokens))
+
+
+def normalized_plant_coverage(candidate_quote: str, planted_quote: str) -> float:
+    """Return the fraction of a planted anchor covered by one ordered span."""
+
+    candidate_tokens = normalized_tokens(candidate_quote)
+    planted_tokens = normalized_tokens(planted_quote)
+    if not candidate_tokens or not planted_tokens:
+        return 0.0
+    longest = _longest_common_contiguous_span(candidate_tokens, planted_tokens)
+    return longest / len(planted_tokens)
+
+
+def normalized_tokens(text: str) -> tuple[str, ...]:
+    normalized = unicodedata.normalize("NFKC", text).casefold()
+    return tuple(_TOKEN_PATTERN.findall(normalized))
+
+
+def normalized_contiguous_quote(quote: str, document_text: str) -> bool:
+    """Return whether a normalized quote is an ordered contiguous document span."""
+
+    quote_tokens = normalized_tokens(quote)
+    document_tokens = normalized_tokens(document_text)
+    if not quote_tokens or len(quote_tokens) > len(document_tokens):
+        return False
+    width = len(quote_tokens)
+    return any(
+        document_tokens[index : index + width] == quote_tokens
+        for index in range(len(document_tokens) - width + 1)
     )
-    return 2 * shared / (sum(left_tokens.values()) + sum(right_tokens.values()))
+
+
+def _longest_common_contiguous_span(
+    left_tokens: Sequence[str], right_tokens: Sequence[str]
+) -> int:
+    previous = [0] * (len(right_tokens) + 1)
+    longest = 0
+    for left_token in left_tokens:
+        current = [0] * (len(right_tokens) + 1)
+        for right_index, right_token in enumerate(right_tokens, start=1):
+            if left_token == right_token:
+                current[right_index] = previous[right_index - 1] + 1
+                longest = max(longest, current[right_index])
+        previous = current
+    return longest
 
 
 def _maximum_weight_sum(weights: Sequence[Sequence[float]]) -> float:
@@ -911,16 +1127,20 @@ def _maximum_weight_sum(weights: Sequence[Sequence[float]]) -> float:
 
 
 def extract_json_object(text: str, *, preferred_key: str) -> Any:
+    if not isinstance(text, str) or len(text) > MAX_COMPLETION_CHARS:
+        raise ValueError("completion exceeds the JSON parser size limit")
+    starts = [index for index, character in enumerate(text) if character == "{"]
+    if len(starts) > MAX_JSON_STARTS:
+        raise ValueError("completion contains too many JSON object starts")
     decoder = json.JSONDecoder()
     last_decodable: Any = None
     last_preferred: dict[str, Any] | None = None
     found_decodable = False
-    for index, character in enumerate(text):
-        if character != "{":
-            continue
+    for index in starts:
         try:
             parsed, _ = decoder.raw_decode(text[index:])
-        except json.JSONDecodeError:
+            _validate_json_shape(parsed)
+        except (json.JSONDecodeError, RecursionError, ValueError):
             continue
         found_decodable = True
         last_decodable = parsed
@@ -931,6 +1151,35 @@ def extract_json_object(text: str, *, preferred_key: str) -> Any:
     if found_decodable:
         return last_decodable
     raise ValueError("no JSON object found")
+
+
+def _load_bounded_json(text: str) -> Any:
+    if len(text) > MAX_COMPLETION_CHARS:
+        raise ValueError("JSON payload exceeds the size limit")
+    try:
+        loaded = json.loads(text)
+    except (json.JSONDecodeError, RecursionError) as error:
+        raise ValueError("invalid bounded JSON payload") from error
+    _validate_json_shape(loaded)
+    return loaded
+
+
+def _validate_json_shape(value: Any) -> None:
+    """Bound decoded container depth and nodes without recursive traversal."""
+
+    stack: list[tuple[Any, int]] = [(value, 1)]
+    nodes = 0
+    while stack:
+        current, depth = stack.pop()
+        nodes += 1
+        if nodes > MAX_JSON_NODES:
+            raise ValueError("JSON payload exceeds the node limit")
+        if depth > MAX_JSON_DEPTH:
+            raise ValueError("JSON payload exceeds the nesting limit")
+        if isinstance(current, Mapping):
+            stack.extend((item, depth + 1) for item in current.values())
+        elif isinstance(current, list):
+            stack.extend((item, depth + 1) for item in current)
 
 
 def validate_difficulty_args(
