@@ -18,7 +18,15 @@ from datasets import Dataset
 
 ENV_ID = "commonground-predict"
 DATA_ENV_VAR = "COMMONGROUND_DATA_PATH"
-BUNDLED_EVAL_PATH = Path(__file__).resolve().parent / "data" / "eval_synthetic.jsonl"
+DATA_DIR = Path(__file__).resolve().parent / "data"
+BUNDLED_EVAL_PATH = DATA_DIR / "eval_synthetic.jsonl"
+BUNDLED_TRAIN_PATH = DATA_DIR / "train_synthetic.jsonl"
+BUNDLED_CE_DEMO_PATH = DATA_DIR / "eval_ce_demo.jsonl"
+BUNDLED_SPLIT_PATHS = {
+    "eval": BUNDLED_EVAL_PATH,
+    "train": BUNDLED_TRAIN_PATH,
+    "ce-demo": BUNDLED_CE_DEMO_PATH,
+}
 VALID_VOTES = {-1, 0, 1}
 LABEL_TO_VOTE = {"agree": 1, "disagree": -1, "pass": 0}
 VOTE_TO_LABEL = {vote: label for label, vote in LABEL_TO_VOTE.items()}
@@ -41,11 +49,14 @@ def load_environment(
     masked_vote_count: int | None = None,
     min_cluster_count: int | None = None,
     data_path: str | os.PathLike[str] | None = None,
+    split: str = "eval",
     **kwargs: Any,
 ) -> vf.SingleTurnEnv:
     """Build the deterministic single-turn masked-vote prediction environment."""
 
-    resolved_path = Path(data_path or os.environ.get(DATA_ENV_VAR) or BUNDLED_EVAL_PATH)
+    bundled_path = _bundled_data_path(split)
+    configured_path = data_path or os.environ.get(DATA_ENV_VAR)
+    resolved_path = Path(configured_path) if configured_path else bundled_path
     snapshots = load_snapshots(
         resolved_path,
         masked_vote_count=masked_vote_count,
@@ -58,6 +69,7 @@ def load_environment(
         "masked_vote_count": masked_vote_count,
         "min_cluster_count": min_cluster_count,
         "data_path": str(resolved_path),
+        "split": split,
     }
     return vf.SingleTurnEnv(
         dataset=dataset,
@@ -68,6 +80,18 @@ def load_environment(
         env_args=env_args,
         **kwargs,
     )
+
+
+def _bundled_data_path(split: str) -> Path:
+    """Resolve a named bundled split to its packaged JSONL path."""
+
+    try:
+        return BUNDLED_SPLIT_PATHS[split]
+    except KeyError:
+        valid_names = ", ".join(BUNDLED_SPLIT_PATHS)
+        raise ValueError(
+            f"unknown split {split!r}; valid splits: {valid_names}"
+        ) from None
 
 
 def load_snapshots(

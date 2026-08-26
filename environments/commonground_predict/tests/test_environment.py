@@ -10,7 +10,9 @@ import pytest
 import verifiers as vf
 from commonground_predict import PredictionJsonParser, load_environment
 from commonground_predict.environment import (
+    BUNDLED_CE_DEMO_PATH,
     BUNDLED_EVAL_PATH,
+    BUNDLED_TRAIN_PATH,
     DATA_ENV_VAR,
     apply_masked_vote_count,
     brier,
@@ -28,6 +30,56 @@ def test_load_environment_builds_bundled_split() -> None:
     assert isinstance(env, vf.SingleTurnEnv)
     assert env.env_id == "commonground-predict"
     assert len(env.get_eval_dataset()) == 20
+
+
+@pytest.mark.parametrize(
+    ("split", "expected_path", "expected_rows", "masked_vote_count"),
+    [
+        ("eval", BUNDLED_EVAL_PATH, 20, None),
+        ("train", BUNDLED_TRAIN_PATH, 150, None),
+        ("ce-demo", BUNDLED_CE_DEMO_PATH, 1, 3),
+    ],
+)
+def test_named_bundled_splits_resolve_to_packaged_rows(
+    split: str,
+    expected_path: Path,
+    expected_rows: int,
+    masked_vote_count: int | None,
+) -> None:
+    env = load_environment(split=split, masked_vote_count=masked_vote_count)
+
+    assert env.env_args["split"] == split
+    assert env.env_args["data_path"] == str(expected_path)
+    assert len(env.get_eval_dataset()) == expected_rows
+
+
+def test_named_eval_split_rows_are_byte_identical_to_default() -> None:
+    default_env = load_environment()
+    named_env = load_environment(split="eval")
+    legacy_path_env = load_environment(data_path=BUNDLED_EVAL_PATH)
+
+    assert dataset_rows_bytes(named_env.get_eval_dataset()) == dataset_rows_bytes(
+        default_env.get_eval_dataset()
+    )
+    assert dataset_rows_bytes(named_env.get_eval_dataset()) == dataset_rows_bytes(
+        legacy_path_env.get_eval_dataset()
+    )
+
+
+def test_explicit_data_path_takes_precedence_over_split() -> None:
+    env = load_environment(data_path=BUNDLED_EVAL_PATH, split="train")
+
+    assert env.env_args["data_path"] == str(BUNDLED_EVAL_PATH)
+    assert len(env.get_eval_dataset()) == 20
+
+
+def test_unknown_split_lists_valid_names() -> None:
+    with pytest.raises(ValueError) as exc_info:
+        load_environment(split="unknown")
+
+    message = str(exc_info.value)
+    assert "unknown split 'unknown'" in message
+    assert "valid splits: eval, train, ce-demo" in message
 
 
 def test_server_state_path_binds_answer_for_correct_and_incorrect() -> None:
@@ -80,7 +132,7 @@ def test_load_environment_builds_ce_demo_split_from_env(monkeypatch: Any) -> Non
     data_path = DATA_DIR / "eval_ce_demo.jsonl"
     monkeypatch.setenv(DATA_ENV_VAR, str(data_path))
 
-    env = load_environment(masked_vote_count=3)
+    env = load_environment(masked_vote_count=3, split="train")
     row = dict(env.get_eval_dataset()[0])
     held_out = json.loads(row["answer"])
     info = json.loads(row["info"])
@@ -95,6 +147,7 @@ def test_load_environment_builds_ce_demo_split_from_env(monkeypatch: Any) -> Non
     assert len(snapshot["votes"]) == 62
     assert {len(row) for row in snapshot["votes"]} == {30}
     assert len(held_out) == 3
+    assert env.env_args["data_path"] == str(data_path)
     state = score_row(env, row, held_out)
     assert state["reward"] == 1.0
     assert state["metrics"]["vote_accuracy"] == 1.0
@@ -415,6 +468,15 @@ def write_snapshot_jsonl(tmp_path: Path, snapshot: dict[str, Any]) -> Path:
     data_path = tmp_path / "snapshot.jsonl"
     data_path.write_text(json.dumps(snapshot, sort_keys=True) + "\n", encoding="utf-8")
     return data_path
+
+
+def dataset_rows_bytes(dataset: Any) -> bytes:
+    """Serialize dataset rows canonically for byte-level comparisons."""
+
+    lines = [
+        json.dumps(dict(row), sort_keys=True, separators=(",", ":")) for row in dataset
+    ]
+    return ("\n".join(lines) + "\n").encode()
 
 
 def wrong_vote(vote: int) -> int:

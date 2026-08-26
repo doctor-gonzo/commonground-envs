@@ -47,6 +47,77 @@ def test_load_environment_builds_default_heldout_rows() -> None:
     } == {"heldout"}
 
 
+@pytest.mark.parametrize(
+    ("split", "expected_path", "expected_rows", "expected_template_set"),
+    [
+        ("eval", BUNDLED_EVAL_PATH, 20, "heldout"),
+        ("train", BUNDLED_TRAIN_PATH, 40, "train"),
+    ],
+)
+def test_named_bundled_splits_resolve_to_packaged_rows(
+    split: str,
+    expected_path: Path,
+    expected_rows: int,
+    expected_template_set: str,
+) -> None:
+    env = load_environment(split=split)
+
+    assert env.env_args["split"] == split
+    assert env.env_args["data_path"] == str(expected_path)
+    assert len(env.get_eval_dataset()) == expected_rows
+    assert {
+        json.loads(row["info"])["template_set"] for row in env.get_eval_dataset()
+    } == {expected_template_set}
+
+
+def test_named_eval_split_rows_are_byte_identical_to_default() -> None:
+    default_env = load_environment()
+    named_env = load_environment(split="eval")
+    legacy_paths_env = load_environment(
+        data_path=BUNDLED_EVAL_PATH,
+        train_data_path=BUNDLED_TRAIN_PATH,
+    )
+
+    assert dataset_rows_bytes(named_env.get_dataset()) == dataset_rows_bytes(
+        default_env.get_dataset()
+    )
+    assert dataset_rows_bytes(named_env.get_eval_dataset()) == dataset_rows_bytes(
+        default_env.get_eval_dataset()
+    )
+    assert dataset_rows_bytes(named_env.get_dataset()) == dataset_rows_bytes(
+        legacy_paths_env.get_dataset()
+    )
+    assert dataset_rows_bytes(named_env.get_eval_dataset()) == dataset_rows_bytes(
+        legacy_paths_env.get_eval_dataset()
+    )
+
+
+def test_explicit_paths_take_precedence_over_split() -> None:
+    env = load_environment(
+        data_path=BUNDLED_EVAL_PATH,
+        train_data_path=BUNDLED_EVAL_PATH,
+        split="train",
+    )
+
+    assert env.env_args["data_path"] == str(BUNDLED_EVAL_PATH)
+    assert env.env_args["train_data_path"] == str(BUNDLED_EVAL_PATH)
+    assert {json.loads(row["info"])["template_set"] for row in env.get_dataset()} == {
+        "heldout"
+    }
+    assert {
+        json.loads(row["info"])["template_set"] for row in env.get_eval_dataset()
+    } == {"heldout"}
+
+
+def test_unknown_split_lists_valid_names() -> None:
+    with pytest.raises(ValueError) as exc_info:
+        load_environment(split="unknown")
+
+    message = str(exc_info.value)
+    assert "unknown split 'unknown'" in message
+    assert "valid splits: eval, train" in message
+
+
 @pytest.mark.parametrize("task", ["find", "elicit-ask"])
 def test_server_state_path_scores_correct_and_incorrect(task: str) -> None:
     env = load_environment(task=task)
@@ -1515,6 +1586,15 @@ def test_distractor_density_removes_hidden_near_miss_passages() -> None:
 def test_invalid_difficulty_args_are_rejected(kwargs: dict[str, Any]) -> None:
     with pytest.raises(ValueError):
         load_environment(**kwargs)
+
+
+def dataset_rows_bytes(dataset: Any) -> bytes:
+    """Serialize dataset rows canonically for byte-level comparisons."""
+
+    lines = [
+        json.dumps(dict(row), sort_keys=True, separators=(",", ":")) for row in dataset
+    ]
+    return ("\n".join(lines) + "\n").encode()
 
 
 def score_row(
