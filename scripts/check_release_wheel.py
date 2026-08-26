@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 REQUIRES_PYTHON_PARTS = frozenset({">=3.12", "<3.13"})
 EXPECTED_AUTHOR = "Common Ground contributors"
 EXPECTED_LICENSE = "Apache-2.0"
-EXPECTED_REPOSITORY_URL = "https://github.com/<OWNER>/commonground-envs"
+EXPECTED_REPOSITORY_URL = "https://github.com/doctor-gonzo/commonground-envs"
 REQUIRED_CLASSIFIERS = frozenset(
     {
         "Development Status :: 3 - Alpha",
@@ -35,6 +35,7 @@ REPOSITORY_TOOLING = frozenset(
 @dataclass(frozen=True)
 class WheelTarget:
     name: str
+    version: str
     source_dir: Path
     requirements: frozenset[str]
     bundled_files: frozenset[str]
@@ -51,6 +52,7 @@ def _data_files(source_dir: Path, package_name: str) -> frozenset[str]:
 TARGETS = (
     WheelTarget(
         name="commonground-predict",
+        version="0.1.1",
         source_dir=ROOT / "environments" / "commonground_predict",
         requirements=frozenset({"commonground-score<0.2,>=0.1.0", "verifiers==0.1.14"}),
         bundled_files=_data_files(
@@ -59,6 +61,7 @@ TARGETS = (
     ),
     WheelTarget(
         name="commonground-elicit",
+        version="0.1.1",
         source_dir=ROOT / "environments" / "commonground_elicit",
         requirements=frozenset(
             {
@@ -74,12 +77,14 @@ TARGETS = (
     ),
     WheelTarget(
         name="commonground-scenarios",
+        version="0.1.0",
         source_dir=ROOT / "packages" / "commonground-scenarios",
         requirements=frozenset(),
         bundled_files=frozenset({"commonground_scenarios/schema/scenario.schema.json"}),
     ),
     WheelTarget(
         name="commonground-score",
+        version="0.1.0",
         source_dir=ROOT / "packages" / "commonground-score",
         requirements=frozenset(),
         bundled_files=frozenset(),
@@ -106,6 +111,11 @@ def _inspect_wheel(target: WheelTarget, wheel_path: Path) -> int:
         if metadata["Name"] != target.name:
             raise AssertionError(
                 f"expected wheel for {target.name}, found {metadata['Name']!r}"
+            )
+        if metadata["Version"] != target.version:
+            raise AssertionError(
+                f"{target.name}: expected version {target.version!r}; "
+                f"found {metadata['Version']!r}"
             )
         if not metadata["Summary"] or metadata["Summary"] == "UNKNOWN":
             raise AssertionError(f"{target.name}: wheel metadata has no description")
