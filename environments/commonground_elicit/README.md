@@ -119,21 +119,16 @@ The public package contains every planted answer key for reproducibility and
 open training. It is not contamination-resistant. A leaderboard or
 consequential comparison needs a private server-side evaluation split.
 
-## The commonground family and human socket
+## The commonground family
 
 `commonground-elicit` and `commonground-predict` are separate Hub IDs in one
 program. Predict scores masked-vote inference; elicit scores document-grounded
 finding and question raising. They share `commonground-score` and the same
-synthetic-versus-human provenance boundary without combining incompatible
-rubrics behind a mode flag.
-
-The scenario schema reserves `human_feedback` for a reviewed, consented
-Context Engine snapshot. It uses the same strict validator as predict intake:
-positional pseudonyms, exact clusters with `k >= 5`, consistent vote statistics,
-no held-out labels, and explicit source, rights, schema-version, exporter, and
-privacy-review attestations. Automated identifier screening is limited and
-never replaces human review. The bundled elicit release uses synthetic
-scenarios only.
+synthetic-data provenance conventions without combining incompatible rubrics
+behind a mode flag. The bundled 0.2.x scenarios are synthetic. The optional
+advanced custom `human_feedback` path uses the same fail-closed validator as
+Predict; see
+[human-data governance](https://github.com/doctor-gonzo/commonground-envs/blob/master/docs/human-data-governance.md).
 
 ## Evaluation
 
