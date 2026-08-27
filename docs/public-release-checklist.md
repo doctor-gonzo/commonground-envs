@@ -29,9 +29,11 @@ Run:
 The committed generated files must remain byte-identical, and both floor tables
 must exactly match their environment READMEs. Elicit generation must report 40
 unique training semantic tasks and 20 unique evaluation semantic tasks, with
-disjoint template families. The grounded-quote exploit, malformed JSON, depth,
-size, negation, actor/object reversal, and short-fragment tests must pass.
-Predict training and evaluation policy texts must remain disjoint.
+disjoint template families. The grounded-quote, wrong-document, semantic-
+operator, malformed JSON, depth, size, duplicate-assignment, and short-fragment
+tests must pass. The Elicit-ask regression must prove that hidden canonical
+wording cannot alter a grounded paraphrase's score. Predict training and
+evaluation policy texts must remain disjoint.
 
 The public distributions contain evaluation answers. Never describe a public
 score as contamination-resistant. Use a private server-side split for a
@@ -73,7 +75,7 @@ Publish immutable shared packages first:
 1. commonground-score 0.1.1
 2. commonground-scenarios 0.1.1
 3. commonground-predict 0.2.1
-4. commonground-elicit 0.2.1
+4. commonground-elicit 0.2.2
 
 The environment packages exactly pin the shared versions. Do not reuse a
 published version number.
@@ -103,8 +105,8 @@ Push the new versions privately first. On the exact private artifacts:
 - pull and repeat clean install, import, taskset load, and shipped-test checks;
 - run a small native-v1 server evaluation and a standalone hosted legacy
   evaluation for predict and both elicit task modes;
-- rerun and publish elicit model baselines because its corpus and reward changed
-  in 0.2.0;
+- rerun and publish elicit model baselines because its corpus changed in 0.2.0
+  and its question reward changed in 0.2.2;
 - review the rendered README and license/provenance notice.
 
 Only then should an operator manually make a listing public. Publishing and

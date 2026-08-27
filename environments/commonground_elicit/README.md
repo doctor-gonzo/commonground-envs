@@ -1,6 +1,6 @@
 # commonground-elicit
 
-`commonground-elicit` 0.2.1 is a deterministic native Verifiers v1 taskset for
+`commonground-elicit` 0.2.2 is a deterministic native Verifiers v1 taskset for
 finding planted ambiguities, contradictions, and gaps in small sets of
 fictional policy documents. Its scenarios are synthetic, generated offline
 from committed templates, and carry explicit provenance.
@@ -27,17 +27,23 @@ logged metric with weight zero.
 Set `task="elicit-ask"` for the question-raising split. It requires exactly K
 strict-JSON questions with a quote copied from the visible document and a
 predicted stance for every listed faction. Utility is credited only when the
-raw document ID and quote match the planted anchor, the question equals the
-canonical question or a finite generator-authored alias under NFC
-normalization, and the complete planted target-stance vector matches.
-Duplicates targeting the same planting are rejected even when one uses an
-alias. Unlisted paraphrases, composites, and reversals receive zero. This
-bounded-recall contract avoids rewarding lexical fragments without a judge
-model. Disagreement is the mean of normalized vote entropy and faction-pair
-separation from `commonground-score`. Generic divisiveness does not match a
-planting.
+raw document ID and exact quote match a planted anchor. The question must use
+strict yes/no form and reuse at least one informative token from its quoted
+passage; its wording does not have to match a hidden authored sentence.
+One-to-one assignment prevents duplicate questions from claiming the same
+planting twice. Half of each matched utility comes from issue grounding and
+half from per-faction stance accuracy, so partially correct stance vectors earn
+partial credit. The result is scaled by panel polarization and the planting's
+mean normalized vote entropy/faction-pair separation from
+`commonground-score`. No judge model or network call is used.
 Questions are yes/no propositions: `agree` predicts yes, `disagree` predicts
 no, and `pass` means that faction takes no position.
+
+This deterministic contract measures grounded issue selection and stance
+prediction. Beyond yes/no form and lexical connection to the evidence, it does
+not attempt to judge the prose quality or semantic equivalence of an open-ended
+question. Use a judge-backed or human-reviewed layer when that distinction is
+the research target.
 
 Difficulty arguments are `docs_count`, `docs_length`, `planted_density`,
 `distractor_density`, `panel_polarization`, and `question_count`. Generation,
@@ -68,7 +74,7 @@ uv run validate commonground-elicit --taskset.split train \
 ```
 
 The packaged `commonground_elicit/dependency-manifest.txt` records the exact
-no-dev resolution used for this 0.2.1 candidate, including the root `uv.lock`
+no-dev resolution used for this 0.2.2 candidate, including the root `uv.lock`
 SHA-256, Python scope, and uv generator version. Workspace sources appear as
 immutable distribution pins; the manifest is provenance rather than a
 cross-platform installer.
@@ -110,10 +116,10 @@ prints:
 See the bundled data directory's dataset card for the planting and separation
 methodology.
 
-The 0.1.x model table is intentionally removed: 0.2.0 replaced both the held-out
-semantic corpus and the quote-grounding reward, so those historical scores are
-not comparable. Fresh baselines must be run on the exact private 0.2.1
-candidate before any public performance claim.
+The 0.1.x model table is intentionally removed: 0.2.0 replaced the held-out
+semantic corpus and 0.2.2 replaced the question reward, so those historical
+scores are not comparable. Fresh baselines must be run on the exact private
+0.2.2 candidate before any public performance claim.
 
 The public package contains every planted answer key for reproducibility and
 open training. It is not contamination-resistant. A leaderboard or

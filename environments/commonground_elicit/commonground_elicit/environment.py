@@ -15,7 +15,6 @@ import verifiers as legacy_vf
 import verifiers.v1 as vf
 from commonground_scenarios import (
     is_yes_no_question,
-    question_fingerprint,
     validate_scenario,
 )
 from commonground_score import (
@@ -44,6 +43,40 @@ MAX_JSON_DEPTH = 32
 MAX_JSON_NODES = 10_000
 VALID_TASKS = frozenset({"find", "elicit-ask"})
 STANCE_TO_VOTE = {"agree": 1, "disagree": -1, "pass": 0}
+QUESTION_GROUNDING_WEIGHT = 0.5
+STANCE_ACCURACY_WEIGHT = 0.5
+QUESTION_GROUNDING_STOPWORDS = frozenset(
+    {
+        "a",
+        "an",
+        "and",
+        "are",
+        "be",
+        "by",
+        "do",
+        "does",
+        "for",
+        "from",
+        "have",
+        "in",
+        "is",
+        "it",
+        "of",
+        "on",
+        "or",
+        "should",
+        "the",
+        "this",
+        "to",
+        "under",
+        "what",
+        "when",
+        "which",
+        "who",
+        "with",
+        "without",
+    }
+)
 _TOKEN_PATTERN = re.compile(
     r"(?:!=|<=|>=|==)|[!~](?=\s*[^\W_])|-(?=\s*\d)|[^\W_]+|"
     r"[¬≠≤≥=<>±+\N{MINUS SIGN}%$€£¥∉∈∧\N{LOGICAL OR}]",
@@ -666,6 +699,7 @@ def render_prompt(
             ),
             f"Return exactly {question_count} question objects. The findings determine reward; questions are scored as a logged weight-zero companion metric.",
             "Phrase each question as yes/no: agree means that faction predicts yes, disagree means no, and pass means no position.",
+            "For every question, copy its exact supporting passage into quote and reuse at least one informative word from that quote.",
         ]
     )
     return "\n".join(lines)
@@ -682,6 +716,7 @@ def render_ask_prompt(
         f"Raise exactly {question_count} clarifying questions grounded in these policy documents.",
         "Each question should expose a specific ambiguity, contradiction, or uncovered case that could split the listed stakeholder factions.",
         "Phrase every question as yes/no. Predict every faction's answer: agree means yes, disagree means no, and pass means no position.",
+        "Copy the exact supporting passage into quote and reuse at least one informative word from that quote in the question.",
         "Generic questions about whether rules should exist are not useful.",
         "",
         "Stakeholder factions:",
@@ -796,30 +831,10 @@ def question_utility_score(
     panel_polarization: float,
     question_count: int,
 ) -> float:
-    """Return optimal one-to-one planted-question utility for exactly K outputs."""
+    """Return grounded issue discovery plus stance accuracy for exactly K outputs."""
 
     if len(candidates) != question_count or question_count <= 0:
         return 0.0
-    fingerprints = [
-        question_fingerprint(str(candidate.get("question", "")))
-        for candidate in candidates
-    ]
-    if len(set(fingerprints)) != len(fingerprints):
-        return 0.0
-    candidate_question_targets = [
-        {
-            plant_index
-            for plant_index, plant in enumerate(planted)
-            if _question_matches_plant(str(candidate.get("question", "")), plant)
-        }
-        for candidate in candidates
-    ]
-    for left_index, left_targets in enumerate(candidate_question_targets):
-        if any(
-            left_targets & right_targets
-            for right_targets in candidate_question_targets[left_index + 1 :]
-        ):
-            return 0.0
     weights: list[list[float]] = []
     for candidate in candidates:
         candidate_weights = [
@@ -840,53 +855,66 @@ def _candidate_plant_question_utility(
     *,
     panel_polarization: float,
 ) -> float:
-    text_match = _candidate_plant_text_match(candidate, plant)
-    if text_match is None:
+    quote_overlap = _candidate_plant_grounding(candidate, plant)
+    if quote_overlap is None:
         return 0.0
-    quote_overlap, question_overlap = text_match
     planted_stances = plant.get("target_stances", {})
     candidate_stances = candidate.get("target_stances", {})
-    if not isinstance(planted_stances, Mapping) or set(candidate_stances) != set(
-        planted_stances
-    ):
+    if not isinstance(planted_stances, Mapping) or not planted_stances:
         return 0.0
-    if dict(candidate_stances) != dict(planted_stances):
-        return 0.0
+    stance_accuracy = (
+        sum(
+            candidate_stances.get(faction_id) == stance
+            for faction_id, stance in planted_stances.items()
+        )
+        / len(planted_stances)
+        if isinstance(candidate_stances, Mapping)
+        else 0.0
+    )
     disagreement = panel_disagreement(planted_stances)
-    return quote_overlap * question_overlap * disagreement * panel_polarization
+    component_score = (
+        QUESTION_GROUNDING_WEIGHT + STANCE_ACCURACY_WEIGHT * stance_accuracy
+    )
+    return quote_overlap * component_score * disagreement * panel_polarization
 
 
-def _candidate_plant_text_match(
+def _candidate_plant_grounding(
     candidate: Mapping[str, Any],
     plant: Mapping[str, Any],
-) -> tuple[float, float] | None:
-    """Match a candidate to one planted issue before considering stance guesses."""
+) -> float | None:
+    """Match a generated question to one planted issue using visible evidence."""
 
     if candidate.get("doc_id") != plant.get("doc_id"):
         return None
     candidate_quote = str(candidate.get("quote", ""))
     planted_quote = str(plant.get("quote", ""))
-    if candidate_quote != planted_quote:
-        return None
     document_text = str(plant.get("document_text", ""))
-    if candidate_quote not in document_text:
+    if candidate_quote != planted_quote or candidate_quote not in document_text:
         return None
     candidate_question = str(candidate.get("question", ""))
     if not is_yes_no_question(candidate_question):
         return None
-    if not _question_matches_plant(candidate_question, plant):
+    # Regression guard: issue identity comes only from prompt-visible evidence.
+    # Hidden canonical wording made 60 valid baseline outputs score zero.
+    if not question_references_quote(candidate_question, candidate_quote):
         return None
-    return 1.0, 1.0
+    return 1.0
 
 
-def _question_matches_plant(candidate: str, plant: Mapping[str, Any]) -> bool:
-    """Match only a canonical question or an explicitly authored finite alias."""
+def question_references_quote(question: str, quote: str) -> bool:
+    """Require at least one informative quote token in the generated question."""
 
-    candidate_identity = question_fingerprint(candidate)
-    allowed = [plant.get("question", ""), *plant.get("question_aliases", ())]
-    return candidate_identity in {
-        question_fingerprint(str(question)) for question in allowed
+    question_tokens = {
+        token
+        for token in normalized_tokens(question)
+        if len(token) > 2 and token not in QUESTION_GROUNDING_STOPWORDS
     }
+    quote_tokens = {
+        token
+        for token in normalized_tokens(quote)
+        if len(token) > 2 and token not in QUESTION_GROUNDING_STOPWORDS
+    }
+    return bool(question_tokens & quote_tokens)
 
 
 def panel_disagreement(target_stances: Mapping[str, str]) -> float:

@@ -84,14 +84,14 @@ def test_checked_in_manifests_match_the_exact_lock() -> None:
 
 
 @pytest.mark.parametrize(
-    ("distribution", "import_package"),
+    ("distribution", "import_package", "expected_version"),
     [
-        ("commonground-predict", "commonground_predict"),
-        ("commonground-elicit", "commonground_elicit"),
+        ("commonground-predict", "commonground_predict", "0.2.1"),
+        ("commonground-elicit", "commonground_elicit", "0.2.2"),
     ],
 )
 def test_manifest_records_release_scope_without_local_paths(
-    distribution: str, import_package: str
+    distribution: str, import_package: str, expected_version: str
 ) -> None:
     manifest_path = (
         ROOT
@@ -103,7 +103,7 @@ def test_manifest_records_release_scope_without_local_paths(
     content = manifest_path.read_text(encoding="utf-8")
     lock_sha256 = hashlib.sha256((ROOT / "uv.lock").read_bytes()).hexdigest()
 
-    assert f"# Distribution: {distribution}==0.2.1" in content
+    assert f"# Distribution: {distribution}=={expected_version}" in content
     assert "# Python-Requires: >=3.12,<3.13" in content
     assert f"# Lock-SHA256: {lock_sha256}" in content
     assert "# uv-Version: 0.10.9" in content

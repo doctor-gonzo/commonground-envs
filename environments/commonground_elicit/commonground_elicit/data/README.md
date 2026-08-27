@@ -13,7 +13,11 @@ Each scenario starts from a committed domain template with public policy
 documents and faction descriptions. The generator plants an ambiguity, a
 cross-document contradiction, and an uncovered case, then records their raw
 document IDs, exact anchor quotes, canonical questions, finite authored alias
-lists, and deterministic faction-stance vectors in the hidden answer key.
+lists, and deterministic faction-stance vectors in the hidden answer key. The
+canonical questions and aliases document generator intent but are not used as
+an exact-string reward gate. Elicit-ask instead matches the exact visible
+document anchor, validates yes/no form plus a lexical connection to that
+anchor, and separately scores faction-stance accuracy.
 Precise, consistent passages are carried as distractors. Prompts contain the
 documents and public faction descriptions but not the answer key or priors.
 

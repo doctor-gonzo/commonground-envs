@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.2 - 2026-08-26
+
+- Replace Elicit-ask's unreachable hidden canonical-sentence gate with a
+  prompt-visible contract: exact document/quote grounding, strict yes/no
+  form, and at least one informative word shared with the quoted passage.
+- Split each matched question's utility evenly between issue grounding and
+  per-faction stance accuracy, retain disagreement/polarization scaling, and
+  use global one-to-one assignment so duplicates earn no second match.
+- Add the observed baseline regression: a valid grounded paraphrase with
+  partially correct stances now receives partial credit, while changing hidden
+  canonical wording cannot change its score.
+
 ## 0.2.1 - 2026-08-26
 
 - Restore real legacy `SingleTurnEnv` adapters from `load_environment()` so

@@ -1,7 +1,7 @@
 # commonground-envs
 
 Standalone workspace for Common Ground deliberation and collective-preference
-training and evaluation environments. Release 0.2.1 exposes two independent
+training and evaluation environments. The current candidates expose two independent
 native Verifiers v1 tasksets: `commonground-predict` estimates held-out
 stakeholder votes on fictional company AI policies, while
 `commonground-elicit` finds planted policy problems and raises questions that
@@ -114,9 +114,10 @@ uv run python scripts/aggregate_baselines.py --csv /path/to/baselines.csv
 
 ## The `commonground` family
 
-`commonground` is an environment family, not a one-off. Release 0.2.1 ships
-`commonground-predict` and `commonground-elicit` as separate Hub IDs backed by
-the shared score and scenario packages. Planned follow-ons are:
+`commonground` is an environment family, not a one-off. The validated
+`commonground-predict` 0.2.1 candidate and `commonground-elicit` 0.2.2 candidate
+are separate Hub IDs backed by the shared score and scenario packages. Planned
+follow-ons are:
 
 - `commonground-bridge` — bridging-statement generation scored by a frozen
   vote-predictor plus a cross-cluster diversity bonus; eval splits scored

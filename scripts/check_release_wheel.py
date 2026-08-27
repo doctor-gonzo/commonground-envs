@@ -89,7 +89,7 @@ TARGETS = (
     ),
     WheelTarget(
         name="commonground-elicit",
-        version="0.2.1",
+        version="0.2.2",
         source_dir=ROOT / "environments" / "commonground_elicit",
         requirements=frozenset(
             {
@@ -375,7 +375,7 @@ import commonground_scenarios
 import commonground_score
 
 assert version("commonground-predict") == "0.2.1"
-assert version("commonground-elicit") == "0.2.1"
+assert version("commonground-elicit") == "0.2.2"
 assert version("commonground-scenarios") == "0.1.1"
 assert version("commonground-score") == "0.1.1"
 

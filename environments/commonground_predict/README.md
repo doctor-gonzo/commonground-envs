@@ -176,7 +176,8 @@ that purpose.
 
 ## The commonground Family
 
-`commonground-predict` and `commonground-elicit` are the two 0.2.1 Hub IDs.
+`commonground-predict` 0.2.1 and `commonground-elicit` 0.2.2 are the two Hub
+release candidates.
 Predict tests inference over held-out deliberation votes; elicit tests whether a
 model can find policy problems and ask faction-splitting questions. They share
 the score package and provenance conventions while keeping their incompatible

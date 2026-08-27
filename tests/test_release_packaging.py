@@ -26,7 +26,7 @@ PROJECTS = {
     "commonground-elicit": (
         ROOT / "environments" / "commonground_elicit",
         "commonground_elicit",
-        "0.2.1",
+        "0.2.2",
         [
             "commonground-scenarios==0.1.1",
             "commonground-score==0.1.1",

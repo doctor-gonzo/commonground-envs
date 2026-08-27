@@ -338,6 +338,8 @@ def test_ask_task_builds_same_env_id_with_task_specific_prompt() -> None:
     assert env.env_args["task"] == "elicit-ask"
     assert "Raise exactly 3 clarifying questions" in prompt
     assert "agree means yes" in prompt
+    assert "copy the exact supporting passage" in prompt.casefold()
+    assert "reuse at least one informative word" in prompt.casefold()
     assert "Stakeholder factions:" in prompt
     for plant in planted:
         assert plant["question"] not in prompt
@@ -533,465 +535,12 @@ def test_find_task_caps_companion_k_to_visible_plants() -> None:
     "question",
     [
         "route",
-        "Should route conditions be decided by a union vote?",
-    ],
-)
-def test_low_specificity_questions_cannot_match_planting(question: str) -> None:
-    env = load_environment(task="elicit-ask", question_count=1)
-    plant = planted_questions_from_row(dict(env.get_eval_dataset()[0]))[0]
-    candidate = candidate_for_plant(plant, question=question)
-
-    assert (
-        question_utility_score(
-            [candidate], [plant], panel_polarization=1.0, question_count=1
-        )
-        == 0.0
-    )
-
-
-def test_negating_canonical_question_cannot_retain_lexical_credit() -> None:
-    env = load_environment(task="elicit-ask", question_count=1)
-    plant = planted_questions_from_row(dict(env.get_eval_dataset()[0]))[0]
-    candidate = candidate_for_plant(
-        plant,
-        question=f"Should we not ask: {plant['question']}",
-    )
-
-    assert (
-        question_utility_score(
-            [candidate], [plant], panel_polarization=1.0, question_count=1
-        )
-        == 0.0
-    )
-
-
-@pytest.mark.parametrize(
-    "question",
-    [
-        "Should the duty coordinator transfer a load without delay after hours with the assigned dispatcher?",
-        "Should the duty coordinator transfer a load before hours without the assigned dispatcher?",
-        "Should the duty coordinator transfer a load without the assigned dispatcher after hours?",
-    ],
-)
-def test_negation_scope_changes_cannot_match_planting(question: str) -> None:
-    env = load_environment(task="elicit-ask", question_count=1)
-    plants = planted_questions_from_row(dict(env.get_eval_dataset()[0]))
-    plant = next(
-        plant
-        for plant in plants
-        if plant["question"]
-        == "Should the duty coordinator transfer a load after hours without the assigned dispatcher?"
-    )
-
-    assert (
-        question_utility_score(
-            [candidate_for_plant(plant, question=question)],
-            [plant],
-            panel_polarization=1.0,
-            question_count=1,
-        )
-        == 0.0
-    )
-
-
-@pytest.mark.parametrize(
-    "question",
-    [
-        "Pause route require conditions observable?",
-        "Should dispatchers decide which observable conditions prohibit a route pause?",
-        "Should conditions require route?",
         "Dispatchers decide which observable conditions require a route pause.",
-        "Should dispatchers ignore observable conditions that require a route pause?",
+        "Should we have rules at all?",
+        "Should this policy apply?",
     ],
 )
-def test_word_scrambles_and_opposite_predicates_cannot_match(question: str) -> None:
-    env = load_environment(task="elicit-ask", question_count=1)
-    plant = planted_questions_from_row(dict(env.get_eval_dataset()[0]))[0]
-    candidate = candidate_for_plant(plant, question=question)
-
-    assert (
-        question_utility_score(
-            [candidate], [plant], panel_polarization=1.0, question_count=1
-        )
-        == 0.0
-    )
-
-
-def test_extra_negation_on_question_with_existing_negation_scores_zero() -> None:
-    env = load_environment(task="elicit-ask", question_count=1)
-    plants = planted_questions_from_row(dict(env.get_eval_dataset()[0]))
-    plant = next(plant for plant in plants if "without" in plant["question"])
-    candidate = candidate_for_plant(
-        plant,
-        question=plant["question"].replace(" transfer ", " not transfer ", 1),
-    )
-
-    assert (
-        question_utility_score(
-            [candidate], [plant], panel_polarization=1.0, question_count=1
-        )
-        == 0.0
-    )
-
-
-def test_symbolic_negation_cannot_disappear_during_question_normalization() -> None:
-    env = load_environment(task="elicit-ask", question_count=1)
-    plant = planted_questions_from_row(dict(env.get_eval_dataset()[0]))[0]
-    candidate = candidate_for_plant(
-        plant,
-        question=plant["question"].replace(" dispatchers ", " dispatchers ¬ ", 1),
-    )
-
-    assert (
-        question_utility_score(
-            [candidate], [plant], panel_polarization=1.0, question_count=1
-        )
-        == 0.0
-    )
-
-
-@pytest.mark.parametrize("separator", ["\n", "\t", "  "])
-def test_noncanonical_question_whitespace_scores_zero(separator: str) -> None:
-    env = load_environment(task="elicit-ask", question_count=1)
-    plant = planted_questions_from_row(dict(env.get_eval_dataset()[0]))[0]
-    candidate = candidate_for_plant(
-        plant,
-        question=plant["question"].replace(" ", separator, 1),
-    )
-
-    assert (
-        question_utility_score(
-            [candidate], [plant], panel_polarization=1.0, question_count=1
-        )
-        == 0.0
-    )
-
-
-def test_actor_reversal_with_shared_vocabulary_scores_zero() -> None:
-    env = load_environment(task="elicit-ask", question_count=1)
-    plants = planted_questions_from_row(dict(env.get_eval_dataset()[0]))
-    plant = next(
-        plant
-        for plant in plants
-        if plant["question"]
-        == "Should the duty coordinator transfer a load after hours without the assigned dispatcher?"
-    )
-    candidate = candidate_for_plant(
-        plant,
-        question="Should the assigned dispatcher transfer a load after hours without the duty coordinator?",
-    )
-
-    assert (
-        question_utility_score(
-            [candidate], [plant], panel_polarization=1.0, question_count=1
-        )
-        == 0.0
-    )
-
-
-def test_fabricated_opposite_quote_cannot_claim_document_grounding() -> None:
-    env = load_environment(task="elicit-ask", question_count=1)
-    plant = planted_questions_from_row(dict(env.get_eval_dataset()[0]))[0]
-    candidate = candidate_for_plant(
-        plant,
-        quote=f"Never {plant['quote'][0].lower()}{plant['quote'][1:]}",
-    )
-
-    assert (
-        question_utility_score(
-            [candidate], [plant], panel_polarization=1.0, question_count=1
-        )
-        == 0.0
-    )
-
-
-def test_partial_word_quote_cannot_claim_document_grounding() -> None:
-    env = load_environment(task="elicit-ask", question_count=1)
-    plant = planted_questions_from_row(dict(env.get_eval_dataset()[0]))[0]
-    candidate = candidate_for_plant(
-        plant,
-        quote="use a route when conditions become unsafe.",
-    )
-
-    assert (
-        question_utility_score(
-            [candidate], [plant], panel_polarization=1.0, question_count=1
-        )
-        == 0.0
-    )
-
-
-def test_exact_raw_planted_anchor_inside_token_remains_scorable() -> None:
-    stances = {"operations": "agree", "risk": "disagree", "support": "pass"}
-    plant = {
-        "doc_id": "policy",
-        "quote": "yloph",
-        "question": "Should this exact anchor apply?",
-        "question_aliases": [],
-        "target_stances": stances,
-        "document_text": "xylophone",
-    }
-
-    assert (
-        question_utility_score(
-            [candidate_for_plant(plant)],
-            [plant],
-            panel_polarization=1.0,
-            question_count=1,
-        )
-        > 0.0
-    )
-
-
-def test_symbolic_negation_cannot_disappear_from_grounding_quote() -> None:
-    env = load_environment(task="elicit-ask", question_count=1)
-    plant = planted_questions_from_row(dict(env.get_eval_dataset()[0]))[0]
-    candidate = candidate_for_plant(plant, quote=f"¬{plant['quote']}")
-
-    assert (
-        question_utility_score(
-            [candidate], [plant], panel_polarization=1.0, question_count=1
-        )
-        == 0.0
-    )
-
-
-def test_question_reward_requires_matching_planted_target_stances() -> None:
-    env = load_environment(task="elicit-ask", question_count=1)
-    row = dict(env.get_eval_dataset()[0])
-    plant = planted_questions_from_row(row)[0]
-    wrong_stances = {
-        faction_id: {"agree": "disagree", "disagree": "agree", "pass": "agree"}[stance]
-        for faction_id, stance in plant["target_stances"].items()
-    }
-    candidate = {
-        "doc_id": plant["doc_id"],
-        "quote": plant["quote"],
-        "question": plant["question"],
-        "target_stances": wrong_stances,
-    }
-
-    assert (
-        question_utility_score(
-            [candidate], [plant], panel_polarization=1.0, question_count=1
-        )
-        == 0.0
-    )
-
-
-def test_uniform_or_single_error_stance_vectors_receive_no_credit() -> None:
-    env = load_environment(task="elicit-ask", question_count=1)
-    plant = planted_questions_from_row(dict(env.get_eval_dataset()[0]))[0]
-    uniform = {faction_id: "agree" for faction_id in plant["target_stances"]}
-    single_error = dict(plant["target_stances"])
-    faction_id = next(iter(single_error))
-    single_error[faction_id] = (
-        "disagree" if single_error[faction_id] == "agree" else "agree"
-    )
-
-    for target_stances in (uniform, single_error):
-        candidate = candidate_for_plant(plant, target_stances=target_stances)
-        assert (
-            question_utility_score(
-                [candidate], [plant], panel_polarization=1.0, question_count=1
-            )
-            == 0.0
-        )
-
-
-def test_question_count_is_strict_for_missing_or_extra_outputs() -> None:
-    env = load_environment(task="elicit-ask", question_count=1)
-    row = dict(env.get_eval_dataset()[0])
-    plant = planted_questions_from_row(row)[0]
-    candidate = {
-        "doc_id": plant["doc_id"],
-        "quote": plant["quote"],
-        "question": plant["question"],
-        "target_stances": plant["target_stances"],
-    }
-
-    assert (
-        question_utility_score([], [plant], panel_polarization=1.0, question_count=1)
-        == 0.0
-    )
-    assert (
-        question_utility_score(
-            [candidate, candidate], [plant], panel_polarization=1.0, question_count=1
-        )
-        == 0.0
-    )
-
-
-def test_valid_k_duplicate_questions_are_rejected() -> None:
-    env = load_environment(task="elicit-ask", question_count=2)
-    plants = planted_questions_from_row(dict(env.get_eval_dataset()[0]))
-    duplicate = candidate_for_plant(plants[0])
-
-    assert (
-        question_utility_score(
-            [duplicate, duplicate], plants, panel_polarization=1.0, question_count=2
-        )
-        == 0.0
-    )
-
-
-def test_duplicate_question_variants_ignore_ids_quotes_and_stance_predictions() -> None:
-    env = load_environment(task="elicit-ask", question_count=2)
-    plants = planted_questions_from_row(dict(env.get_eval_dataset()[0]))
-    duplicate = candidate_for_plant(plants[0])
-    altered_stances = dict(duplicate["target_stances"])
-    faction_id = next(iter(altered_stances))
-    altered_stances[faction_id] = (
-        "disagree" if altered_stances[faction_id] == "agree" else "agree"
-    )
-    disguised_duplicate = {
-        **duplicate,
-        "doc_id": f"  {duplicate['doc_id']}  ",
-        "quote": f" {duplicate['quote']} ",
-        "question": plants[0]["question_aliases"][0],
-        "target_stances": altered_stances,
-    }
-
-    assert (
-        question_utility_score(
-            [duplicate, disguised_duplicate],
-            plants,
-            panel_polarization=1.0,
-            question_count=2,
-        )
-        == 0.0
-    )
-
-
-def test_semantic_operators_remain_distinct_during_duplicate_detection() -> None:
-    stances = {"operations": "agree", "risk": "disagree", "support": "pass"}
-    plants = [
-        {
-            "plant_id": "minimum",
-            "doc_id": "minimum-policy",
-            "quote": "Approve amounts ≥ 5.",
-            "question": "Should the approval threshold be ≥ 5?",
-            "target_stances": stances,
-            "document_text": "Approve amounts ≥ 5.",
-        },
-        {
-            "plant_id": "maximum",
-            "doc_id": "maximum-policy",
-            "quote": "Approve amounts ≤ 5.",
-            "question": "Should the approval threshold be ≤ 5?",
-            "target_stances": stances,
-            "document_text": "Approve amounts ≤ 5.",
-        },
-    ]
-    candidates = [candidate_for_plant(plant) for plant in plants]
-
-    assert (
-        question_utility_score(
-            candidates,
-            plants,
-            panel_polarization=1.0,
-            question_count=2,
-        )
-        > 0.0
-    )
-
-
-@pytest.mark.parametrize(
-    "question",
-    [
-        "Should operations require 5 >= an approval threshold?",
-        "Should operations require an approval threshold <= 5?",
-        "Should operations require an approval threshold >= 6?",
-    ],
-)
-def test_semantic_expression_operands_and_order_must_match(question: str) -> None:
-    stances = {"operations": "agree", "risk": "disagree", "support": "pass"}
-    plant = {
-        "plant_id": "threshold",
-        "doc_id": "approval-policy",
-        "quote": "Approval requires threshold >= 5.",
-        "question": "Should operations require an approval threshold >= 5?",
-        "target_stances": stances,
-        "document_text": "Approval requires threshold >= 5.",
-    }
-
-    assert (
-        question_utility_score(
-            [candidate_for_plant(plant, question=question)],
-            [plant],
-            panel_polarization=1.0,
-            question_count=1,
-        )
-        == 0.0
-    )
-
-
-def test_cross_plant_quote_swaps_receive_no_question_credit() -> None:
-    stances = {"operations": "agree", "risk": "disagree", "support": "pass"}
-    document_text = (
-        "Managers must consult payroll before approving refunds. "
-        "Payroll must consult managers before approving refunds."
-    )
-    plants = [
-        {
-            "plant_id": "managers-first",
-            "doc_id": "refund-policy",
-            "quote": "Managers must consult payroll before approving refunds.",
-            "question": "Should managers consult payroll before approving refunds?",
-            "target_stances": stances,
-            "document_text": document_text,
-        },
-        {
-            "plant_id": "payroll-first",
-            "doc_id": "refund-policy",
-            "quote": "Payroll must consult managers before approving refunds.",
-            "question": "Should payroll consult managers before approving refunds?",
-            "target_stances": stances,
-            "document_text": document_text,
-        },
-    ]
-    swapped = [
-        candidate_for_plant(plants[0], quote=plants[1]["quote"]),
-        candidate_for_plant(plants[1], quote=plants[0]["quote"]),
-    ]
-
-    assert (
-        question_utility_score(
-            swapped,
-            plants,
-            panel_polarization=1.0,
-            question_count=2,
-        )
-        == 0.0
-    )
-
-
-def test_appended_composite_clause_receives_no_question_credit() -> None:
-    env = load_environment(task="elicit-ask", question_count=1)
-    plant = planted_questions_from_row(dict(env.get_eval_dataset()[0]))[0]
-    question = plant["question"].removesuffix("?") + " and abolish all rules?"
-
-    assert (
-        question_utility_score(
-            [candidate_for_plant(plant, question=question)],
-            [plant],
-            panel_polarization=1.0,
-            question_count=1,
-        )
-        == 0.0
-    )
-
-
-@pytest.mark.parametrize(
-    "question",
-    [
-        "Should dispatchers decide which observable conditions require a route continuation?",
-        "Should dispatchers decide which observable conditions require a route pause, abolish rules?",
-        "Should dispatchers decide which dangerous conditions require a route pause?",
-        "Should dispatchers decide which unobservable conditions require a route pause?",
-    ],
-)
-def test_semantic_substitutions_and_composites_receive_no_question_credit(
+def test_question_must_be_yes_no_and_reference_grounding(
     question: str,
 ) -> None:
     env = load_environment(task="elicit-ask", question_count=1)
@@ -1008,13 +557,180 @@ def test_semantic_substitutions_and_composites_receive_no_question_credit(
     )
 
 
-def test_explicit_generator_authored_question_alias_receives_credit() -> None:
+@pytest.mark.parametrize(
+    "question",
+    [
+        "Should dispatchers choose the observable conditions under which a route must pause?",
+        "Should route conditions determine when operations pause?",
+    ],
+)
+def test_unlisted_grounded_paraphrases_receive_credit(question: str) -> None:
     env = load_environment(task="elicit-ask", question_count=1)
     plant = planted_questions_from_row(dict(env.get_eval_dataset()[0]))[0]
+    assert question not in {plant["question"], *plant["question_aliases"]}
+
+    score = question_utility_score(
+        [candidate_for_plant(plant, question=question)],
+        [plant],
+        panel_polarization=1.0,
+        question_count=1,
+    )
+
+    assert score > 0.0
+
+
+def test_hidden_canonical_wording_does_not_affect_generated_question_score() -> None:
+    env = load_environment(task="elicit-ask", question_count=1)
+    plant = planted_questions_from_row(dict(env.get_eval_dataset()[0]))[0]
+    candidate = candidate_for_plant(
+        plant,
+        question="Should route conditions determine when operations pause?",
+    )
+    rewritten_oracle = {
+        **plant,
+        "question": "Is unrelated hidden wording allowed?",
+        "question_aliases": ["Does unrelated hidden wording apply?"],
+    }
+
+    original = question_utility_score(
+        [candidate], [plant], panel_polarization=1.0, question_count=1
+    )
+    rewritten = question_utility_score(
+        [candidate], [rewritten_oracle], panel_polarization=1.0, question_count=1
+    )
+
+    assert rewritten == pytest.approx(original)
+    assert rewritten > 0.0
+
+
+def test_baseline_style_paraphrase_regression_is_scorable() -> None:
+    plant = {
+        "doc_id": "listing-rules",
+        "quote": "Trust reviewers may remove a misleading listing immediately.",
+        "question": "Should immediate trust removal override review?",
+        "question_aliases": [],
+        "target_stances": {
+            "buyers": "agree",
+            "creators": "disagree",
+            "trust": "agree",
+        },
+        "document_text": (
+            "Removed listing records retain the cited rule. "
+            "Trust reviewers may remove a misleading listing immediately."
+        ),
+    }
+    candidate = candidate_for_plant(
+        plant,
+        question=(
+            "Is immediate removal by trust reviewers allowed before a creator "
+            "can appeal?"
+        ),
+        target_stances={
+            "buyers": "pass",
+            "creators": "disagree",
+            "trust": "agree",
+        },
+    )
+
+    score = question_utility_score(
+        [candidate], [plant], panel_polarization=1.0, question_count=1
+    )
+
+    assert (
+        0.0
+        < score
+        < question_utility_score(
+            [candidate_for_plant(plant)],
+            [plant],
+            panel_polarization=1.0,
+            question_count=1,
+        )
+    )
+
+
+def test_stance_accuracy_adds_monotonic_partial_credit() -> None:
+    env = load_environment(task="elicit-ask", question_count=1)
+    plant = planted_questions_from_row(dict(env.get_eval_dataset()[0]))[0]
+    correct = dict(plant["target_stances"])
+    one_wrong = dict(correct)
+    changed_faction = next(iter(one_wrong))
+    one_wrong[changed_faction] = (
+        "disagree" if one_wrong[changed_faction] == "agree" else "agree"
+    )
+    all_wrong = {
+        faction_id: {"agree": "disagree", "disagree": "agree", "pass": "agree"}[stance]
+        for faction_id, stance in correct.items()
+    }
+
+    exact_score = question_utility_score(
+        [candidate_for_plant(plant, target_stances=correct)],
+        [plant],
+        panel_polarization=1.0,
+        question_count=1,
+    )
+    partial_score = question_utility_score(
+        [candidate_for_plant(plant, target_stances=one_wrong)],
+        [plant],
+        panel_polarization=1.0,
+        question_count=1,
+    )
+    grounding_only_score = question_utility_score(
+        [candidate_for_plant(plant, target_stances=all_wrong)],
+        [plant],
+        panel_polarization=1.0,
+        question_count=1,
+    )
+
+    assert exact_score > partial_score > grounding_only_score > 0.0
+
+
+@pytest.mark.parametrize(
+    ("field", "wrong_value"),
+    [
+        ("doc_id", "another-document"),
+        ("quote", "A fabricated passage not present in the document."),
+    ],
+)
+def test_wrong_document_or_quote_cannot_claim_question_credit(
+    field: str,
+    wrong_value: str,
+) -> None:
+    env = load_environment(task="elicit-ask", question_count=1)
+    plant = planted_questions_from_row(dict(env.get_eval_dataset()[0]))[0]
+    candidate = candidate_for_plant(plant)
+    candidate[field] = wrong_value
 
     assert (
         question_utility_score(
-            [candidate_for_plant(plant, question=plant["question_aliases"][0])],
+            [candidate], [plant], panel_polarization=1.0, question_count=1
+        )
+        == 0.0
+    )
+
+
+def test_exact_quote_preserves_semantic_operators() -> None:
+    stances = {"operations": "agree", "risk": "disagree", "support": "pass"}
+    plant = {
+        "doc_id": "approval-policy",
+        "quote": "Approval requires threshold >= 5.",
+        "question": "Should approval require a threshold >= 5?",
+        "question_aliases": [],
+        "target_stances": stances,
+        "document_text": "Approval requires threshold >= 5.",
+    }
+
+    assert (
+        question_utility_score(
+            [candidate_for_plant(plant, quote="Approval requires threshold <= 5.")],
+            [plant],
+            panel_polarization=1.0,
+            question_count=1,
+        )
+        == 0.0
+    )
+    assert (
+        question_utility_score(
+            [candidate_for_plant(plant)],
             [plant],
             panel_polarization=1.0,
             question_count=1,
@@ -1023,20 +739,18 @@ def test_explicit_generator_authored_question_alias_receives_credit() -> None:
     )
 
 
-@pytest.mark.parametrize(
-    "question",
-    [
-        "Should dispatchers choose the observable conditions under which a route must pause?",
-        "Should dispatchers have discretion to pause routes based on which observable conditions are unsafe?",
-    ],
-)
-def test_unlisted_question_paraphrases_receive_zero(question: str) -> None:
+def test_question_count_is_strict_for_missing_or_extra_outputs() -> None:
     env = load_environment(task="elicit-ask", question_count=1)
     plant = planted_questions_from_row(dict(env.get_eval_dataset()[0]))[0]
+    candidate = candidate_for_plant(plant)
 
     assert (
+        question_utility_score([], [plant], panel_polarization=1.0, question_count=1)
+        == 0.0
+    )
+    assert (
         question_utility_score(
-            [candidate_for_plant(plant, question=question)],
+            [candidate, candidate],
             [plant],
             panel_polarization=1.0,
             question_count=1,
@@ -1045,119 +759,89 @@ def test_unlisted_question_paraphrases_receive_zero(question: str) -> None:
     )
 
 
-def test_canonical_and_authored_alias_duplicate_zero_the_whole_response() -> None:
+def test_duplicate_grounding_is_penalized_by_one_to_one_assignment() -> None:
     env = load_environment(task="elicit-ask", question_count=2)
     plants = planted_questions_from_row(dict(env.get_eval_dataset()[0]))
-    canonical = candidate_for_plant(plants[0])
-    alias = candidate_for_plant(
-        plants[0],
-        question=plants[0]["question_aliases"][0],
+    duplicate = candidate_for_plant(plants[0])
+    single_score = question_utility_score(
+        [duplicate],
+        [plants[0]],
+        panel_polarization=1.0,
+        question_count=1,
     )
 
-    assert (
-        question_utility_score(
-            [canonical, alias],
-            plants,
-            panel_polarization=1.0,
-            question_count=2,
-        )
-        == 0.0
+    duplicate_score = question_utility_score(
+        [duplicate, duplicate],
+        plants,
+        panel_polarization=1.0,
+        question_count=2,
     )
 
+    assert duplicate_score == pytest.approx(single_score / 2)
 
-def test_alias_duplicate_rejection_ignores_claimed_grounding_and_stances() -> None:
+
+def test_distinct_grounded_questions_use_global_one_to_one_assignment() -> None:
     env = load_environment(task="elicit-ask", question_count=2)
     plants = planted_questions_from_row(dict(env.get_eval_dataset()[0]))
-    canonical = candidate_for_plant(plants[0])
-    disguised_alias = {
-        **candidate_for_plant(plants[1]),
-        "question": plants[0]["question_aliases"][0],
-    }
-
-    assert (
-        question_utility_score(
-            [canonical, disguised_alias],
-            plants,
-            panel_polarization=1.0,
-            question_count=2,
-        )
-        == 0.0
-    )
-
-
-def test_compatibility_lookalike_quote_cannot_match_planted_anchor() -> None:
-    stances = {"operations": "agree", "risk": "disagree", "support": "pass"}
-    plant = {
-        "plant_id": "threshold",
-        "doc_id": "approval-policy",
-        "quote": "Set threshold to 25.",
-        "question": "Should operations require a threshold of 25?",
-        "target_stances": stances,
-        "document_text": "Set threshold to 25. Set threshold to 2⁵.",
-    }
-
-    assert (
-        question_utility_score(
-            [candidate_for_plant(plant, quote="Set threshold to 2⁵.")],
-            [plant],
-            panel_polarization=1.0,
-            question_count=1,
-        )
-        == 0.0
-    )
-
-
-def test_one_composite_question_cannot_claim_two_plants() -> None:
-    env = load_environment(task="elicit-ask", question_count=1)
-    plants = planted_questions_from_row(dict(env.get_eval_dataset()[0]))
-    radio_plants = [plant for plant in plants if plant["doc_id"] == "radio-script"]
-    assert len(radio_plants) == 2
-    assert radio_plants[0]["target_stances"] == radio_plants[1]["target_stances"]
-    composite = {
-        "doc_id": "radio-script",
-        "quote": radio_plants[0]["quote"],
-        "question": " ".join(plant["question"] for plant in radio_plants),
-        "target_stances": radio_plants[0]["target_stances"],
-    }
-
-    assert (
-        question_utility_score(
-            [composite], radio_plants, panel_polarization=1.0, question_count=1
-        )
-        == 0.0
-    )
-
-
-def test_composite_detection_ignores_claimed_grounding_and_stance_vector() -> None:
-    env = load_environment(task="elicit-ask", question_count=1)
-    pair = None
-    plants = []
-    for row in env.get_eval_dataset():
-        plants = planted_questions_from_row(dict(row))
-        pair = next(
-            (
-                (first, second)
-                for first_index, first in enumerate(plants)
-                for second in plants[first_index + 1 :]
-                if first["doc_id"] != second["doc_id"]
-                and first["target_stances"] != second["target_stances"]
+    candidates = [
+        candidate_for_plant(
+            plant,
+            question=(
+                f"Should {' '.join(plant['quote'].rstrip('.').split()[:3])} apply?"
             ),
-            None,
         )
-        if pair is not None:
-            break
-    assert pair is not None
-    first, second = pair
-    composite = {
-        "doc_id": first["doc_id"],
-        "quote": first["quote"],
-        "question": f"{first['question']} {second['question']}",
-        "target_stances": first["target_stances"],
+        for plant in plants[:2]
+    ]
+
+    score = question_utility_score(
+        candidates,
+        plants,
+        panel_polarization=1.0,
+        question_count=2,
+    )
+
+    assert score > 0.0
+
+
+def test_question_needs_an_informative_quote_token() -> None:
+    env = load_environment(task="elicit-ask", question_count=1)
+    plant = planted_questions_from_row(dict(env.get_eval_dataset()[0]))[0]
+    no_token = candidate_for_plant(plant, question="Should this policy apply?")
+    grounded = candidate_for_plant(
+        plant,
+        question="Should this route apply?",
+    )
+
+    assert (
+        question_utility_score(
+            [no_token], [plant], panel_polarization=1.0, question_count=1
+        )
+        == 0.0
+    )
+    assert (
+        question_utility_score(
+            [grounded], [plant], panel_polarization=1.0, question_count=1
+        )
+        > 0.0
+    )
+
+
+def test_short_anchor_without_informative_tokens_is_not_scorable() -> None:
+    plant = {
+        "doc_id": "policy",
+        "quote": "Is it?",
+        "question": "Is it?",
+        "question_aliases": [],
+        "target_stances": {"operations": "agree", "risk": "disagree"},
+        "document_text": "Is it?",
     }
 
     assert (
         question_utility_score(
-            [composite], plants, panel_polarization=1.0, question_count=1
+            [candidate_for_plant(plant)],
+            [plant],
+            panel_polarization=1.0,
+            question_count=1,
         )
         == 0.0
     )
@@ -1230,7 +914,7 @@ def test_configured_short_yes_no_question_and_anchor_are_scorable(
     )
     document["text"] = document["text"].replace(plant["anchor_quote"], "Pause now.")
     plant["anchor_quote"] = "Pause now."
-    plant["canonical_question"] = "Is it?"
+    plant["canonical_question"] = "Should we pause now?"
     data_path = tmp_path / "short-configured.jsonl"
     data_path.write_text(json.dumps(scenario, sort_keys=True) + "\n", encoding="utf-8")
     env = load_environment(task="elicit-ask", question_count=1, data_path=data_path)

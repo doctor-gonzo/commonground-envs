@@ -48,15 +48,23 @@ matched to an answer-key anchor. Matching then uses longest-common-contiguous
 token overlap, requires at least 80% contiguous coverage of the planted anchor,
 and retains the 0.5 symmetric overlap-F1 floor. Semantic operators are tokens,
 so normalization does not erase negation, inequality, sign, or percentage
-changes. Question reward remains deterministic and bounded-recall:
-questions must match an authored canonical question or alias and the complete
-target-stance vector. Neither path calls a judge model.
+changes. Question reward remains deterministic but no longer depends on hidden
+authored wording. A candidate must name the planted document, copy its exact
+visible anchor, use strict yes/no form, and reuse at least one informative
+token from that quote. Global one-to-one assignment prevents duplicate claims.
+Half of matched utility comes from issue grounding and half from per-faction
+stance accuracy, then the result is scaled by the planted faction disagreement
+and configured panel polarization. Neither path calls a judge model.
+Consequently, Elicit-ask measures grounded issue selection and stance
+prediction; it validates question form and lexical grounding but does not
+semantically grade prose quality.
 
 This is a reproducible synthetic policy-reasoning environment, not evidence of
 human deliberation validity. Because the public package contains planted answer
 keys, consequential comparisons require a private server-side split. The 0.2.0
-corpus and reward invalidate the historical 0.1.x elicit model baselines; fresh
-private-candidate baselines are required before public performance claims.
+corpus and 0.2.2 question reward invalidate earlier elicit model baselines;
+fresh private-candidate baselines are required before public performance
+claims.
 
 ## Schema identity
 
