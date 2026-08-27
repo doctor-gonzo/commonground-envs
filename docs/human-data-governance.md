@@ -2,7 +2,7 @@
 
 ## Current release boundary
 
-Versions 0.2.0 of commonground-predict and commonground-elicit bundle synthetic
+Versions 0.2.x of commonground-predict and commonground-elicit bundle synthetic
 data only. The open packages contain their evaluation answers and are intended
 for reproducible development and training, not contamination-resistant
 leaderboards. No file may be described or published as a human-data split merely
@@ -74,4 +74,4 @@ snapshot.
 The scenario package delegates human_feedback validation to the same strict
 snapshot validator. A scenario carrying human feedback therefore has the same
 contract as predict intake. This socket is reserved for future reviewed data;
-the 0.2.0 elicit corpus does not use it.
+the 0.2.x elicit corpus does not use it.

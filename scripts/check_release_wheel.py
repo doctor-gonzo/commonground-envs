@@ -70,7 +70,7 @@ def _data_files(source_dir: Path, package_name: str) -> frozenset[str]:
 TARGETS = (
     WheelTarget(
         name="commonground-predict",
-        version="0.2.0",
+        version="0.2.1",
         source_dir=ROOT / "environments" / "commonground_predict",
         requirements=frozenset(
             {
@@ -89,7 +89,7 @@ TARGETS = (
     ),
     WheelTarget(
         name="commonground-elicit",
-        version="0.2.0",
+        version="0.2.1",
         source_dir=ROOT / "environments" / "commonground_elicit",
         requirements=frozenset(
             {
@@ -365,6 +365,8 @@ def _fresh_install(wheel_paths: list[Path], output_dir: Path) -> None:
         check=True,
     )
     probe = """
+import asyncio
+import json
 from importlib.metadata import version
 
 import commonground_elicit
@@ -372,13 +374,88 @@ import commonground_predict
 import commonground_scenarios
 import commonground_score
 
-assert version("commonground-predict") == "0.2.0"
-assert version("commonground-elicit") == "0.2.0"
+assert version("commonground-predict") == "0.2.1"
+assert version("commonground-elicit") == "0.2.1"
 assert version("commonground-scenarios") == "0.1.1"
 assert version("commonground-score") == "0.1.1"
-assert len(commonground_predict.load_environment().load()) == 20
-assert len(commonground_elicit.load_environment().load()) == 20
-assert len(commonground_elicit.load_environment(task="elicit-ask").load()) == 20
+
+assert len(commonground_predict.load_taskset().load()) == 20
+assert len(commonground_elicit.load_taskset().load()) == 20
+assert len(commonground_elicit.load_taskset(task="elicit-ask").load()) == 20
+
+import verifiers as legacy_vf
+from verifiers.types import State
+from verifiers.v1.harnesses.null import NullHarness
+from verifiers.v1.utils.loaders import default_harness_id, harness_class, taskset_class
+
+predict_legacy = legacy_vf.load_environment("commonground-predict", split="eval")
+elicit_find_legacy = legacy_vf.load_environment(
+    "commonground-elicit", task="find", split="eval"
+)
+elicit_ask_legacy = legacy_vf.load_environment(
+    "commonground-elicit", task="elicit-ask", split="eval"
+)
+assert isinstance(predict_legacy, legacy_vf.SingleTurnEnv)
+assert isinstance(elicit_find_legacy, legacy_vf.SingleTurnEnv)
+assert isinstance(elicit_ask_legacy, legacy_vf.SingleTurnEnv)
+assert len(predict_legacy.get_eval_dataset()) == 20
+assert len(elicit_find_legacy.get_eval_dataset()) == 20
+assert len(elicit_ask_legacy.get_eval_dataset()) == 20
+
+assert taskset_class("commonground-predict") is commonground_predict.CommonGroundPredictTaskset
+assert taskset_class("commonground-elicit") is commonground_elicit.ElicitTaskset
+assert default_harness_id("commonground-predict") == "commonground-predict"
+assert default_harness_id("commonground-elicit") == "commonground-elicit"
+assert issubclass(harness_class("commonground-predict"), NullHarness)
+assert issubclass(harness_class("commonground-elicit"), NullHarness)
+
+def score(env, row, response):
+    task = {
+        key: row[key]
+        for key in ("prompt", "answer", "info", "example_id")
+        if key in row
+    }
+    state = State.for_task(task)
+    state["completion"] = [
+        {"role": "assistant", "content": json.dumps(response, sort_keys=True)}
+    ]
+    asyncio.run(env.rubric.score_rollout(state))
+    return state["reward"]
+
+predict_row = dict(predict_legacy.get_eval_dataset()[0])
+assert score(predict_legacy, predict_row, {
+    "predictions": json.loads(predict_row["answer"])
+}) == 1.0
+
+def elicit_response(row):
+    answer = json.loads(row["answer"])
+    info = json.loads(row["info"])
+    questions = [
+        {
+            key: question[key]
+            for key in ("doc_id", "quote", "question", "target_stances")
+        }
+        for question in answer.get("questions", [])[:info["question_count"]]
+    ]
+    response = {"questions": questions}
+    if info["allow_combined_questions"]:
+        response["findings"] = [
+            {
+                key: finding[key]
+                for key in ("doc_id", "quote", "type")
+            }
+            for finding in answer["findings"]
+        ]
+    return response
+
+elicit_find_row = dict(elicit_find_legacy.get_eval_dataset()[0])
+elicit_ask_row = dict(elicit_ask_legacy.get_eval_dataset()[0])
+assert score(
+    elicit_find_legacy, elicit_find_row, elicit_response(elicit_find_row)
+) == 1.0
+assert 0.0 < score(
+    elicit_ask_legacy, elicit_ask_row, elicit_response(elicit_ask_row)
+) <= 1.0
 """
     subprocess.run(
         [str(venv_python), "-I", "-c", probe],

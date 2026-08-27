@@ -1,6 +1,6 @@
 # commonground-elicit
 
-`commonground-elicit` 0.2.0 is a deterministic native Verifiers v1 taskset for
+`commonground-elicit` 0.2.1 is a deterministic native Verifiers v1 taskset for
 finding planted ambiguities, contradictions, and gaps in small sets of
 fictional policy documents. Its scenarios are synthetic, generated offline
 from committed templates, and carry explicit provenance.
@@ -68,7 +68,7 @@ uv run validate commonground-elicit --taskset.split train \
 ```
 
 The packaged `commonground_elicit/dependency-manifest.txt` records the exact
-no-dev resolution used for this 0.2.0 candidate, including the root `uv.lock`
+no-dev resolution used for this 0.2.1 candidate, including the root `uv.lock`
 SHA-256, Python scope, and uv generator version. Workspace sources appear as
 immutable distribution pins; the manifest is provenance rather than a
 cross-platform installer.
@@ -112,7 +112,7 @@ methodology.
 
 The 0.1.x model table is intentionally removed: 0.2.0 replaced both the held-out
 semantic corpus and the quote-grounding reward, so those historical scores are
-not comparable. Fresh baselines must be run on the exact private 0.2.0
+not comparable. Fresh baselines must be run on the exact private 0.2.1
 candidate before any public performance claim.
 
 The public package contains every planted answer key for reproducibility and
@@ -144,6 +144,11 @@ Run a model evaluation without uploading results with:
 ```bash
 uv run eval commonground-elicit -m MODEL --no-push
 ```
+
+The package also exposes a genuine legacy `SingleTurnEnv` from
+`load_environment()` because Prime CLI 0.6.28 Hosted Evaluations still use the
+v0 runner. Native v1 resolves `ElicitTaskset` and its bundled pure-chat
+`ElicitHarness` directly from the package exports.
 
 The test suite, split generator, rewards, validation, and floor baselines are
 hermetic and require no API key.

@@ -1,6 +1,6 @@
 # commonground-predict
 
-`commonground-predict` 0.2.0 is a deterministic native Verifiers v1 taskset
+`commonground-predict` 0.2.1 is a deterministic native Verifiers v1 taskset
 for predicting held-out stakeholder votes on fictional company AI-deployment
 policies. It has no judge model: the reward compares strict JSON predictions
 against masked ground truth.
@@ -71,7 +71,7 @@ uv run validate commonground-predict --taskset.split train \
 ```
 
 The packaged `commonground_predict/dependency-manifest.txt` records the exact
-no-dev resolution used for this 0.2.0 candidate, including the root `uv.lock`
+no-dev resolution used for this 0.2.1 candidate, including the root `uv.lock`
 SHA-256, Python scope, and uv generator version. Workspace sources appear as
 immutable distribution pins; the manifest is provenance rather than a
 cross-platform installer.
@@ -91,7 +91,8 @@ Environment variable:
   inputs must pass the shared governance validator. Unmasked inputs still
   require the `masked_vote_count` loader argument.
 
-Difficulty knobs passed to `load_environment(**kwargs)`:
+Difficulty knobs passed to native `load_taskset(**kwargs)` or the legacy Hosted
+Evaluation adapter `load_environment(**kwargs)`:
 
 - `masked_vote_count`: deterministically remasks each snapshot to this many
   held-out votes. Non-positive values mask no votes; values larger than the
@@ -146,7 +147,7 @@ Recorded 2026-08-16 on the unchanged public synthetic evaluation split with
 Verifiers 0.1.x and Prime Inference, aggregated by
 `scripts/aggregate_baselines.py` (newest complete run per model; std is across
 all 60 rollouts). These are historical reference numbers, not evidence from the
-0.2.0 private candidate.
+0.2.1 private candidate.
 
 | Model | vote_accuracy (mean ± std) | brier (mean ± std) |
 | --- | ---: | ---: |
@@ -175,7 +176,7 @@ that purpose.
 
 ## The commonground Family
 
-`commonground-predict` and `commonground-elicit` are the two 0.2.0 Hub IDs.
+`commonground-predict` and `commonground-elicit` are the two 0.2.1 Hub IDs.
 Predict tests inference over held-out deliberation votes; elicit tests whether a
 model can find policy problems and ask faction-splitting questions. They share
 the score package and provenance conventions while keeping their incompatible
@@ -196,6 +197,11 @@ Run a model evaluation without uploading results with:
 ```bash
 uv run eval commonground-predict -m MODEL --no-push
 ```
+
+The package also exposes a genuine legacy `SingleTurnEnv` from
+`load_environment()` because Prime CLI 0.6.28 Hosted Evaluations still use the
+v0 runner. Native v1 resolves `CommonGroundPredictTaskset` and the bundled
+pure-chat `PredictionHarness` directly from the package exports.
 
 The test and validation suites require no API key. The CE demo fixture's pinned
 source, hashes, transformation boundary, and MPL-2.0 treatment are recorded in

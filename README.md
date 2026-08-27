@@ -1,7 +1,7 @@
 # commonground-envs
 
 Standalone workspace for Common Ground deliberation and collective-preference
-training and evaluation environments. Release 0.2.0 exposes two independent
+training and evaluation environments. Release 0.2.1 exposes two independent
 native Verifiers v1 tasksets: `commonground-predict` estimates held-out
 stakeholder votes on fictional company AI policies, while
 `commonground-elicit` finds planted policy problems and raises questions that
@@ -18,6 +18,14 @@ packages but remain separate because their rubrics are not interchangeable.
 | `packages/commonground-scenarios` | `commonground-scenarios` | Seeded offline policy-scenario generation, schema, and validation. |
 | `environments/commonground_predict` | `commonground-predict` | Native Verifiers v1 taskset for predicting held-out deliberation votes. |
 | `environments/commonground_elicit` | `commonground-elicit` | Native Verifiers v1 taskset for document-grounded finding and question raising. |
+
+Both environment packages are dual-interface at the platform boundary. Native
+Verifiers v1 evaluation and Hosted Training discover the exported `Taskset` and
+pure-chat `Harness` classes. Prime's current standalone Hosted Evaluation
+runner still calls the legacy `load_environment()` convention, so each package
+also returns a real `SingleTurnEnv` adapter built from the same hardened rows
+and scoring functions. `load_taskset()` is the direct native-v1 construction
+helper; neither path is a partial shim.
 
 ## Setup
 
@@ -39,7 +47,7 @@ platform-specific installation resolution. Verify it with
 
 ## Data Provenance
 
-Release 0.2.0 ships synthetic data only. `commonground-predict` uses seeded
+Release 0.2.x ships synthetic data only. `commonground-predict` uses seeded
 enterprise AI-policy vote snapshots, disjoint training and evaluation policy
 text banks, and an operator-authored synthetic Context Engine demo fixture.
 `commonground-elicit` uses committed templates that plant known ambiguities,
@@ -47,7 +55,7 @@ contradictions, and gaps in fictional policy documents. Its 40 training rows
 and 20 held-out rows have unique semantic fingerprints, use disjoint template
 families, and carry explicit synthetic provenance.
 
-Bundled 0.2.0 data is synthetic. An advanced governed custom-data path is
+Bundled 0.2.x data is synthetic. An advanced governed custom-data path is
 documented separately in
 [human-data governance](docs/human-data-governance.md).
 
@@ -106,7 +114,7 @@ uv run python scripts/aggregate_baselines.py --csv /path/to/baselines.csv
 
 ## The `commonground` family
 
-`commonground` is an environment family, not a one-off. Release 0.2.0 ships
+`commonground` is an environment family, not a one-off. Release 0.2.1 ships
 `commonground-predict` and `commonground-elicit` as separate Hub IDs backed by
 the shared score and scenario packages. Planned follow-ons are:
 

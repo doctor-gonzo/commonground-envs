@@ -6,15 +6,22 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import verifiers as legacy_vf
 import verifiers.v1 as vf1
 from commonground_elicit import (
+    ElicitHarness,
     ElicitJsonParser,
     ElicitTaskset,
     finding_f1,
-    load_environment,
     panel_disagreement,
     question_utility,
     question_utility_score,
+)
+from commonground_elicit import (
+    load_environment as load_legacy_environment,
+)
+from commonground_elicit import (
+    load_taskset as load_environment,
 )
 from commonground_elicit.environment import (
     BUNDLED_EVAL_PATH,
@@ -28,9 +35,43 @@ from commonground_elicit.environment import (
 )
 from commonground_scenarios import HELDOUT_TEMPLATES, generate_scenario
 from verifiers.types import State
+from verifiers.v1.harnesses.null import NullHarness
+from verifiers.v1.utils.loaders import (
+    default_harness_id,
+    harness_class,
+    taskset_class,
+)
 
 CANONICAL_TASK_COLUMNS = ("prompt", "answer", "info", "example_id")
 QUESTION_RESPONSE_FIELDS = ("doc_id", "quote", "question", "target_stances")
+
+
+@pytest.mark.parametrize("task", ["find", "elicit-ask"])
+def test_legacy_hosted_eval_loader_returns_full_environment(task: str) -> None:
+    env = legacy_vf.load_environment("commonground-elicit", task=task, split="eval")
+
+    assert isinstance(env, legacy_vf.SingleTurnEnv)
+    assert isinstance(load_legacy_environment(task=task), legacy_vf.SingleTurnEnv)
+    assert env.env_id == "commonground-elicit"
+    assert env.env_args["task"] == task
+    assert env.env_args["split"] == "eval"
+    assert len(env.get_dataset()) == 40
+    assert len(env.get_eval_dataset()) == 20
+    assert all(
+        callable(getattr(env, method))
+        for method in ("set_kwargs", "start_server", "evaluate", "stop_server")
+    )
+
+    row = dict(env.get_eval_dataset()[0])
+    state = score_row(env, row, correct_response_from_row(row))
+    assert 0.0 < state["reward"] <= 1.0
+
+
+def test_native_plugin_resolution_preserves_taskset_and_pure_chat_harness() -> None:
+    assert taskset_class("commonground-elicit") is ElicitTaskset
+    assert default_harness_id("commonground-elicit") == "commonground-elicit"
+    assert harness_class("commonground-elicit") is ElicitHarness
+    assert issubclass(ElicitHarness, NullHarness)
 
 
 def test_load_environment_builds_default_heldout_rows() -> None:

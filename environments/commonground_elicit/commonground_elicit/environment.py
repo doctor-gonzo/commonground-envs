@@ -11,6 +11,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, Literal
 
+import verifiers as legacy_vf
 import verifiers.v1 as vf
 from commonground_scenarios import (
     is_yes_no_question,
@@ -21,6 +22,7 @@ from commonground_score import (
     cluster_separation,
     vote_entropy,
 )
+from datasets import Dataset
 from verifiers.v1.harnesses.null import NullHarness
 
 ENV_ID = "commonground-elicit"
@@ -49,10 +51,11 @@ _TOKEN_PATTERN = re.compile(
 )
 
 
-class ElicitJsonParser:
+class ElicitJsonParser(legacy_vf.Parser):
     """Extract the last task-specific JSON object from a completion."""
 
     def __init__(self, preferred_key: str = "findings") -> None:
+        super().__init__()
         self.preferred_key = preferred_key
 
     def parse(self, text: str) -> dict[str, Any]:
@@ -255,7 +258,7 @@ class ElicitTaskset(vf.Taskset[ElicitTask, ElicitTasksetConfig]):
         return list(self._eval_rows)
 
 
-def load_environment(
+def load_taskset(
     docs_count: int | None = None,
     docs_length: int | None = None,
     planted_density: float = 1.0,
@@ -269,7 +272,7 @@ def load_environment(
     split: str = "eval",
     **kwargs: Any,
 ) -> ElicitTaskset:
-    """Build the native Verifiers v1 taskset with a compatibility inspection API."""
+    """Build the native Verifiers v1 taskset with the public load controls."""
 
     validate_difficulty_args(
         docs_count=docs_count,
@@ -299,6 +302,58 @@ def load_environment(
             question_count=question_count,
             split=split,
         )
+    )
+
+
+def load_environment(
+    docs_count: int | None = None,
+    docs_length: int | None = None,
+    planted_density: float = 1.0,
+    distractor_density: float = 1.0,
+    data_path: str | os.PathLike[str] | None = None,
+    *,
+    task: str = "find",
+    panel_polarization: float = 1.0,
+    question_count: int = 3,
+    train_data_path: str | os.PathLike[str] | None = None,
+    split: str = "eval",
+    **kwargs: Any,
+) -> legacy_vf.SingleTurnEnv:
+    """Build the legacy adapter required by Prime Hosted Evaluations."""
+
+    # Hosted Evaluations still call the v0 factory, while native v1 discovers
+    # ElicitTaskset through __all__. Keep a genuine Environment here so the
+    # hosted runner receives its full server/evaluate lifecycle contract.
+    taskset = load_taskset(
+        docs_count=docs_count,
+        docs_length=docs_length,
+        planted_density=planted_density,
+        distractor_density=distractor_density,
+        data_path=data_path,
+        task=task,
+        panel_polarization=panel_polarization,
+        question_count=question_count,
+        train_data_path=train_data_path,
+        split=split,
+    )
+    parser = ElicitJsonParser("questions" if task == "elicit-ask" else "findings")
+    rubric = (
+        legacy_vf.Rubric(funcs=[question_utility], weights=[1.0], parser=parser)
+        if task == "elicit-ask"
+        else legacy_vf.Rubric(
+            funcs=[finding_f1, question_utility],
+            weights=[1.0, 0.0],
+            parser=parser,
+        )
+    )
+    return legacy_vf.SingleTurnEnv(
+        dataset=Dataset.from_list(taskset.get_dataset()),
+        eval_dataset=Dataset.from_list(taskset.get_eval_dataset()),
+        parser=parser,
+        rubric=rubric,
+        env_id=ENV_ID,
+        env_args=dict(taskset.env_args),
+        **kwargs,
     )
 
 

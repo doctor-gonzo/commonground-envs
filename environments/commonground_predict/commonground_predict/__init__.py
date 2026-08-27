@@ -4,8 +4,10 @@ from importlib.metadata import PackageNotFoundError, version
 
 from commonground_predict.environment import (
     CommonGroundPredictTaskset,
+    PredictionHarness,
     PredictionJsonParser,
     load_environment,
+    load_taskset,
     render_prompt,
 )
 
@@ -16,7 +18,9 @@ except PackageNotFoundError:  # pragma: no cover - source tree without installat
 
 __all__ = [
     "CommonGroundPredictTaskset",
+    "PredictionHarness",
     "PredictionJsonParser",
     "load_environment",
+    "load_taskset",
     "render_prompt",
 ]

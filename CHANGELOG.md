@@ -2,6 +2,19 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.1 - 2026-08-26
+
+- Restore real legacy `SingleTurnEnv` adapters from `load_environment()` so
+  the current Prime Hosted Evaluation runner can execute both packages, while
+  preserving the exported native-v1 tasksets used by local evaluation and
+  Hosted Training.
+- Add `load_taskset()` as the explicit direct-construction helper and bundle a
+  pure-chat `NullHarness` with Predict so native-v1 runs do not fall back to the
+  bash/code-agent harness.
+- Extend source and clean-wheel regression gates across both runner contracts,
+  including exact legacy loader calls, taskset/harness plugin resolution, and
+  Predict hidden-label non-leakage.
+
 ## 0.2.0 - 2026-08-26
 
 - Migrate both environments from deprecated Verifiers v0 to native v1 tasksets,

@@ -12,6 +12,7 @@ from math import isfinite
 from pathlib import Path
 from typing import Any, Never
 
+import verifiers as legacy_vf
 import verifiers.v1 as vf
 from commonground_scenarios import (
     HumanSnapshotValidationError,
@@ -19,6 +20,8 @@ from commonground_scenarios import (
 )
 from commonground_score import brier_score as score_brier_score
 from commonground_score import vote_accuracy as score_vote_accuracy
+from datasets import Dataset
+from verifiers.v1.harnesses.null import NullHarness
 
 ENV_ID = "commonground-predict"
 DATA_ENV_VAR = "COMMONGROUND_DATA_PATH"
@@ -40,8 +43,11 @@ MAX_JSON_CANDIDATES = 128
 CELL_ID_PATTERN = re.compile(r"(0|[1-9]\d*),(0|[1-9]\d*)")
 
 
-class PredictionJsonParser:
+class PredictionJsonParser(legacy_vf.Parser):
     """Extract the last predictions JSON object from a completion."""
+
+    def __init__(self) -> None:
+        super().__init__()
 
     def parse(self, text: str) -> dict[str, Any]:
         try:
@@ -106,6 +112,10 @@ class CommonGroundPredictConfig(vf.TasksetConfig):
     split: str = "eval"
 
 
+class PredictionHarness(NullHarness):
+    """Pure-chat harness bundled with the prediction taskset."""
+
+
 class CommonGroundPredictTaskset(vf.Taskset[PredictionTask, CommonGroundPredictConfig]):
     """Load deterministic masked-vote tasks through the Verifiers v1 API."""
 
@@ -124,14 +134,14 @@ class CommonGroundPredictTaskset(vf.Taskset[PredictionTask, CommonGroundPredictC
         ]
 
 
-def load_environment(
+def load_taskset(
     masked_vote_count: int | None = None,
     min_cluster_count: int | None = None,
     data_path: str | os.PathLike[str] | None = None,
     split: str = "eval",
     **config_kwargs: Any,
 ) -> CommonGroundPredictTaskset:
-    """Build the native v1 taskset with the legacy factory's load controls."""
+    """Build the native v1 taskset with the public load controls."""
 
     return CommonGroundPredictTaskset(
         CommonGroundPredictConfig(
@@ -142,6 +152,53 @@ def load_environment(
             split=split,
             **config_kwargs,
         )
+    )
+
+
+def load_environment(
+    masked_vote_count: int | None = None,
+    min_cluster_count: int | None = None,
+    data_path: str | os.PathLike[str] | None = None,
+    split: str = "eval",
+    **kwargs: Any,
+) -> legacy_vf.SingleTurnEnv:
+    """Build the legacy adapter required by Prime Hosted Evaluations."""
+
+    # Hosted Evaluations still call the v0 factory, while native v1 discovers
+    # CommonGroundPredictTaskset through __all__. Keep the two entry points real
+    # and separate so neither runner receives a partial compatibility object.
+    taskset = load_taskset(
+        masked_vote_count=masked_vote_count,
+        min_cluster_count=min_cluster_count,
+        data_path=data_path,
+        split=split,
+    )
+    rows = [_prediction_task_to_legacy_row(task) for task in taskset]
+    dataset = Dataset.from_list(rows)
+    parser = PredictionJsonParser()
+    rubric = legacy_vf.Rubric(
+        funcs=[vote_accuracy, brier],
+        weights=[1.0, 0.0],
+        parser=parser,
+    )
+    configured_path = data_path or os.environ.get(DATA_ENV_VAR)
+    resolved_path = (
+        Path(configured_path) if configured_path else _bundled_data_path(split)
+    )
+    env_args = {
+        "masked_vote_count": masked_vote_count,
+        "min_cluster_count": min_cluster_count,
+        "data_path": str(resolved_path),
+        "split": split,
+    }
+    return legacy_vf.SingleTurnEnv(
+        dataset=dataset,
+        eval_dataset=dataset,
+        parser=parser,
+        rubric=rubric,
+        env_id=ENV_ID,
+        env_args=env_args,
+        **kwargs,
     )
 
 
@@ -623,6 +680,19 @@ def snapshot_to_task_data(
         info=info,
         snapshot=public_snapshot,
     )
+
+
+def _prediction_task_to_legacy_row(task: PredictionTask) -> dict[str, Any]:
+    """Serialize one native task into the canonical v0 dataset row."""
+
+    data = task.data
+    return {
+        "prompt": [{"role": "user", "content": data.prompt_text}],
+        "answer": json.dumps(data.answer, sort_keys=True),
+        "info": json.dumps(data.info, sort_keys=True),
+        "snapshot": json.dumps(data.snapshot, sort_keys=True),
+        "example_id": data.name or str(data.idx),
+    }
 
 
 def render_prompt(snapshot: Mapping[str, Any]) -> str:

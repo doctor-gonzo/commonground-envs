@@ -72,8 +72,8 @@ Publish immutable shared packages first:
 
 1. commonground-score 0.1.1
 2. commonground-scenarios 0.1.1
-3. commonground-predict 0.2.0
-4. commonground-elicit 0.2.0
+3. commonground-predict 0.2.1
+4. commonground-elicit 0.2.1
 
 The environment packages exactly pin the shared versions. Do not reuse a
 published version number.
@@ -90,7 +90,8 @@ For every wheel, sdist, and Hub source archive:
   SHA-256, Python scope, pinned uv version, and exact no-dev resolution;
 - verify no top-level pyproject.toml is installed;
 - install into a fresh Python 3.12 environment;
-- import the package and load its native Verifiers v1 taskset;
+- import the package, resolve its native Verifiers v1 taskset and pure-chat
+  harness, and load its legacy Hosted Evaluation adapter;
 - run every test included in the extracted source archive;
 - compare generated artifact hashes with the candidate recorded for release.
 
@@ -100,7 +101,8 @@ Push the new versions privately first. On the exact private artifacts:
 
 - require the managed Hub action to pass;
 - pull and repeat clean install, import, taskset load, and shipped-test checks;
-- run a small no-upload evaluation for predict and both elicit task modes;
+- run a small native-v1 server evaluation and a standalone hosted legacy
+  evaluation for predict and both elicit task modes;
 - rerun and publish elicit model baselines because its corpus and reward changed
   in 0.2.0;
 - review the rendered README and license/provenance notice.

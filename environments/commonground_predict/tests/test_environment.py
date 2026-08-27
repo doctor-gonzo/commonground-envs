@@ -7,21 +7,77 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import verifiers as legacy_vf
 import verifiers.v1 as vf
-from commonground_predict import PredictionJsonParser, load_environment
+from commonground_predict import (
+    PredictionJsonParser,
+)
+from commonground_predict import (
+    load_environment as load_legacy_environment,
+)
+from commonground_predict import (
+    load_taskset as load_environment,
+)
 from commonground_predict.environment import (
     BUNDLED_CE_DEMO_PATH,
     BUNDLED_EVAL_PATH,
     BUNDLED_TRAIN_PATH,
     DATA_ENV_VAR,
     CommonGroundPredictTaskset,
+    PredictionHarness,
     PredictionTask,
     apply_masked_vote_count,
     brier,
     vote_accuracy,
 )
+from verifiers.types import State
+from verifiers.v1.harnesses.null import NullHarness
+from verifiers.v1.utils.loaders import (
+    default_harness_id,
+    harness_class,
+    taskset_class,
+)
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "commonground_predict" / "data"
+CANONICAL_TASK_COLUMNS = ("prompt", "answer", "info", "example_id")
+
+
+def test_legacy_hosted_eval_loader_returns_full_environment() -> None:
+    env = legacy_vf.load_environment("commonground-predict", split="eval")
+
+    assert isinstance(env, legacy_vf.SingleTurnEnv)
+    assert isinstance(load_legacy_environment(), legacy_vf.SingleTurnEnv)
+    assert env.env_id == "commonground-predict"
+    assert env.env_args["split"] == "eval"
+    assert len(env.get_eval_dataset()) == 20
+    assert all(
+        callable(getattr(env, method))
+        for method in ("set_kwargs", "start_server", "evaluate", "stop_server")
+    )
+
+    row = dict(env.get_eval_dataset()[0])
+    answer = json.loads(row["answer"])
+    state = score_legacy_row(env, row, answer)
+    assert state["reward"] == 1.0
+    assert state["metrics"]["vote_accuracy"] == 1.0
+    assert "held_out" not in json.loads(row["snapshot"])
+
+
+def test_legacy_env_args_capture_environment_variable_path(monkeypatch: Any) -> None:
+    data_path = DATA_DIR / "eval_ce_demo.jsonl"
+    monkeypatch.setenv(DATA_ENV_VAR, str(data_path))
+
+    env = load_legacy_environment(masked_vote_count=3, split="train")
+
+    assert Path(env.env_args["data_path"]) == data_path
+    assert len(env.get_eval_dataset()) == 1
+
+
+def test_native_plugin_resolution_preserves_taskset_and_pure_chat_harness() -> None:
+    assert taskset_class("commonground-predict") is CommonGroundPredictTaskset
+    assert default_harness_id("commonground-predict") == "commonground-predict"
+    assert harness_class("commonground-predict") is PredictionHarness
+    assert issubclass(PredictionHarness, NullHarness)
 
 
 def test_load_environment_builds_bundled_split() -> None:
@@ -518,6 +574,23 @@ def score_row(
         "metrics": trace.metrics,
         "task": trace.task.data.model_dump(mode="json"),
     }
+
+
+def score_legacy_row(
+    env: legacy_vf.SingleTurnEnv,
+    row: dict[str, Any],
+    predictions: dict[str, int],
+) -> State:
+    task = {key: row[key] for key in CANONICAL_TASK_COLUMNS if key in row}
+    state = State.for_task(task)
+    state["completion"] = [
+        {
+            "role": "assistant",
+            "content": json.dumps({"predictions": predictions}, sort_keys=True),
+        }
+    ]
+    asyncio.run(env.rubric.score_rollout(state))
+    return state
 
 
 def score_brier_prediction(prediction: dict[Any, float]) -> float:
