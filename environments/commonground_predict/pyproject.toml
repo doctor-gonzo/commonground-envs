@@ -1,7 +1,7 @@
 [project]
 name = "commonground-predict"
-version = "0.2.4"
-description = "Context Engine masked-vote prediction environment for synthetic stakeholder panels."
+version = "0.2.5"
+description = "Masked-vote prediction over synthetic stakeholder panels."
 authors = [{ name = "Common Ground contributors" }]
 license = "Apache-2.0 AND MPL-2.0"
 license-files = ["LICENSE", "LICENSES/MPL-2.0.txt", "NOTICE"]

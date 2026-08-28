@@ -16,7 +16,7 @@ groups, and turn ratified preferences into auditable decisions. Its planned
 governed export path is designed so that, subject to participant consent and
 applicable privacy and data-rights terms, a group can retain, license, or sell
 datasets derived from its own sessions for evaluation or training. Release
-0.2.4 contains only seeded synthetic data and one explicitly synthetic demo
+0.2.5 contains only seeded synthetic data and one explicitly synthetic demo
 fixture, not live participant records, and does not yet include that exporter.
 
 ![Common Ground Predict and Elicit use synthetic data in the current release; reviewed human data is shown only as a future option.](docs/assets/commonground-envs-overview.png)
@@ -128,7 +128,7 @@ uv run python scripts/aggregate_baselines.py --csv /path/to/baselines.csv
 ## The `commonground` family
 
 `commonground` is an environment family, not a one-off. The validated
-`commonground-predict` 0.2.4 candidate and `commonground-elicit` 0.2.4 candidate
+`commonground-predict` 0.2.5 candidate and `commonground-elicit` 0.2.5 candidate
 are separate Hub IDs backed by the shared score and scenario packages. Planned
 follow-ons are:
 

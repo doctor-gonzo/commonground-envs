@@ -15,7 +15,7 @@ PROJECTS = {
     "commonground-predict": (
         ROOT / "environments" / "commonground_predict",
         "commonground_predict",
-        "0.2.4",
+        "0.2.5",
         [
             "commonground-scenarios==0.1.1",
             "commonground-score==0.1.1",
@@ -26,7 +26,7 @@ PROJECTS = {
     "commonground-elicit": (
         ROOT / "environments" / "commonground_elicit",
         "commonground_elicit",
-        "0.2.4",
+        "0.2.5",
         [
             "commonground-scenarios==0.1.1",
             "commonground-score==0.1.1",
@@ -48,6 +48,16 @@ PROJECTS = {
     ),
 }
 
+EXPECTED_ENVIRONMENT_DESCRIPTIONS = {
+    "commonground-predict": (
+        "Masked-vote prediction over synthetic stakeholder panels."
+    ),
+    "commonground-elicit": (
+        "Policy-issue finding and faction-splitting question selection over "
+        "synthetic scenarios."
+    ),
+}
+
 
 @pytest.mark.parametrize(("distribution", "project"), PROJECTS.items())
 def test_release_metadata_is_immutable_and_publication_ready(
@@ -63,6 +73,11 @@ def test_release_metadata_is_immutable_and_publication_ready(
     assert metadata["version"] == expected_version
     assert metadata["dependencies"] == expected_dependencies
     assert metadata["urls"]["Repository"] == REPOSITORY_URL
+    if distribution in EXPECTED_ENVIRONMENT_DESCRIPTIONS:
+        assert (
+            metadata["description"] == EXPECTED_ENVIRONMENT_DESCRIPTIONS[distribution]
+        )
+        assert "Context Engine" not in metadata["description"]
     assert (project_dir / "LICENSE").read_bytes() == (ROOT / "LICENSE").read_bytes()
 
 
