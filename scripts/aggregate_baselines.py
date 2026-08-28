@@ -61,6 +61,7 @@ class CompleteRun:
     run_id: str
     descriptor_timestamp_ns: int
     recovered_rollout_count: int
+    task_ids: tuple[int, ...]
     rewards: tuple[float, ...]
     metrics: Mapping[str, tuple[float, ...]]
 
@@ -237,6 +238,7 @@ def load_legacy_run(result_path: Path) -> CompleteRun:
         )
 
     counts_by_example: dict[int, int] = {}
+    task_ids: list[int] = []
     rewards: list[float] = []
     metric_values: dict[str, list[float]] = {}
     expected_metric_keys: tuple[str, ...] | None = None
@@ -251,6 +253,7 @@ def load_legacy_run(result_path: Path) -> CompleteRun:
                 f"{result_path}:{line_number}: example_id must be an integer"
             )
         counts_by_example[example_id] = counts_by_example.get(example_id, 0) + 1
+        task_ids.append(example_id)
         reward = require_number(output, "reward", result_path, line_number)
         if not 0.0 <= reward <= 1.0:
             raise InvalidRunError(
@@ -302,6 +305,7 @@ def load_legacy_run(result_path: Path) -> CompleteRun:
         run_id=result_path.parent.name,
         descriptor_timestamp_ns=metadata_path.stat().st_mtime_ns,
         recovered_rollout_count=0,
+        task_ids=tuple(task_ids),
         rewards=tuple(rewards),
         metrics={name: tuple(values) for name, values in metric_values.items()},
     )
@@ -340,6 +344,7 @@ def load_native_run(result_path: Path) -> CompleteRun:
         )
 
     counts_by_example: dict[int, int] = {}
+    task_ids: list[int] = []
     episode_ids: set[str] = set()
     trace_ids: set[str] = set()
     run_ids: set[str] = set()
@@ -412,6 +417,7 @@ def load_native_run(result_path: Path) -> CompleteRun:
                 f"{result_path}:{line_number}: trace.task.data.idx must be an integer"
             )
         counts_by_example[example_id] = counts_by_example.get(example_id, 0) + 1
+        task_ids.append(example_id)
         require_task_mode(task_data.get("info"), task_mode, result_path, line_number)
 
         raw_rewards = trace.get("rewards")
@@ -504,6 +510,7 @@ def load_native_run(result_path: Path) -> CompleteRun:
         run_id=next(iter(run_ids)),
         descriptor_timestamp_ns=result_path.stat().st_mtime_ns,
         recovered_rollout_count=recovered_rollout_count,
+        task_ids=tuple(task_ids),
         rewards=tuple(rewards),
         metrics={name: tuple(values) for name, values in metric_values.items()},
     )

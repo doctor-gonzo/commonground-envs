@@ -178,6 +178,9 @@ def test_native_v1_run_aggregates_weighted_rewards_and_named_signals(
     assert summary.metrics["vote_accuracy"] == pytest.approx((2 / 3, math.sqrt(2) / 3))
     assert summary.metrics["brier"] == pytest.approx((1 / 3, math.sqrt(2) / 3))
 
+    run = aggregate.load_complete_run(next(tmp_path.glob("outputs/*/*/traces.jsonl")))
+    assert run.task_ids == (0, 0, 0, 1, 1, 1)
+
 
 def test_native_elicit_modes_never_collapse_to_one_environment_key(
     tmp_path: Path,

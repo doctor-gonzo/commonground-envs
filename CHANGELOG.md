@@ -21,9 +21,10 @@ All notable changes to this project are documented in this file.
   strengthen the semantic decision-term gate, and make an exact response attain
   1.0 under every polarization setting.
 - Bump `commonground-score` and `commonground-scenarios` to 0.2.0 for the
-  breaking score and scenario-schema contracts. Mark 0.3.0 model results as
-  pending until exact private artifacts complete the 100-task/five-rollout
-  multi-model sweep.
+  breaking score and scenario-schema contracts.
+- Complete the exact-private-artifact 100-task/five-rollout study across four
+  model families and three task modes (6,000 clean rollouts); add deterministic
+  paired task-cluster bootstrap intervals and preserve complete run provenance.
 
 ## 0.2.3 - 2026-08-27
 

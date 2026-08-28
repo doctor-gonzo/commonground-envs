@@ -105,6 +105,26 @@ uv run python scripts/aggregate_baselines.py
 uv run python scripts/aggregate_baselines.py --csv /path/to/baselines.csv
 ```
 
+The 0.3.0 release study completed all 6,000 planned rollouts across Claude
+Sonnet 4.5, Gemini 2.5 Flash, GPT-4.1, and Qwen3 30B A3B Instruct with no
+recovered rollouts. Predict rewards ranged from 0.572 to 0.730, Find from 0.120
+to 0.235, and Ask from 0.052 to 0.296. The exact task-cluster intervals,
+pairwise comparisons, configs, artifact hashes, and limitations are in the
+[0.3.0 evaluation report](docs/evaluation-report-0.3.0.md).
+
+Reproduce the independent-task analysis with:
+
+```bash
+uv run python scripts/analyze_release_study.py \
+  --root /path/to/study \
+  --bootstrap-samples 50000 \
+  --seed 20260828 \
+  --expected-model-count 4 \
+  --expected-task-count 100 \
+  --expected-rollouts-per-task 5 \
+  --require-no-recoveries
+```
+
 Repeated rollouts estimate sampling variation, not independent task coverage.
 Comparative claims should use per-task paired or task-cluster bootstrap
 intervals and disclose model/provider settings, retries, environment hashes,

@@ -114,5 +114,17 @@ Push the new versions privately first. On the exact private artifacts:
 - analyze paired per-task differences or task-cluster bootstrap intervals;
 - review the rendered README and license/provenance notice.
 
+For the 0.3.0 study, generate the attested analysis directly from the retained
+native-v1 traces:
+
+    uv run python scripts/analyze_release_study.py \
+      --root /path/to/release-study \
+      --bootstrap-samples 50000 \
+      --seed 20260828 \
+      --expected-model-count 4 \
+      --expected-task-count 100 \
+      --expected-rollouts-per-task 5 \
+      --require-no-recoveries
+
 Only then should an operator manually make a listing public. Publishing and
 visibility changes are never performed by the automated local release checks.
