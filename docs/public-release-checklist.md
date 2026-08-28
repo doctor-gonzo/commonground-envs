@@ -74,8 +74,8 @@ Publish immutable shared packages first:
 
 1. commonground-score 0.1.1
 2. commonground-scenarios 0.1.1
-3. commonground-predict 0.2.1
-4. commonground-elicit 0.2.2
+3. commonground-predict 0.2.3
+4. commonground-elicit 0.2.3
 
 The environment packages exactly pin the shared versions. Do not reuse a
 published version number.
@@ -89,7 +89,8 @@ For every wheel, sdist, and Hub source archive:
 - verify LICENSE is present; predict must also contain its MPL-2.0 text and
   NOTICE;
 - verify the packaged dependency manifest matches the candidate `uv.lock`
-  SHA-256, Python scope, pinned uv version, and exact no-dev resolution;
+  closure-scoped resolution SHA-256, Python scope, pinned uv version, and exact
+  no-dev resolution;
 - verify no top-level pyproject.toml is installed;
 - install into a fresh Python 3.12 environment;
 - import the package, resolve its native Verifiers v1 taskset and pure-chat

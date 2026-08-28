@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-import hashlib
 import importlib.util
 import subprocess
 import sys
+import tomllib
+from copy import deepcopy
 from pathlib import Path
 from types import ModuleType
 
@@ -39,13 +40,13 @@ def test_workspace_paths_are_replaced_with_exact_locked_pins() -> None:
     rendered = manifests.canonicalize_export(
         exported,
         {
-            "environments/commonground_predict": "commonground-predict==0.2.1",
+            "environments/commonground_predict": "commonground-predict==0.2.3",
             "packages/commonground-score": "commonground-score==0.1.1",
         },
     )
 
     assert rendered == (
-        "commonground-predict==0.2.1\n"
+        "commonground-predict==0.2.3\n"
         "commonground-score==0.1.1\n"
         "    # via commonground-predict\n"
         "verifiers==0.3.0\n"
@@ -86,8 +87,8 @@ def test_checked_in_manifests_match_the_exact_lock() -> None:
 @pytest.mark.parametrize(
     ("distribution", "import_package", "expected_version"),
     [
-        ("commonground-predict", "commonground_predict", "0.2.1"),
-        ("commonground-elicit", "commonground_elicit", "0.2.2"),
+        ("commonground-predict", "commonground_predict", "0.2.3"),
+        ("commonground-elicit", "commonground_elicit", "0.2.3"),
     ],
 )
 def test_manifest_records_release_scope_without_local_paths(
@@ -101,11 +102,10 @@ def test_manifest_records_release_scope_without_local_paths(
         / manifests.MANIFEST_NAME
     )
     content = manifest_path.read_text(encoding="utf-8")
-    lock_sha256 = hashlib.sha256((ROOT / "uv.lock").read_bytes()).hexdigest()
-
     assert f"# Distribution: {distribution}=={expected_version}" in content
     assert "# Python-Requires: >=3.12,<3.13" in content
-    assert f"# Lock-SHA256: {lock_sha256}" in content
+    assert "# Resolution-SHA256: " in content
+    assert "# Lock-SHA256: " not in content
     assert "# uv-Version: 0.10.9" in content
     assert "commonground-scenarios==0.1.1" in content
     assert "commonground-score==0.1.1" in content
@@ -116,6 +116,37 @@ def test_manifest_records_release_scope_without_local_paths(
     assert " @ file:" not in content.casefold()
     assert str(ROOT) not in content
     manifests.assert_no_local_paths(content)
+
+
+def test_unrelated_workspace_version_does_not_change_manifest() -> None:
+    lock_document = tomllib.loads((ROOT / "uv.lock").read_text(encoding="utf-8"))
+    changed_lock_document = deepcopy(lock_document)
+    for package in changed_lock_document["package"]:
+        if package.get("name") == "commonground-predict":
+            package["version"] = "99.99.99"
+            break
+    else:
+        raise AssertionError("commonground-predict is missing from uv.lock")
+
+    target = next(
+        target
+        for target in manifests.TARGETS
+        if target.distribution == "commonground-elicit"
+    )
+    exported = "-e ./environments/commonground_elicit\nverifiers==0.3.0\n"
+
+    before = manifests.render_manifest(
+        target,
+        lock_document=lock_document,
+        exported=exported,
+    )
+    after = manifests.render_manifest(
+        target,
+        lock_document=changed_lock_document,
+        exported=exported,
+    )
+
+    assert before == after
 
 
 def test_ci_and_release_checker_enforce_manifest_freshness() -> None:

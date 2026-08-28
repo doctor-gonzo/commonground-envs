@@ -192,7 +192,6 @@ def _export_requirements(distribution: str) -> str:
 def render_manifest(
     target: ManifestTarget,
     *,
-    lock_bytes: bytes,
     lock_document: Mapping[str, Any],
     exported: str,
 ) -> str:
@@ -205,7 +204,7 @@ def render_manifest(
         raise ValueError(
             f"{target.distribution}: export is missing {expected_self_pin}"
         )
-    lock_sha256 = hashlib.sha256(lock_bytes).hexdigest()
+    resolution_sha256 = hashlib.sha256(requirements.encode("utf-8")).hexdigest()
     uv_version = _required_uv_version()
     header = (
         "# Common Ground resolved dependency manifest\n"
@@ -213,7 +212,7 @@ def render_manifest(
         f"# Distribution: {expected_self_pin}\n"
         f"# Python-Requires: {requires_python}\n"
         "# Lock-File: uv.lock\n"
-        f"# Lock-SHA256: {lock_sha256}\n"
+        f"# Resolution-SHA256: {resolution_sha256}\n"
         f"# uv-Version: {uv_version}\n"
         "# Generated-By: scripts/check_dependency_manifests.py\n"
         "#\n"
@@ -230,7 +229,6 @@ def expected_manifests() -> dict[Path, str]:
     return {
         target.manifest_path: render_manifest(
             target,
-            lock_bytes=lock_bytes,
             lock_document=lock_document,
             exported=_export_requirements(target.distribution),
         )

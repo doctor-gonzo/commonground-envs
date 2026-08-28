@@ -1,6 +1,6 @@
 # commonground-predict
 
-`commonground-predict` 0.2.1 is a deterministic native Verifiers v1 taskset
+`commonground-predict` 0.2.3 is a deterministic native Verifiers v1 taskset
 for predicting held-out stakeholder votes on fictional company AI-deployment
 policies. It has no judge model: the reward compares strict JSON predictions
 against masked ground truth.
@@ -71,10 +71,10 @@ uv run validate commonground-predict --taskset.split train \
 ```
 
 The packaged `commonground_predict/dependency-manifest.txt` records the exact
-no-dev resolution used for this 0.2.1 candidate, including the root `uv.lock`
-SHA-256, Python scope, and uv generator version. Workspace sources appear as
-immutable distribution pins; the manifest is provenance rather than a
-cross-platform installer.
+no-dev resolution used for this 0.2.3 candidate, including a closure-scoped
+resolution SHA-256, Python scope, and uv generator version. Workspace sources
+appear as immutable distribution pins; the manifest is provenance rather than
+a cross-platform installer.
 
 For a model evaluation, taskset controls live below `env.taskset`:
 
@@ -147,7 +147,7 @@ Recorded 2026-08-16 on the unchanged public synthetic evaluation split with
 Verifiers 0.1.x and Prime Inference, aggregated by
 `scripts/aggregate_baselines.py` (newest complete run per model; std is across
 all 60 rollouts). These are historical reference numbers, not evidence from the
-0.2.1 private candidate.
+0.2.3 private candidate.
 
 | Model | vote_accuracy (mean ± std) | brier (mean ± std) |
 | --- | ---: | ---: |
@@ -176,7 +176,7 @@ that purpose.
 
 ## The commonground Family
 
-`commonground-predict` 0.2.1 and `commonground-elicit` 0.2.2 are the two Hub
+`commonground-predict` 0.2.3 and `commonground-elicit` 0.2.3 are the two Hub
 release candidates.
 Predict tests inference over held-out deliberation votes; elicit tests whether a
 model can find policy problems and ask faction-splitting questions. They share

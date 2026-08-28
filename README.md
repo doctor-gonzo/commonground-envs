@@ -39,10 +39,12 @@ uv run pytest -q
 
 Each environment source archive and wheel includes a
 `dependency-manifest.txt` inside its import package. The manifest records the
-exact no-dev resolution exported from the root `uv.lock`, the lock SHA-256,
-Python scope, and pinned uv generator version; workspace paths are converted to
-published distribution pins. It is release provenance, not a replacement for
-platform-specific installation resolution. Verify it with
+exact no-dev resolution exported from the root `uv.lock`, a closure-scoped
+resolution SHA-256, Python scope, and pinned uv generator version; workspace
+paths are converted to published distribution pins. The digest covers the
+environment's resolved dependency closure, so changing an unrelated workspace
+member cannot mutate an already published artifact. It is release provenance,
+not a replacement for platform-specific installation resolution. Verify it with
 `uv run python scripts/check_dependency_manifests.py --check`.
 
 ## Data Provenance
@@ -115,7 +117,7 @@ uv run python scripts/aggregate_baselines.py --csv /path/to/baselines.csv
 ## The `commonground` family
 
 `commonground` is an environment family, not a one-off. The validated
-`commonground-predict` 0.2.1 candidate and `commonground-elicit` 0.2.2 candidate
+`commonground-predict` 0.2.3 candidate and `commonground-elicit` 0.2.3 candidate
 are separate Hub IDs backed by the shared score and scenario packages. Planned
 follow-ons are:
 

@@ -1,6 +1,6 @@
 [project]
 name = "commonground-predict"
-version = "0.2.1"
+version = "0.2.3"
 description = "Common Ground masked-vote prediction environment for Verifiers."
 authors = [{ name = "Common Ground contributors" }]
 license = "Apache-2.0 AND MPL-2.0"

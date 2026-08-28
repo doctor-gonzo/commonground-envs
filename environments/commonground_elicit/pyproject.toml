@@ -1,6 +1,6 @@
 [project]
 name = "commonground-elicit"
-version = "0.2.2"
+version = "0.2.3"
 description = "Common Ground document-grounded ambiguity elicitation environment for Verifiers."
 authors = [{ name = "Common Ground contributors" }]
 license = "Apache-2.0"

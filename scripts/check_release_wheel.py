@@ -70,7 +70,7 @@ def _data_files(source_dir: Path, package_name: str) -> frozenset[str]:
 TARGETS = (
     WheelTarget(
         name="commonground-predict",
-        version="0.2.1",
+        version="0.2.3",
         source_dir=ROOT / "environments" / "commonground_predict",
         requirements=frozenset(
             {
@@ -89,7 +89,7 @@ TARGETS = (
     ),
     WheelTarget(
         name="commonground-elicit",
-        version="0.2.2",
+        version="0.2.3",
         source_dir=ROOT / "environments" / "commonground_elicit",
         requirements=frozenset(
             {
@@ -374,8 +374,8 @@ import commonground_predict
 import commonground_scenarios
 import commonground_score
 
-assert version("commonground-predict") == "0.2.1"
-assert version("commonground-elicit") == "0.2.2"
+assert version("commonground-predict") == "0.2.3"
+assert version("commonground-elicit") == "0.2.3"
 assert version("commonground-scenarios") == "0.1.1"
 assert version("commonground-score") == "0.1.1"
 

@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.3 - 2026-08-27
+
+- Reissue both Hub environments with closure-scoped dependency provenance so
+  an unrelated workspace member's version bump cannot mutate an already
+  published sibling artifact.
+- Align the inspectable Predict source README and dependency manifest with the
+  audited repository state before public visibility.
+
 ## 0.2.2 - 2026-08-26
 
 - Replace Elicit-ask's unreachable hidden canonical-sentence gate with a
