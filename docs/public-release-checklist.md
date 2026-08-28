@@ -74,8 +74,8 @@ Publish immutable shared packages first:
 
 1. commonground-score 0.1.1
 2. commonground-scenarios 0.1.1
-3. commonground-predict 0.2.3
-4. commonground-elicit 0.2.3
+3. commonground-predict 0.2.4
+4. commonground-elicit 0.2.4
 
 The environment packages exactly pin the shared versions. Do not reuse a
 published version number.

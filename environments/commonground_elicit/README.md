@@ -1,9 +1,19 @@
 # commonground-elicit
 
-`commonground-elicit` 0.2.3 is a deterministic native Verifiers v1 taskset for
+`commonground-elicit` 0.2.4 is a deterministic native Verifiers v1 taskset for
 finding planted ambiguities, contradictions, and gaps in small sets of
 fictional policy documents. Its scenarios are synthetic, generated offline
 from committed templates, and carry explicit provenance.
+
+This environment operationalizes a complementary
+[Context Engine](https://contextengine.sh) workflow: identifying unresolved
+policy issues and asking questions that reveal meaningful faction differences.
+Within an organization, that workflow can turn stakeholder input into auditable
+decision records and, through a planned governed export path, preference
+datasets that a consenting group could retain, license, or sell for evaluation
+or training. Release 0.2.4 is entirely synthetic; Context Engine is a planned
+future data source, not its current data source, and the exporter is not yet
+implemented.
 
 The find task accepts strict JSON containing `findings` and `questions`:
 
@@ -74,7 +84,7 @@ uv run validate commonground-elicit --taskset.split train \
 ```
 
 The packaged `commonground_elicit/dependency-manifest.txt` records the exact
-no-dev resolution used for this 0.2.3 candidate, including a closure-scoped
+no-dev resolution used for this 0.2.4 candidate, including a closure-scoped
 resolution SHA-256, Python scope, and uv generator version. Workspace sources
 appear as immutable distribution pins; the manifest is provenance rather than
 a cross-platform installer.
@@ -119,7 +129,7 @@ methodology.
 The 0.1.x model table is intentionally removed: 0.2.0 replaced the held-out
 semantic corpus and 0.2.2 replaced the question reward, so those historical
 scores are not comparable. Fresh baselines must be run on the exact private
-0.2.3 candidate before any public performance claim.
+0.2.4 candidate before any public performance claim.
 
 The public package contains every planted answer key for reproducibility and
 open training. It is not contamination-resistant. A leaderboard or

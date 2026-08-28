@@ -15,7 +15,7 @@ PROJECTS = {
     "commonground-predict": (
         ROOT / "environments" / "commonground_predict",
         "commonground_predict",
-        "0.2.3",
+        "0.2.4",
         [
             "commonground-scenarios==0.1.1",
             "commonground-score==0.1.1",
@@ -26,7 +26,7 @@ PROJECTS = {
     "commonground-elicit": (
         ROOT / "environments" / "commonground_elicit",
         "commonground_elicit",
-        "0.2.3",
+        "0.2.4",
         [
             "commonground-scenarios==0.1.1",
             "commonground-score==0.1.1",

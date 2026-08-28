@@ -8,6 +8,17 @@ stakeholder votes on fictional company AI policies, while
 expose latent faction disagreement. They share deterministic data and scoring
 packages but remain separate because their rubrics are not interchangeable.
 
+This is [Context Engine](https://contextengine.sh)'s reinforcement-learning
+environment family for evaluating models on collective-preference reasoning.
+Context Engine is an open-source deliberation platform that helps organizations
+collect statements and votes, map agreement and disagreement across stakeholder
+groups, and turn ratified preferences into auditable decisions. Its planned
+governed export path is designed so that, subject to participant consent and
+applicable privacy and data-rights terms, a group can retain, license, or sell
+datasets derived from its own sessions for evaluation or training. Release
+0.2.4 contains only seeded synthetic data and one explicitly synthetic demo
+fixture, not live participant records, and does not yet include that exporter.
+
 ![Common Ground Predict and Elicit use synthetic data in the current release; reviewed human data is shown only as a future option.](docs/assets/commonground-envs-overview.png)
 
 ## Packages
@@ -117,7 +128,7 @@ uv run python scripts/aggregate_baselines.py --csv /path/to/baselines.csv
 ## The `commonground` family
 
 `commonground` is an environment family, not a one-off. The validated
-`commonground-predict` 0.2.3 candidate and `commonground-elicit` 0.2.3 candidate
+`commonground-predict` 0.2.4 candidate and `commonground-elicit` 0.2.4 candidate
 are separate Hub IDs backed by the shared score and scenario packages. Planned
 follow-ons are:
 
@@ -132,7 +143,8 @@ follow-ons are:
 - `commonground-route` — statement dedup/routing scored as F1/ARI against
   ground-truth duplicate clusters from real session data.
 
-Live data source: [contextengine.sh](https://contextengine.sh) ·
+Related project and planned governed data source:
+[contextengine.sh](https://contextengine.sh) ·
 [Context Engine repository](https://github.com/AgalmicSoftware/context-engine)
 
 ## Release and license

@@ -1,7 +1,7 @@
 [project]
 name = "commonground-elicit"
-version = "0.2.3"
-description = "Common Ground document-grounded ambiguity elicitation environment for Verifiers."
+version = "0.2.4"
+description = "Context Engine policy-issue finding and faction-splitting question environment over synthetic scenarios."
 authors = [{ name = "Common Ground contributors" }]
 license = "Apache-2.0"
 license-files = ["LICENSE"]
