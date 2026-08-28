@@ -35,8 +35,10 @@ BUNDLED_SPLIT_PATHS = {
     "train": BUNDLED_TRAIN_PATH,
 }
 FINDING_TYPES = frozenset({"ambiguity", "contradiction", "gap"})
-QUOTE_OVERLAP_THRESHOLD = 0.5
-PLANT_COVERAGE_THRESHOLD = 0.8
+QUOTE_OVERLAP_THRESHOLD = 0.8
+PLANT_COVERAGE_THRESHOLD = 0.9
+QUOTE_PRECISION_THRESHOLD = 0.8
+DECISION_TERM_RECALL_THRESHOLD = 0.5
 MAX_COMPLETION_CHARS = 32_768
 MAX_JSON_STARTS = 64
 MAX_JSON_DEPTH = 32
@@ -150,13 +152,28 @@ class ElicitTask(vf.Task[ElicitTaskData]):
     async def companion_metrics(self, trace: vf.Trace) -> Mapping[str, float]:
         if self.data.info["task_label"] != "find":
             return {}
-        score = await question_utility(
-            [{"role": "assistant", "content": trace.last_reply}],
+        completion = [{"role": "assistant", "content": trace.last_reply}]
+        question_score = await question_utility(
+            completion,
             self.data.answer,
             self.data.info,
             ElicitJsonParser("findings"),
         )
-        return {"question_utility": score}
+        localization = await finding_localization_recall(
+            completion,
+            self.data.answer,
+            ElicitJsonParser("findings"),
+        )
+        type_score = await finding_type_accuracy(
+            completion,
+            self.data.answer,
+            ElicitJsonParser("findings"),
+        )
+        return {
+            "question_utility": question_score,
+            "finding_localization_recall": localization,
+            "finding_type_accuracy": type_score,
+        }
 
 
 class ElicitTasksetConfig(vf.TasksetConfig):
@@ -170,7 +187,7 @@ class ElicitTasksetConfig(vf.TasksetConfig):
     train_data_path: Path | None = None
     task_mode: Literal["find", "elicit-ask"] = "find"
     panel_polarization: float = 1.0
-    question_count: int = 3
+    question_count: int = 2
     split: Literal["eval", "train"] = "eval"
 
 
@@ -195,6 +212,12 @@ class _CompatibilityRubric:
         else:
             reward = await finding_f1(completion, answer, ElicitJsonParser("findings"))
             metrics["finding_f1"] = reward
+            metrics["finding_localization_recall"] = await finding_localization_recall(
+                completion, answer, ElicitJsonParser("findings")
+            )
+            metrics["finding_type_accuracy"] = await finding_type_accuracy(
+                completion, answer, ElicitJsonParser("findings")
+            )
             metrics["question_utility"] = await question_utility(
                 completion, answer, info, ElicitJsonParser("findings")
             )
@@ -300,7 +323,7 @@ def load_taskset(
     *,
     task: str = "find",
     panel_polarization: float = 1.0,
-    question_count: int = 3,
+    question_count: int = 2,
     train_data_path: str | os.PathLike[str] | None = None,
     split: str = "eval",
     **kwargs: Any,
@@ -347,7 +370,7 @@ def load_environment(
     *,
     task: str = "find",
     panel_polarization: float = 1.0,
-    question_count: int = 3,
+    question_count: int = 2,
     train_data_path: str | os.PathLike[str] | None = None,
     split: str = "eval",
     **kwargs: Any,
@@ -374,8 +397,13 @@ def load_environment(
         legacy_vf.Rubric(funcs=[question_utility], weights=[1.0], parser=parser)
         if task == "elicit-ask"
         else legacy_vf.Rubric(
-            funcs=[finding_f1, question_utility],
-            weights=[1.0, 0.0],
+            funcs=[
+                finding_f1,
+                finding_localization_recall,
+                finding_type_accuracy,
+                question_utility,
+            ],
+            weights=[1.0, 0.0, 0.0, 0.0],
             parser=parser,
         )
     )
@@ -504,6 +532,18 @@ def scenario_to_row(
             "doc_id": plant["doc_id"],
             "quote": plant["anchor_quote"],
             "type": plant["type"],
+            "diagnosis": plant["canonical_question"],
+            "decision_terms": list(plant["decision_terms"]),
+            "related_evidence": plant["related_evidence"],
+            "related_document_text": (
+                next(
+                    document["text"]
+                    for document in documents
+                    if document["doc_id"] == plant["related_evidence"]["doc_id"]
+                )
+                if plant["related_evidence"] is not None
+                else None
+            ),
             "document_text": next(
                 document["text"]
                 for document in documents
@@ -519,6 +559,8 @@ def scenario_to_row(
             "question": plant["canonical_question"],
             "question_aliases": list(plant["canonical_question_aliases"]),
             "target_stances": dict(plant["target_stances"]),
+            "decision_terms": list(plant["decision_terms"]),
+            "decision_value": float(plant["decision_value"]),
             "document_text": next(
                 document["text"]
                 for document in documents
@@ -527,6 +569,16 @@ def scenario_to_row(
         }
         for plant in visible_plants
     ]
+    question_oracle.sort(
+        key=lambda plant: (
+            -_plant_attainable_question_utility(
+                plant,
+                panel_polarization=panel_polarization,
+            ),
+            str(plant["doc_id"]),
+            str(plant["quote"]),
+        )
+    )
     answer = (
         {"questions": question_oracle}
         if task == "elicit-ask"
@@ -664,7 +716,7 @@ def render_prompt(
     documents: Sequence[Mapping[str, str]],
     *,
     factions: Sequence[Mapping[str, Any]] = (),
-    question_count: int = 3,
+    question_count: int = 2,
 ) -> str:
     """Render the finding task and its observable weight-zero T2 metric."""
 
@@ -693,13 +745,15 @@ def render_prompt(
             "",
             "Return STRICT JSON only, with this shape:",
             (
-                '{"findings":[{"doc_id":"<document id>","quote":"<passage>","type":"ambiguity|contradiction|gap"}],'
+                '{"findings":[{"doc_id":"<document id>","quote":"<minimal passage>","type":"ambiguity|contradiction|gap",'
+                '"diagnosis":"<yes/no question naming the unresolved decision>","related_evidence":null|{"doc_id":"<conflicting document id>","quote":"<conflicting passage>"}}],'
                 '"questions":[{"doc_id":"<document id>","quote":"<passage>","question":"<specific yes/no clarifying question>",'
                 '"target_stances":{"<faction id>":"agree|disagree|pass"}}]}'
             ),
-            f"Return exactly {question_count} question objects. The findings determine reward; questions are scored as a logged weight-zero companion metric.",
+            f"Return exactly {question_count} question objects. Select the issues with the greatest visible decision impact and faction disagreement. The findings determine reward; questions are scored as a logged weight-zero companion metric.",
             "Phrase each question as yes/no: agree means that faction predicts yes, disagree means no, and pass means no position.",
-            "For every question, copy its exact supporting passage into quote and reuse at least one informative word from that quote.",
+            "For every finding and question, identify the concrete unresolved threshold, exception, authority conflict, or alternative; sharing one noun with the quote is insufficient.",
+            "For contradictions, related_evidence must quote the second conflicting rule. For other finding types it must be null.",
         ]
     )
     return "\n".join(lines)
@@ -713,10 +767,11 @@ def render_ask_prompt(
     """Render the question-raising task without exposing planted stances."""
 
     lines = [
-        f"Raise exactly {question_count} clarifying questions grounded in these policy documents.",
+        f"Select and raise exactly {question_count} clarifying questions grounded in these policy documents.",
         "Each question should expose a specific ambiguity, contradiction, or uncovered case that could split the listed stakeholder factions.",
         "Phrase every question as yes/no. Predict every faction's answer: agree means yes, disagree means no, and pass means no position.",
-        "Copy the exact supporting passage into quote and reuse at least one informative word from that quote in the question.",
+        "Choose from more candidate issues than the output budget. Prioritize visible operational impact and faction disagreement.",
+        "Copy the exact supporting passage into quote. The question must name the concrete unresolved threshold, exception, authority conflict, or decision alternative; sharing one noun is insufficient.",
         "Generic questions about whether rules should exist are not useful.",
         "",
         "Stakeholder factions:",
@@ -831,7 +886,7 @@ def question_utility_score(
     panel_polarization: float,
     question_count: int,
 ) -> float:
-    """Return grounded issue discovery plus stance accuracy for exactly K outputs."""
+    """Return normalized top-K issue selection, semantics, and stance accuracy."""
 
     if len(candidates) != question_count or question_count <= 0:
         return 0.0
@@ -846,7 +901,20 @@ def question_utility_score(
             for plant in planted
         ]
         weights.append(candidate_weights)
-    return _maximum_weight_sum(weights) / question_count
+    attainable = sorted(
+        (
+            _plant_attainable_question_utility(
+                plant,
+                panel_polarization=panel_polarization,
+            )
+            for plant in planted
+        ),
+        reverse=True,
+    )[:question_count]
+    denominator = sum(attainable)
+    if denominator <= 0:
+        return 0.0
+    return min(1.0, _maximum_weight_sum(weights) / denominator)
 
 
 def _candidate_plant_question_utility(
@@ -855,8 +923,8 @@ def _candidate_plant_question_utility(
     *,
     panel_polarization: float,
 ) -> float:
-    quote_overlap = _candidate_plant_grounding(candidate, plant)
-    if quote_overlap is None:
+    semantic_grounding = _candidate_plant_grounding(candidate, plant)
+    if semantic_grounding is None:
         return 0.0
     planted_stances = plant.get("target_stances", {})
     candidate_stances = candidate.get("target_stances", {})
@@ -871,11 +939,32 @@ def _candidate_plant_question_utility(
         if isinstance(candidate_stances, Mapping)
         else 0.0
     )
-    disagreement = panel_disagreement(planted_stances)
+    attainable_utility = _plant_attainable_question_utility(
+        plant,
+        panel_polarization=panel_polarization,
+    )
     component_score = (
         QUESTION_GROUNDING_WEIGHT + STANCE_ACCURACY_WEIGHT * stance_accuracy
     )
-    return quote_overlap * component_score * disagreement * panel_polarization
+    return semantic_grounding * component_score * attainable_utility
+
+
+def _plant_attainable_question_utility(
+    plant: Mapping[str, Any],
+    *,
+    panel_polarization: float,
+) -> float:
+    """Return model-inferable issue value used to normalize the row maximum."""
+
+    stances = plant.get("target_stances", {})
+    if not isinstance(stances, Mapping) or not stances:
+        return 0.0
+    decision_value = plant.get("decision_value", 1.0)
+    if isinstance(decision_value, bool) or not isinstance(decision_value, (int, float)):
+        return 0.0
+    disagreement = panel_disagreement(stances)
+    polarization_weight = (1 - panel_polarization) + panel_polarization * disagreement
+    return float(decision_value) * polarization_weight
 
 
 def _candidate_plant_grounding(
@@ -894,11 +983,60 @@ def _candidate_plant_grounding(
     candidate_question = str(candidate.get("question", ""))
     if not is_yes_no_question(candidate_question):
         return None
-    # Regression guard: issue identity comes only from prompt-visible evidence.
-    # Hidden canonical wording made 60 valid baseline outputs score zero.
-    if not question_references_quote(candidate_question, candidate_quote):
+    semantic_score = question_decision_similarity(candidate_question, plant)
+    if semantic_score < DECISION_TERM_RECALL_THRESHOLD:
         return None
-    return 1.0
+    return semantic_score
+
+
+def question_decision_similarity(
+    question: str,
+    plant: Mapping[str, Any],
+) -> float:
+    """Score whether a question names the planted latent decision, not one noun."""
+
+    decision_terms = plant.get("decision_terms", [])
+    if not isinstance(decision_terms, Sequence) or isinstance(decision_terms, str):
+        return 0.0
+    required = {str(term) for term in decision_terms}
+    if not required:
+        quote = str(plant.get("quote", ""))
+        return 1.0 if question_references_quote(question, quote) else 0.0
+    candidate_tokens = {
+        token
+        for token in normalized_tokens(question)
+        if len(token) > 2 and token not in QUESTION_GROUNDING_STOPWORDS
+    }
+    if len(required) < 2 or len(candidate_tokens & required) < 2:
+        return 0.0
+    recall = len(candidate_tokens & required) / len(required)
+    reference_questions = [
+        str(plant.get("question", plant.get("diagnosis", ""))),
+        *[str(alias) for alias in plant.get("question_aliases", [])],
+    ]
+    lexical_f1 = max(
+        (
+            _token_set_f1(
+                candidate_tokens,
+                {
+                    token
+                    for token in normalized_tokens(reference)
+                    if len(token) > 2 and token not in QUESTION_GROUNDING_STOPWORDS
+                },
+            )
+            for reference in reference_questions
+            if reference
+        ),
+        default=0.0,
+    )
+    return min(1.0, 0.6 * recall + 0.4 * lexical_f1)
+
+
+def _token_set_f1(left: set[str], right: set[str]) -> float:
+    if not left or not right:
+        return 0.0
+    overlap = len(left & right)
+    return 2 * overlap / (len(left) + len(right))
 
 
 def question_references_quote(question: str, quote: str) -> bool:
@@ -947,6 +1085,42 @@ async def finding_f1(
     return match_findings(candidates, planted)["f1"]
 
 
+async def finding_localization_recall(
+    completion: list[dict[str, Any]],
+    answer: Mapping[str, Any] | str,
+    parser: ElicitJsonParser,
+) -> float:
+    """Metric: fraction of planted spans localized regardless of diagnosis type."""
+
+    result = _scored_findings(completion, answer, parser)
+    return float(result.get("localization_recall", 0.0))
+
+
+async def finding_type_accuracy(
+    completion: list[dict[str, Any]],
+    answer: Mapping[str, Any] | str,
+    parser: ElicitJsonParser,
+) -> float:
+    """Metric: type accuracy among candidate-localized planted spans."""
+
+    result = _scored_findings(completion, answer, parser)
+    return float(result.get("type_accuracy", 0.0))
+
+
+def _scored_findings(
+    completion: list[dict[str, Any]],
+    answer: Mapping[str, Any] | str,
+    parser: ElicitJsonParser,
+) -> dict[str, float | int]:
+    parsed = parser.parse_answer(completion)
+    candidates = parse_candidate_findings(parsed)
+    if candidates is None:
+        return {}
+    answer_payload = _parse_mapping_payload(answer)
+    planted = parse_planted_items(answer_payload.get("findings", []))
+    return match_findings(candidates, planted)
+
+
 def _parse_mapping_payload(payload: Mapping[str, Any] | str) -> Mapping[str, Any]:
     """Decode a canonical answer/info payload into a mapping for scoring."""
 
@@ -958,7 +1132,7 @@ def _parse_mapping_payload(payload: Mapping[str, Any] | str) -> Mapping[str, Any
     return loaded if isinstance(loaded, Mapping) else {}
 
 
-def parse_candidate_findings(parsed: Any) -> list[dict[str, str]] | None:
+def parse_candidate_findings(parsed: Any) -> list[dict[str, Any]] | None:
     """Validate the exact T1 response schema, returning None on any error."""
 
     if not isinstance(parsed, Mapping) or set(parsed) not in (
@@ -969,32 +1143,62 @@ def parse_candidate_findings(parsed: Any) -> list[dict[str, str]] | None:
     return _parse_findings_list(parsed["findings"])
 
 
-def _parse_findings_list(raw_findings: Any) -> list[dict[str, str]] | None:
+def _parse_findings_list(raw_findings: Any) -> list[dict[str, Any]] | None:
     if not isinstance(raw_findings, list):
         return None
-    findings: list[dict[str, str]] = []
+    findings: list[dict[str, Any]] = []
+    seen_spans: set[tuple[str, tuple[str, ...]]] = set()
     for raw_finding in raw_findings:
         if not isinstance(raw_finding, Mapping) or set(raw_finding) != {
             "doc_id",
             "quote",
             "type",
+            "diagnosis",
+            "related_evidence",
         }:
             return None
         if not all(
-            isinstance(raw_finding[field], str) for field in ("doc_id", "quote", "type")
+            isinstance(raw_finding[field], str)
+            for field in ("doc_id", "quote", "type", "diagnosis")
         ):
             return None
-        if not raw_finding["doc_id"].strip() or not raw_finding["quote"].strip():
+        if not all(
+            raw_finding[field].strip() for field in ("doc_id", "quote", "diagnosis")
+        ):
             return None
         if raw_finding["type"] not in FINDING_TYPES:
             return None
-        findings.append(dict(raw_finding))
+        related = raw_finding["related_evidence"]
+        if related is not None and (
+            not isinstance(related, Mapping)
+            or set(related) != {"doc_id", "quote"}
+            or not all(
+                isinstance(related[field], str) and related[field].strip()
+                for field in ("doc_id", "quote")
+            )
+        ):
+            return None
+        span_key = (
+            raw_finding["doc_id"],
+            normalized_tokens(raw_finding["quote"]),
+        )
+        if span_key in seen_spans:
+            return None
+        seen_spans.add(span_key)
+        findings.append(
+            {
+                **dict(raw_finding),
+                "related_evidence": dict(related)
+                if isinstance(related, Mapping)
+                else None,
+            }
+        )
     return findings
 
 
 def parse_planted_items(
-    planted_items: Sequence[Mapping[str, str]] | str,
-) -> list[dict[str, str]]:
+    planted_items: Sequence[Mapping[str, Any]] | str,
+) -> list[dict[str, Any]]:
     loaded = (
         _load_bounded_json(planted_items)
         if isinstance(planted_items, str)
@@ -1005,6 +1209,10 @@ def parse_planted_items(
             "doc_id": str(item["doc_id"]),
             "quote": str(item.get("quote", item.get("anchor_quote", ""))),
             "type": str(item["type"]),
+            "diagnosis": str(item.get("diagnosis", item.get("canonical_question", ""))),
+            "decision_terms": list(item.get("decision_terms", [])),
+            "related_evidence": item.get("related_evidence"),
+            "related_document_text": item.get("related_document_text"),
             "document_text": str(
                 item.get(
                     "document_text", item.get("quote", item.get("anchor_quote", ""))
@@ -1016,22 +1224,26 @@ def parse_planted_items(
 
 
 def match_findings(
-    candidates: Sequence[Mapping[str, str]],
-    planted: Sequence[Mapping[str, str]],
+    candidates: Sequence[Mapping[str, Any]],
+    planted: Sequence[Mapping[str, Any]],
     *,
     quote_overlap_threshold: float = QUOTE_OVERLAP_THRESHOLD,
     plant_coverage_threshold: float = PLANT_COVERAGE_THRESHOLD,
 ) -> dict[str, float | int]:
-    """Globally match eligible candidates once each and return F1 counts."""
+    """Match strict diagnosis plus paired evidence and report component scores."""
 
+    localization_adjacency: dict[int, list[tuple[float, int]]] = {
+        candidate_index: [] for candidate_index in range(len(candidates))
+    }
+    typed_adjacency: dict[int, list[tuple[float, int]]] = {
+        candidate_index: [] for candidate_index in range(len(candidates))
+    }
     adjacency: dict[int, list[tuple[float, int]]] = {
         candidate_index: [] for candidate_index in range(len(candidates))
     }
     for candidate_index, candidate in enumerate(candidates):
         for plant_index, plant in enumerate(planted):
             if candidate.get("doc_id") != plant.get("doc_id"):
-                continue
-            if candidate.get("type") != plant.get("type"):
                 continue
             if not normalized_contiguous_quote(
                 candidate.get("quote", ""),
@@ -1043,18 +1255,67 @@ def match_findings(
             )
             if plant_coverage < plant_coverage_threshold:
                 continue
+            precision = normalized_quote_precision(
+                candidate.get("quote", ""), plant.get("quote", "")
+            )
+            if precision < QUOTE_PRECISION_THRESHOLD:
+                continue
             overlap = normalized_quote_overlap(
                 candidate.get("quote", ""), plant.get("quote", "")
             )
             if overlap >= quote_overlap_threshold:
+                localization_adjacency[candidate_index].append((overlap, plant_index))
+                if candidate.get("type") != plant.get("type"):
+                    continue
+                typed_adjacency[candidate_index].append((overlap, plant_index))
+                if not _finding_diagnosis_matches(candidate, plant):
+                    continue
+                if not _related_evidence_matches(candidate, plant):
+                    continue
                 adjacency[candidate_index].append((overlap, plant_index))
-    for edges in adjacency.values():
+    for graph in (localization_adjacency, typed_adjacency, adjacency):
+        for edges in graph.values():
+            edges.sort(key=lambda item: (-item[0], item[1]))
+
+    localization_true_positive = _maximum_cardinality_matches(localization_adjacency)
+    typed_true_positive = _maximum_cardinality_matches(typed_adjacency)
+    true_positive = _maximum_cardinality_matches(adjacency)
+
+    false_positive = len(candidates) - true_positive
+    false_negative = len(planted) - true_positive
+    denominator = 2 * true_positive + false_positive + false_negative
+    f1 = 0.0 if denominator == 0 else (2 * true_positive) / denominator
+    localization_recall = (
+        0.0 if not planted else localization_true_positive / len(planted)
+    )
+    type_accuracy = (
+        0.0
+        if localization_true_positive == 0
+        else typed_true_positive / localization_true_positive
+    )
+    return {
+        "true_positive": true_positive,
+        "false_positive": false_positive,
+        "false_negative": false_negative,
+        "f1": f1,
+        "localization_recall": localization_recall,
+        "type_accuracy": type_accuracy,
+    }
+
+
+def _maximum_cardinality_matches(
+    adjacency: Mapping[int, Sequence[tuple[float, int]]],
+) -> int:
+    """Return deterministic maximum-cardinality bipartite match count."""
+
+    normalized = {index: list(edges) for index, edges in adjacency.items()}
+    for edges in normalized.values():
         edges.sort(key=lambda item: (-item[0], item[1]))
 
     plant_to_candidate: dict[int, int] = {}
 
     def augment(candidate_index: int, seen_plants: set[int]) -> bool:
-        for _, plant_index in adjacency[candidate_index]:
+        for _, plant_index in normalized[candidate_index]:
             if plant_index in seen_plants:
                 continue
             seen_plants.add(plant_index)
@@ -1067,20 +1328,54 @@ def match_findings(
     # Deterministic augmenting paths find a maximum-cardinality assignment;
     # overlap-descending adjacency makes stronger quote matches the first
     # preference without sacrificing a valid additional match.
-    for candidate_index in range(len(candidates)):
+    for candidate_index in normalized:
         augment(candidate_index, set())
+    return len(plant_to_candidate)
 
-    true_positive = len(plant_to_candidate)
-    false_positive = len(candidates) - true_positive
-    false_negative = len(planted) - true_positive
-    denominator = 2 * true_positive + false_positive + false_negative
-    f1 = 0.0 if denominator == 0 else (2 * true_positive) / denominator
-    return {
-        "true_positive": true_positive,
-        "false_positive": false_positive,
-        "false_negative": false_negative,
-        "f1": f1,
-    }
+
+def _finding_diagnosis_matches(
+    candidate: Mapping[str, Any], plant: Mapping[str, Any]
+) -> bool:
+    diagnosis = str(candidate.get("diagnosis", ""))
+    if not plant.get("decision_terms"):
+        return True
+    return (
+        is_yes_no_question(diagnosis)
+        and question_decision_similarity(diagnosis, plant)
+        >= DECISION_TERM_RECALL_THRESHOLD
+    )
+
+
+def _related_evidence_matches(
+    candidate: Mapping[str, Any], plant: Mapping[str, Any]
+) -> bool:
+    expected = plant.get("related_evidence")
+    actual = candidate.get("related_evidence")
+    if "related_evidence" not in plant:
+        return True
+    if plant.get("type") != "contradiction":
+        return actual is None and expected is None
+    if not isinstance(expected, Mapping) or not isinstance(actual, Mapping):
+        return False
+    return (
+        actual.get("doc_id") == expected.get("doc_id")
+        and normalized_contiguous_quote(
+            str(actual.get("quote", "")),
+            str(plant.get("related_document_text", expected.get("quote", ""))),
+        )
+        and normalized_quote_overlap(
+            str(actual.get("quote", "")), str(expected.get("quote", ""))
+        )
+        >= QUOTE_OVERLAP_THRESHOLD
+        and normalized_plant_coverage(
+            str(actual.get("quote", "")), str(expected.get("quote", ""))
+        )
+        >= PLANT_COVERAGE_THRESHOLD
+        and normalized_quote_precision(
+            str(actual.get("quote", "")), str(expected.get("quote", ""))
+        )
+        >= QUOTE_PRECISION_THRESHOLD
+    )
 
 
 def normalized_quote_overlap(left: str, right: str) -> float:
@@ -1103,6 +1398,17 @@ def normalized_plant_coverage(candidate_quote: str, planted_quote: str) -> float
         return 0.0
     longest = _longest_common_contiguous_span(candidate_tokens, planted_tokens)
     return longest / len(planted_tokens)
+
+
+def normalized_quote_precision(candidate_quote: str, planted_quote: str) -> float:
+    """Return the fraction of candidate tokens belonging to the planted anchor."""
+
+    candidate_tokens = normalized_tokens(candidate_quote)
+    planted_tokens = normalized_tokens(planted_quote)
+    if not candidate_tokens or not planted_tokens:
+        return 0.0
+    longest = _longest_common_contiguous_span(candidate_tokens, planted_tokens)
+    return longest / len(candidate_tokens)
 
 
 def normalized_tokens(text: str) -> tuple[str, ...]:

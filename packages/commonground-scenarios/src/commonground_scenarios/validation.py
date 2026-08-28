@@ -243,6 +243,9 @@ def _validate_plants(
                 "canonical_question_aliases",
                 "target_dimension",
                 "target_stances",
+                "decision_terms",
+                "decision_value",
+                "related_evidence",
             },
             f"planted_items[{index}]",
         )
@@ -327,6 +330,61 @@ def _validate_plants(
             raise ScenarioValidationError(
                 f"plant must mark latently split factions: {plant_id}"
             )
+        decision_terms = plant["decision_terms"]
+        if (
+            not isinstance(decision_terms, list)
+            or len(decision_terms) < 2
+            or len(set(decision_terms)) != len(decision_terms)
+            or not all(
+                isinstance(term, str)
+                and term == term.casefold()
+                and re.fullmatch(r"[^\W_]+", term)
+                for term in decision_terms
+            )
+        ):
+            raise ScenarioValidationError(
+                f"decision_terms must contain unique normalized terms: {plant_id}"
+            )
+        decision_value = plant["decision_value"]
+        if (
+            isinstance(decision_value, bool)
+            or not isinstance(decision_value, (int, float))
+            or not isfinite(float(decision_value))
+            or not 0 < float(decision_value) <= 1
+        ):
+            raise ScenarioValidationError(
+                f"decision_value must be within (0, 1]: {plant_id}"
+            )
+        related_evidence = plant["related_evidence"]
+        if plant["type"] == "contradiction":
+            related = _exact_object(
+                related_evidence,
+                {"doc_id", "quote"},
+                f"planted_items[{index}].related_evidence",
+            )
+            related_doc_id = _identifier(
+                related["doc_id"],
+                f"planted_items[{index}].related_evidence.doc_id",
+            )
+            related_quote = _nonempty_text(
+                related["quote"],
+                f"planted_items[{index}].related_evidence.quote",
+            )
+            if related_doc_id == doc_id:
+                raise ScenarioValidationError(
+                    f"contradiction related evidence must use another document: {plant_id}"
+                )
+            if (
+                related_doc_id not in documents
+                or related_quote not in documents[related_doc_id]["text"]
+            ):
+                raise ScenarioValidationError(
+                    f"related contradiction evidence is absent: {plant_id}"
+                )
+        elif related_evidence is not None:
+            raise ScenarioValidationError(
+                f"only contradictions may define related evidence: {plant_id}"
+            )
     if seen_types != PLANT_TYPES:
         raise ScenarioValidationError(
             "planted_items must include ambiguity, contradiction, and gap"
@@ -408,6 +466,7 @@ def _validate_provenance(value: Any, scenario_id: str) -> dict[str, Any]:
             "generated_at",
             "synthetic",
             "generation_mode",
+            "generator_family",
         },
         "provenance",
     )
@@ -427,6 +486,7 @@ def _validate_provenance(value: Any, scenario_id: str) -> dict[str, Any]:
         raise ScenarioValidationError("provenance.synthetic must be boolean")
     if provenance["generation_mode"] not in {"template", "operator-polished", "human"}:
         raise ScenarioValidationError("invalid provenance.generation_mode")
+    _identifier(provenance["generator_family"], "provenance.generator_family")
     return provenance
 
 

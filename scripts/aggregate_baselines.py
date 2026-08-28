@@ -27,7 +27,14 @@ DEFAULT_RUN_DIRS_GLOBS = (
 )
 LEGACY_ARTIFACTS = ("metadata.json", "results.jsonl")
 NATIVE_ARTIFACTS = ("config.toml", "traces.jsonl")
-METRIC_NAMES = ("vote_accuracy", "brier", "finding_f1", "question_utility")
+METRIC_NAMES = (
+    "vote_accuracy",
+    "brier",
+    "finding_localization_recall",
+    "finding_type_accuracy",
+    "finding_f1",
+    "question_utility",
+)
 ELICIT_TASK_MODES = frozenset({"find", "elicit-ask"})
 
 
@@ -705,7 +712,7 @@ def validate_native_baseline_profile(
             "planted_density": 1.0,
             "distractor_density": 1.0,
             "panel_polarization": 1.0,
-            "question_count": 3,
+            "question_count": 2,
             "task_mode": task_mode,
         }
         drift = {
@@ -726,7 +733,11 @@ def expected_native_signals(
     if package_name == "commonground-predict":
         return ("vote_accuracy",), ("brier",)
     if package_name == "commonground-elicit" and task_mode == "find":
-        return ("finding_f1",), ("question_utility",)
+        return ("finding_f1",), (
+            "finding_localization_recall",
+            "finding_type_accuracy",
+            "question_utility",
+        )
     if package_name == "commonground-elicit" and task_mode == "elicit-ask":
         return ("question_utility",), ()
     raise InvalidRunError(f"{path}: unsupported Common Ground reward profile")
@@ -739,6 +750,8 @@ def expected_legacy_metrics(
     if package_name == "commonground-predict":
         return ("vote_accuracy", "brier")
     if package_name == "commonground-elicit" and task_mode == "find":
+        # Historical 0.2.x legacy runs did not emit the diagnostic metrics
+        # added to the native 0.3.0 task contract.
         return ("finding_f1", "question_utility")
     if package_name == "commonground-elicit" and task_mode == "elicit-ask":
         return ("question_utility",)
@@ -748,7 +761,7 @@ def expected_legacy_metrics(
 def validate_metric_domain(
     name: str, value: float, path: Path, line_number: int
 ) -> None:
-    upper = 2.0 if name == "brier" else 1.0
+    upper = 1.0
     if not 0.0 <= value <= upper:
         raise InvalidRunError(
             f"{path}:{line_number}: {name} must be within [0, {upper:g}]"

@@ -62,7 +62,7 @@ def write_native_run(
                 "planted_density = 1.0",
                 "distractor_density = 1.0",
                 "panel_polarization = 1.0",
-                "question_count = 3",
+                "question_count = 2",
             ]
         )
     config = "\n".join(
@@ -97,6 +97,8 @@ def write_native_run(
             if environment == "commonground-predict":
                 metrics["brier"] = 1.0 - score
             elif task_mode == "find":
+                metrics["finding_localization_recall"] = score
+                metrics["finding_type_accuracy"] = score
                 metrics["question_utility"] = score / 2
             task_info = {"task_label": task_mode} if task_mode is not None else {}
             trace_id = f"trace-{task_index}-{rollout_index}"
@@ -150,8 +152,8 @@ def test_baseline_config_uses_installed_native_v1_schema() -> None:
     config = EvalConfig.model_validate(raw_config)
 
     assert config.env.taskset.id == "commonground-predict"
-    assert config.num_tasks == 20
-    assert config.num_rollouts == 3
+    assert config.num_tasks == 100
+    assert config.num_rollouts == 5
     assert config.shuffle is False
     assert config.push is False
     assert "model" not in raw_config
@@ -385,10 +387,10 @@ def test_aggregate_complete_runs_in_deterministic_order() -> None:
 
     assert aggregate.render_markdown(summaries) == "\n".join(
         [
-            "| Model | Environment | Run ID | Rollouts | Recovered rollouts | Reward (mean ± std) | vote_accuracy (mean ± std) | brier (mean ± std) | finding_f1 (mean ± std) | question_utility (mean ± std) |",
-            "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
-            "| fixture/offline-oracle | commonground-elicit:find | d4c3b2a1 | 6 | 0 | 0.667 ± 0.471 | — | — | 0.667 ± 0.471 | 0.415 ± 0.294 |",
-            "| fixture/offline-oracle | commonground-predict | a1b2c3d4 | 6 | 0 | 0.667 ± 0.471 | 0.667 ± 0.471 | 0.333 ± 0.471 | — | — |",
+            "| Model | Environment | Run ID | Rollouts | Recovered rollouts | Reward (mean ± std) | vote_accuracy (mean ± std) | brier (mean ± std) | finding_localization_recall (mean ± std) | finding_type_accuracy (mean ± std) | finding_f1 (mean ± std) | question_utility (mean ± std) |",
+            "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+            "| fixture/offline-oracle | commonground-elicit:find | d4c3b2a1 | 6 | 0 | 0.667 ± 0.471 | — | — | — | — | 0.667 ± 0.471 | 0.415 ± 0.294 |",
+            "| fixture/offline-oracle | commonground-predict | a1b2c3d4 | 6 | 0 | 0.667 ± 0.471 | 0.667 ± 0.471 | 0.333 ± 0.471 | — | — | — | — |",
         ]
     )
 

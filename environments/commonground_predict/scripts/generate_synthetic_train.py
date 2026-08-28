@@ -1,93 +1,185 @@
-"""Generate the bundled synthetic train split for commonground-predict.
-
-Reuses the frozen eval generator's snapshot machinery with a distinct seed,
-snapshot count, session-id range, and output file. The eval splits and their
-published floors stay untouched; this script only writes
-``train_synthetic.jsonl`` for training runs (point ``COMMONGROUND_DATA_PATH``
-or the RL config's env data path at it).
-
-Regenerate with: ``python environments/commonground_predict/scripts/generate_synthetic_train.py``
-Determinism: same seed -> byte-identical output.
-"""
+"""Generate a lexically and procedurally distinct Predict training split."""
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import random
+import sys
 from pathlib import Path
-from typing import Any, Protocol, cast
+from typing import Any
 
-TRAIN_SEED = 20260815
-TRAIN_SNAPSHOT_COUNT = 150
-SESSION_INDEX_OFFSET = 1000  # keeps session_ids disjoint from the eval split (0-19)
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
 
-# Training policies are intentionally text-disjoint from the evaluation bank.
-# They exercise the same broad enterprise-governance concepts without making
-# exact evaluation statements recoverable from the public training split.
-TRAIN_STATEMENT_BANK = [
-    "The incident assistant should record the evidence and timestamp behind every proposed severity classification.",
-    "The recruiting assistant should not infer protected characteristics from names, photographs, schools, or writing style.",
-    "The procurement assistant should identify the approved supplier record before recommending that an order be placed.",
-    "The translation assistant should preserve legal notices and mark any phrase whose meaning remains uncertain.",
-    "The security assistant may prepare an access change but an authorized administrator must approve its execution.",
-    "The scheduling assistant should reveal which constraints caused it to reject a requested meeting time.",
-    "The knowledge assistant should distinguish retrieved facts from generated suggestions in its response.",
-    "The claims assistant should route suspected fraud to a qualified investigator rather than making a final accusation.",
-    "The inventory assistant should confirm warehouse availability before promising a delivery date.",
-    "The marketing assistant should use only customer segments whose collection purpose covers the proposed campaign.",
-    "The compliance assistant should preserve the exact source wording when quoting a regulatory obligation.",
-    "The maintenance assistant should stop automated work when sensor readings conflict with the equipment record.",
-    "The travel assistant should display cancellation conditions before asking an employee to approve a booking.",
-    "The document assistant should remove hidden comments and tracked changes before preparing a file for external sharing.",
-    "The benefits assistant should send eligibility exceptions to a designated benefits specialist for a decision.",
-    "Each production assistant should have a documented owner who can disable its tools and revoke its credentials.",
-    "Changes to an assistant's system instructions should receive the same risk review as changes to its model or tools.",
-    "A person affected by an automated eligibility recommendation should receive a reason and a meaningful appeal route.",
-    "Evaluation sets for an assistant should cover foreseeable misuse as well as its intended workflow.",
-    "Records created by an assistant should follow the retention schedule of the business process they support.",
-    "The research assistant should attach stable citations for material factual claims and identify inaccessible sources.",
-    "The forecasting assistant should show the observation window and uncertainty assumptions behind each projection.",
-    "The customer-success assistant should not promise roadmap work unless the commitment appears in an approved source.",
-    "The payroll assistant should require a second reviewer before changing bank or tax details.",
-    "The facilities assistant should place occupant safety ahead of energy optimization when its signals disagree.",
-    "The quality assistant should retain failed inspection results instead of replacing them with a later passing run.",
-    "The learning assistant should label generated examples that have not been reviewed by a subject-matter expert.",
-    "The records assistant should log who authorized a legal hold and which deletion rules it suspends.",
-    "The vendor-risk assistant should separate verified evidence from questionnaire claims that have not been checked.",
-    "The localization assistant should request regional review before changing required disclosures or consent language.",
+from synthetic_core import StatementSpec  # noqa: E402
+from synthetic_core import make_snapshot as build_snapshot  # noqa: E402
+
+TRAIN_SEED = 20260829
+TRAIN_SNAPSHOT_COUNT = 200
+SESSION_INDEX_OFFSET = 1000
+GENERATOR_FAMILY = "train-random-mixture-v2"
+
+_TEXTS = [
+    (
+        "The incident assistant should record the evidence and timestamp behind every proposed severity classification.",
+        "evidence",
+    ),
+    (
+        "The recruiting assistant should not infer protected characteristics from names, photographs, schools, or writing style.",
+        "fairness",
+    ),
+    (
+        "The procurement assistant should identify the approved supplier record before recommending that an order be placed.",
+        "governance",
+    ),
+    (
+        "The translation assistant should preserve legal notices and mark any phrase whose meaning remains uncertain.",
+        "transparency",
+    ),
+    (
+        "The security assistant may prepare an access change but an authorized administrator must approve its execution.",
+        "oversight",
+    ),
+    (
+        "The scheduling assistant should reveal which constraints caused it to reject a requested meeting time.",
+        "transparency",
+    ),
+    (
+        "The knowledge assistant should distinguish retrieved facts from generated suggestions in its response.",
+        "evidence",
+    ),
+    (
+        "The claims assistant should route suspected fraud to a qualified investigator rather than making a final accusation.",
+        "oversight",
+    ),
+    (
+        "The inventory assistant should confirm warehouse availability before promising a delivery date.",
+        "evidence",
+    ),
+    (
+        "The marketing assistant should use only customer segments whose collection purpose covers the proposed campaign.",
+        "privacy",
+    ),
+    (
+        "The compliance assistant should preserve the exact source wording when quoting a regulatory obligation.",
+        "transparency",
+    ),
+    (
+        "The maintenance assistant should stop automated work when sensor readings conflict with the equipment record.",
+        "safety",
+    ),
+    (
+        "The travel assistant should display cancellation conditions before asking an employee to approve a booking.",
+        "transparency",
+    ),
+    (
+        "The document assistant should remove hidden comments and tracked changes before preparing a file for external sharing.",
+        "privacy",
+    ),
+    (
+        "The benefits assistant should send eligibility exceptions to a designated benefits specialist for a decision.",
+        "oversight",
+    ),
+    (
+        "Each production assistant should have a documented owner who can disable its tools and revoke its credentials.",
+        "accountability",
+    ),
+    (
+        "Changes to an assistant's system instructions should receive the same risk review as changes to its model or tools.",
+        "governance",
+    ),
+    (
+        "A person affected by an automated eligibility recommendation should receive a reason and a meaningful appeal route.",
+        "access",
+    ),
+    (
+        "Evaluation sets for an assistant should cover foreseeable misuse as well as its intended workflow.",
+        "fairness",
+    ),
+    (
+        "Records created by an assistant should follow the retention schedule of the business process they support.",
+        "retention",
+    ),
+    (
+        "The research assistant should attach stable citations for material factual claims and identify inaccessible sources.",
+        "evidence",
+    ),
+    (
+        "The forecasting assistant should show the observation window and uncertainty assumptions behind each projection.",
+        "transparency",
+    ),
+    (
+        "The customer-success assistant should not promise roadmap work unless the commitment appears in an approved source.",
+        "governance",
+    ),
+    (
+        "The payroll assistant should require a second reviewer before changing bank or tax details.",
+        "oversight",
+    ),
+    (
+        "The facilities assistant should place occupant safety ahead of energy optimization when its signals disagree.",
+        "safety",
+    ),
+    (
+        "The quality assistant should retain failed inspection results instead of replacing them with a later passing run.",
+        "accountability",
+    ),
+    (
+        "The learning assistant should label generated examples that have not been reviewed by a subject-matter expert.",
+        "transparency",
+    ),
+    (
+        "The records assistant should log who authorized a legal hold and which deletion rules it suspends.",
+        "retention",
+    ),
+    (
+        "The vendor-risk assistant should separate verified evidence from questionnaire claims that have not been checked.",
+        "evidence",
+    ),
+    (
+        "The localization assistant should request regional review before changing required disclosures or consent language.",
+        "access",
+    ),
 ]
-
-_EVAL_GENERATOR = Path(__file__).with_name("generate_synthetic_eval.py")
-
-
-class EvalGenerator(Protocol):
-    SEED: int
-    STATEMENT_BANK: list[str]
-
-    def make_snapshot(
-        self, rng: random.Random, session_index: int
-    ) -> dict[str, Any]: ...
+TRAIN_STATEMENT_SPECS = [StatementSpec(text, dimension) for text, dimension in _TEXTS]
+TRAIN_STATEMENT_BANK = [spec.text for spec in TRAIN_STATEMENT_SPECS]
+DIMENSIONS = tuple(sorted({spec.dimension for spec in TRAIN_STATEMENT_SPECS}))
 
 
-def _load_eval_generator() -> EvalGenerator:
-    spec = importlib.util.spec_from_file_location(
-        "commonground_generate_synthetic_eval", _EVAL_GENERATOR
+def build_profiles(
+    rng: random.Random,
+    cluster_count: int,
+    statements: list[StatementSpec],
+) -> list[dict[str, float]]:
+    """Sample continuous profiles instead of the held-out archetype family."""
+
+    del statements
+    orientations = rng.sample((-0.85, -0.45, 0.45, 0.85), cluster_count)
+    return [
+        {
+            dimension: max(
+                -1.0,
+                min(1.0, orientation + rng.uniform(-0.65, 0.65)),
+            )
+            for dimension in DIMENSIONS
+        }
+        for orientation in orientations
+    ]
+
+
+def make_snapshot(rng: random.Random, session_index: int) -> dict[str, Any]:
+    return build_snapshot(
+        rng,
+        session_index,
+        seed=TRAIN_SEED,
+        family=GENERATOR_FAMILY,
+        statement_bank=TRAIN_STATEMENT_SPECS,
+        profile_builder=build_profiles,
     )
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"unable to load {_EVAL_GENERATOR}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return cast(EvalGenerator, module)
 
 
 def main() -> None:
-    generator = _load_eval_generator()
-    # make_snapshot reads the module-level SEED for meta.source labeling; the
-    # train split records its own seed there. The separate statement bank is a
-    # methodological boundary: eval policy text never appears in training.
-    generator.SEED = TRAIN_SEED
-    generator.STATEMENT_BANK = TRAIN_STATEMENT_BANK
     rng = random.Random(TRAIN_SEED)
     output_path = (
         Path(__file__).parents[1]
@@ -95,9 +187,8 @@ def main() -> None:
         / "data"
         / "train_synthetic.jsonl"
     )
-    output_path.parent.mkdir(parents=True, exist_ok=True)
     snapshots = [
-        generator.make_snapshot(rng, SESSION_INDEX_OFFSET + index)
+        make_snapshot(rng, SESSION_INDEX_OFFSET + index)
         for index in range(TRAIN_SNAPSHOT_COUNT)
     ]
     output_path.write_text(

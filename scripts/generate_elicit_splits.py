@@ -24,8 +24,8 @@ DEFAULT_OUTPUT_DIR = (
 GENERATED_AT = "2026-08-15"
 TRAIN_SEED_BASE = 8100
 EVAL_SEED_BASE = 8200
-TRAIN_SCENARIOS_PER_TEMPLATE = 10
-EVAL_SCENARIOS_PER_TEMPLATE = 1
+TRAIN_SCENARIOS_PER_TEMPLATE = 25
+EVAL_SCENARIOS_PER_TEMPLATE = 5
 
 
 def build_split_bytes(
@@ -48,7 +48,7 @@ def build_split_bytes(
         raise ValueError("scenarios_per_template must be positive")
     scenarios = [
         generate_scenario(
-            seed=seed_base + template_index * 10 + repetition,
+            seed=seed_base + template_index * scenarios_per_template + repetition,
             domain_template=template,
             generated_at=generated_at,
         )
@@ -96,6 +96,119 @@ def scenario_semantic_key(scenario: dict[str, Any]) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+def prompt_fingerprint(scenario: dict[str, Any]) -> str:
+    """Hash only model-visible documents and faction descriptions."""
+
+    payload = {
+        "documents": sorted(scenario["documents"], key=lambda item: item["doc_id"]),
+        "factions": [
+            {
+                "faction_id": faction["faction_id"],
+                "name": faction["name"],
+                "summary": faction["summary"],
+            }
+            for faction in scenario["factions"]
+        ],
+    }
+    return _payload_hash(payload)
+
+
+def answer_fingerprint(scenario: dict[str, Any]) -> str:
+    """Hash the hidden answer contract independently of the prompt hash."""
+
+    return _payload_hash(scenario["planted_items"])
+
+
+def structural_signature(scenario: dict[str, Any]) -> str:
+    """Describe task structure without domain wording or random opaque IDs."""
+
+    documents = {document["doc_id"]: document for document in scenario["documents"]}
+    issue_layout = []
+    for plant in scenario["planted_items"]:
+        sentences = [
+            sentence.strip()
+            for sentence in documents[plant["doc_id"]]["text"].split(".")
+            if sentence.strip()
+        ]
+        anchor_prefix = plant["anchor_quote"].removesuffix(".")
+        anchor_position = next(
+            (
+                index
+                for index, sentence in enumerate(sentences)
+                if sentence.startswith(anchor_prefix)
+            ),
+            -1,
+        )
+        issue_layout.append(
+            {
+                "type": plant["type"],
+                "anchor_position": anchor_position,
+                "document_sentence_count": len(sentences),
+                "stance_multiset": sorted(plant["target_stances"].values()),
+                "has_related_evidence": plant["related_evidence"] is not None,
+            }
+        )
+    return _payload_hash(
+        {
+            "generator_family": scenario["provenance"]["generator_family"],
+            "document_count": len(scenario["documents"]),
+            "faction_count": len(scenario["factions"]),
+            "issue_layout": sorted(
+                issue_layout, key=lambda item: json.dumps(item, sort_keys=True)
+            ),
+        }
+    )
+
+
+def assert_split_integrity(
+    train_scenarios: Sequence[dict[str, Any]],
+    eval_scenarios: Sequence[dict[str, Any]],
+) -> None:
+    """Block exact prompt/answer overlap and shared generator families."""
+
+    for label, scenarios in (("train", train_scenarios), ("eval", eval_scenarios)):
+        for fingerprint_name, fingerprint in (
+            ("prompt", prompt_fingerprint),
+            ("answer", answer_fingerprint),
+        ):
+            values = [fingerprint(scenario) for scenario in scenarios]
+            if len(values) != len(set(values)):
+                raise ValueError(f"duplicate {fingerprint_name} fingerprint in {label}")
+    train_prompt_keys = {prompt_fingerprint(scenario) for scenario in train_scenarios}
+    eval_prompt_keys = {prompt_fingerprint(scenario) for scenario in eval_scenarios}
+    if train_prompt_keys & eval_prompt_keys:
+        raise ValueError("train/eval prompt fingerprint overlap")
+    train_answer_keys = {answer_fingerprint(scenario) for scenario in train_scenarios}
+    eval_answer_keys = {answer_fingerprint(scenario) for scenario in eval_scenarios}
+    if train_answer_keys & eval_answer_keys:
+        raise ValueError("train/eval answer fingerprint overlap")
+    train_families = {
+        scenario["provenance"]["generator_family"] for scenario in train_scenarios
+    }
+    eval_families = {
+        scenario["provenance"]["generator_family"] for scenario in eval_scenarios
+    }
+    if train_families & eval_families:
+        raise ValueError("train/eval generator families must be disjoint")
+    legacy_ids = {"scope-note", "authority-bulletin", "exception-card"}
+    if any(
+        legacy_ids & {document["doc_id"] for document in scenario["documents"]}
+        for scenario in eval_scenarios
+    ):
+        raise ValueError("legacy prompt-visible document codebook detected")
+
+
+def _payload_hash(payload: Any) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")
+    ).hexdigest()
+
+
 def assert_unique_semantic_tasks(scenarios: Sequence[dict[str, Any]]) -> None:
     """Reject rows that differ only in seed, order, or organization name."""
 
@@ -119,22 +232,23 @@ def write_splits(
     output_dir.mkdir(parents=True, exist_ok=True)
     train_path = output_dir / "train_synthetic.jsonl"
     eval_path = output_dir / "eval_synthetic_heldout.jsonl"
-    train_path.write_bytes(
-        build_split_bytes(
-            TRAIN_TEMPLATES,
-            seed_base=TRAIN_SEED_BASE,
-            generated_at=generated_at,
-            scenarios_per_template=TRAIN_SCENARIOS_PER_TEMPLATE,
-        )
+    train_bytes = build_split_bytes(
+        TRAIN_TEMPLATES,
+        seed_base=TRAIN_SEED_BASE,
+        generated_at=generated_at,
+        scenarios_per_template=TRAIN_SCENARIOS_PER_TEMPLATE,
     )
-    eval_path.write_bytes(
-        build_split_bytes(
-            HELDOUT_TEMPLATES,
-            seed_base=EVAL_SEED_BASE,
-            generated_at=generated_at,
-            scenarios_per_template=EVAL_SCENARIOS_PER_TEMPLATE,
-        )
+    eval_bytes = build_split_bytes(
+        HELDOUT_TEMPLATES,
+        seed_base=EVAL_SEED_BASE,
+        generated_at=generated_at,
+        scenarios_per_template=EVAL_SCENARIOS_PER_TEMPLATE,
     )
+    train_scenarios = [json.loads(line) for line in train_bytes.splitlines()]
+    eval_scenarios = [json.loads(line) for line in eval_bytes.splitlines()]
+    assert_split_integrity(train_scenarios, eval_scenarios)
+    train_path.write_bytes(train_bytes)
+    eval_path.write_bytes(eval_bytes)
     return train_path, eval_path
 
 

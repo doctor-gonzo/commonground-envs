@@ -669,6 +669,21 @@ def _additional_heldout_template(
         "contradiction": f"{template_id}-authority",
         "gap": f"{template_id}-exception",
     }
+    # Vary each role's issue-specific stance across held-out domains.  This
+    # prevents faction name from serving as a universal answer codebook while
+    # preserving a mix of agree, disagree, and pass targets.
+    base_stances = {
+        "ambiguity": (0.9, -0.9, 0.0),
+        "contradiction": (-0.9, 0.9, 0.7),
+        "gap": (0.7, 0.0, -0.9),
+    }
+    role_priors: list[dict[str, float]] = [{}, {}, {}]
+    for kind_index, kind in enumerate(("ambiguity", "contradiction", "gap")):
+        values = base_stances[kind]
+        rotation = (pattern_code + kind_index) % len(values)
+        rotated = values[rotation:] + values[:rotation]
+        for role_index, value in enumerate(rotated):
+            role_priors[role_index][dimensions[kind]] = value
     fillers = (
         "The document owner records each revision.",
         "Approved copies carry a control code.",
@@ -740,19 +755,19 @@ def _additional_heldout_template(
                 "faction_id": "operators",
                 "name": "Front-line operators",
                 "summary": "Want practical discretion and continuity of service.",
-                "priors": {dimension: 0.9 for dimension in dimensions.values()},
+                "priors": role_priors[0],
             },
             {
                 "faction_id": "assurance",
                 "name": "Assurance reviewers",
                 "summary": "Want conservative thresholds and explicit authority.",
-                "priors": {dimension: -0.9 for dimension in dimensions.values()},
+                "priors": role_priors[1],
             },
             {
                 "faction_id": "community",
                 "name": "Affected community",
                 "summary": "Wants accessible exceptions and timely resolution.",
-                "priors": {dimension: 0.7 for dimension in dimensions.values()},
+                "priors": role_priors[2],
             },
         ),
         documents=tuple(documents),

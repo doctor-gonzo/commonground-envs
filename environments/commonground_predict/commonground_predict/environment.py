@@ -728,8 +728,10 @@ def render_prompt(snapshot: Mapping[str, Any]) -> str:
             "",
             "Masked cells: " + ", ".join(masked_cells),
             "",
+            "Return a probability distribution for every masked cell.",
+            "Each distribution must contain exactly agree, disagree, and pass, use finite non-negative numbers, and have a positive total.",
             "Return STRICT JSON only, with this shape:",
-            '{"predictions":{"<participant_idx>,<statement_idx>":1|-1|0}}',
+            '{"predictions":{"<participant_idx>,<statement_idx>":{"agree":0.0,"disagree":0.0,"pass":0.0}}}',
         ]
     )
     return "\n".join(lines)
@@ -752,7 +754,7 @@ async def brier(
     answer: Mapping[str, int] | str,
     parser: PredictionJsonParser,
 ) -> float:
-    """Metric: delegated Brier score; invalid probability mappings score uniform."""
+    """Metric: normalized 0-1 Brier; invalid forecasts score as uniform."""
 
     parsed = parse_completion_predictions(completion, parser)
     brier_predictions = coerce_brier_predictions(parsed)
@@ -790,7 +792,7 @@ def parse_held_out(held_out: Mapping[str, int] | str) -> dict[str, int]:
 def coerce_point_predictions(predictions: Mapping[str, Any]) -> dict[str, int]:
     coerced = {}
     for cell_id, prediction in predictions.items():
-        vote = coerce_vote(prediction)
+        vote = coerce_probability_vote(prediction)
         if vote is not None:
             coerced["".join(str(cell_id).split())] = vote
     return coerced
@@ -802,13 +804,37 @@ def coerce_brier_predictions(
     coerced: dict[str, int | dict[Any, Any]] = {}
     for cell_id, prediction in predictions.items():
         normalized_cell_id = "".join(str(cell_id).split())
-        if isinstance(prediction, Mapping):
+        if valid_probability_mapping(prediction):
             coerced[normalized_cell_id] = dict(prediction)
-            continue
-        vote = coerce_vote(prediction)
-        if vote is not None:
-            coerced[normalized_cell_id] = vote
     return coerced
+
+
+def coerce_probability_vote(prediction: Any) -> int | None:
+    """Return an argmax vote only for a complete valid probability mapping."""
+
+    if not valid_probability_mapping(prediction):
+        return None
+    vote_scores = coerce_vote_scores(prediction)
+    return max(vote_scores.items(), key=lambda item: item[1])[0]
+
+
+def valid_probability_mapping(prediction: Any) -> bool:
+    """Enforce the public probability-forecast response contract."""
+
+    if not isinstance(prediction, Mapping) or set(prediction) != set(LABEL_TO_VOTE):
+        return False
+    values: list[float] = []
+    for value in prediction.values():
+        if isinstance(value, bool):
+            return False
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            return False
+        if not isfinite(numeric) or numeric < 0:
+            return False
+        values.append(numeric)
+    return sum(values) > 0
 
 
 def coerce_vote(prediction: Any) -> int | None:

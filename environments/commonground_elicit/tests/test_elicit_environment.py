@@ -44,6 +44,13 @@ from verifiers.v1.utils.loaders import (
 
 CANONICAL_TASK_COLUMNS = ("prompt", "answer", "info", "example_id")
 QUESTION_RESPONSE_FIELDS = ("doc_id", "quote", "question", "target_stances")
+FINDING_RESPONSE_FIELDS = (
+    "doc_id",
+    "quote",
+    "type",
+    "diagnosis",
+    "related_evidence",
+)
 
 
 @pytest.mark.parametrize("task", ["find", "elicit-ask"])
@@ -55,8 +62,8 @@ def test_legacy_hosted_eval_loader_returns_full_environment(task: str) -> None:
     assert env.env_id == "commonground-elicit"
     assert env.env_args["task"] == task
     assert env.env_args["split"] == "eval"
-    assert len(env.get_dataset()) == 40
-    assert len(env.get_eval_dataset()) == 20
+    assert len(env.get_dataset()) == 100
+    assert len(env.get_eval_dataset()) == 100
     assert all(
         callable(getattr(env, method))
         for method in ("set_kwargs", "start_server", "evaluate", "stop_server")
@@ -80,8 +87,8 @@ def test_load_environment_builds_default_heldout_rows() -> None:
     assert isinstance(env, ElicitTaskset)
     assert isinstance(env, vf1.Taskset)
     assert env.env_id == "commonground-elicit"
-    assert len(env.get_dataset()) == 40
-    assert len(env.get_eval_dataset()) == 20
+    assert len(env.get_dataset()) == 100
+    assert len(env.get_eval_dataset()) == 100
     assert {json.loads(row["info"])["template_set"] for row in env.get_dataset()} == {
         "train"
     }
@@ -118,8 +125,8 @@ def test_native_v1_taskset_scores_a_trace_without_the_legacy_bridge() -> None:
 @pytest.mark.parametrize(
     ("split", "expected_path", "expected_rows", "expected_template_set"),
     [
-        ("eval", BUNDLED_EVAL_PATH, 20, "heldout"),
-        ("train", BUNDLED_TRAIN_PATH, 40, "train"),
+        ("eval", BUNDLED_EVAL_PATH, 100, "heldout"),
+        ("train", BUNDLED_TRAIN_PATH, 100, "train"),
     ],
 )
 def test_named_bundled_splits_resolve_to_packaged_rows(
@@ -214,7 +221,7 @@ def test_all_built_rows_use_only_canonical_server_columns(task: str) -> None:
             assert "task" not in info
             assert info["task_label"] == task
             assert info["panel_polarization"] == 1.0
-            assert info["question_count"] == 3
+            assert info["question_count"] == 2
             assert info["allow_combined_questions"] is (task == "find")
 
 
@@ -315,7 +322,7 @@ def test_invalid_or_wrong_k_companion_questions_do_not_zero_t1(
     answer = json.loads(row["answer"])
     response = {
         "findings": [
-            {field: finding[field] for field in ("doc_id", "quote", "type")}
+            {field: finding[field] for field in FINDING_RESPONSE_FIELDS}
             for finding in answer["findings"]
         ],
         "questions": questions,
@@ -336,10 +343,10 @@ def test_ask_task_builds_same_env_id_with_task_specific_prompt() -> None:
 
     assert env.env_id == "commonground-elicit"
     assert env.env_args["task"] == "elicit-ask"
-    assert "Raise exactly 3 clarifying questions" in prompt
+    assert "Select and raise exactly 2 clarifying questions" in prompt
     assert "agree means yes" in prompt
     assert "copy the exact supporting passage" in prompt.casefold()
-    assert "reuse at least one informative word" in prompt.casefold()
+    assert "sharing one noun is insufficient" in prompt.casefold()
     assert "Stakeholder factions:" in prompt
     for plant in planted:
         assert plant["question"] not in prompt
@@ -377,7 +384,9 @@ def test_question_count_knob_changes_prompt_info_and_response_size() -> None:
     info = json.loads(row["info"])
     response = correct_response_from_row(row)
 
-    assert "Raise exactly 1 clarifying questions" in row["prompt"][0]["content"]
+    assert (
+        "Select and raise exactly 1 clarifying questions" in row["prompt"][0]["content"]
+    )
     assert info["question_count"] == 1
     assert len(response["questions"]) == 1
     assert score_row(env, row, response)["reward"] > 0
@@ -388,19 +397,22 @@ def test_ask_task_rejects_k_larger_than_available_plants() -> None:
         load_environment(task="elicit-ask", question_count=4)
 
 
-def test_panel_polarization_scales_question_reward() -> None:
+def test_panel_polarization_changes_selection_weights_without_changing_exact_maximum() -> (
+    None
+):
     full_env = load_environment(task="elicit-ask", question_count=1)
     half_env = load_environment(
         task="elicit-ask", question_count=1, panel_polarization=0.5
     )
     full_row = dict(full_env.get_eval_dataset()[0])
     half_row = dict(half_env.get_eval_dataset()[0])
-    answer = correct_response_from_row(full_row)
+    full_answer = correct_response_from_row(full_row)
+    half_answer = correct_response_from_row(half_row)
 
-    full_score = score_row(full_env, full_row, answer)["reward"]
-    half_score = score_row(half_env, half_row, answer)["reward"]
+    full_score = score_row(full_env, full_row, full_answer)["reward"]
+    half_score = score_row(half_env, half_row, half_answer)["reward"]
 
-    assert half_score == pytest.approx(full_score / 2)
+    assert half_score == pytest.approx(full_score) == 1.0
 
 
 def test_planted_specific_question_strictly_beats_generic_divisiveness() -> None:
@@ -419,7 +431,11 @@ def test_planted_specific_question_strictly_beats_generic_divisiveness() -> None
     }
     targeted_paraphrase = {
         **targeted,
-        "question": plant["question_aliases"][0],
+        "question": (
+            plant["question_aliases"][0]
+            if plant["question_aliases"]
+            else plant["question"]
+        ),
     }
 
     targeted_score = question_utility_score(
@@ -557,16 +573,10 @@ def test_question_must_be_yes_no_and_reference_grounding(
     )
 
 
-@pytest.mark.parametrize(
-    "question",
-    [
-        "Should dispatchers choose the observable conditions under which a route must pause?",
-        "Should route conditions determine when operations pause?",
-    ],
-)
-def test_unlisted_grounded_paraphrases_receive_credit(question: str) -> None:
+def test_multi_term_unlisted_grounded_paraphrase_receives_credit() -> None:
     env = load_environment(task="elicit-ask", question_count=1)
     plant = planted_questions_from_row(dict(env.get_eval_dataset()[0]))[0]
+    question = f"Should {' '.join(plant['decision_terms'])} be resolved?"
     assert question not in {plant["question"], *plant["question_aliases"]}
 
     score = question_utility_score(
@@ -579,12 +589,12 @@ def test_unlisted_grounded_paraphrases_receive_credit(question: str) -> None:
     assert score > 0.0
 
 
-def test_hidden_canonical_wording_does_not_affect_generated_question_score() -> None:
+def test_hidden_decision_wording_contributes_to_question_score() -> None:
     env = load_environment(task="elicit-ask", question_count=1)
     plant = planted_questions_from_row(dict(env.get_eval_dataset()[0]))[0]
     candidate = candidate_for_plant(
         plant,
-        question="Should route conditions determine when operations pause?",
+        question=plant["question"],
     )
     rewritten_oracle = {
         **plant,
@@ -599,8 +609,8 @@ def test_hidden_canonical_wording_does_not_affect_generated_question_score() -> 
         [candidate], [rewritten_oracle], panel_polarization=1.0, question_count=1
     )
 
-    assert rewritten == pytest.approx(original)
-    assert rewritten > 0.0
+    assert original == 1.0
+    assert 0.0 < rewritten < original
 
 
 def test_baseline_style_paraphrase_regression_is_scorable() -> None:
@@ -777,21 +787,13 @@ def test_duplicate_grounding_is_penalized_by_one_to_one_assignment() -> None:
         question_count=2,
     )
 
-    assert duplicate_score == pytest.approx(single_score / 2)
+    assert 0.0 < duplicate_score < single_score
 
 
 def test_distinct_grounded_questions_use_global_one_to_one_assignment() -> None:
     env = load_environment(task="elicit-ask", question_count=2)
     plants = planted_questions_from_row(dict(env.get_eval_dataset()[0]))
-    candidates = [
-        candidate_for_plant(
-            plant,
-            question=(
-                f"Should {' '.join(plant['quote'].rstrip('.').split()[:3])} apply?"
-            ),
-        )
-        for plant in plants[:2]
-    ]
+    candidates = [candidate_for_plant(plant) for plant in plants[:2]]
 
     score = question_utility_score(
         candidates,
@@ -803,14 +805,12 @@ def test_distinct_grounded_questions_use_global_one_to_one_assignment() -> None:
     assert score > 0.0
 
 
-def test_question_needs_an_informative_quote_token() -> None:
+def test_question_needs_multiple_latent_decision_terms() -> None:
     env = load_environment(task="elicit-ask", question_count=1)
     plant = planted_questions_from_row(dict(env.get_eval_dataset()[0]))[0]
     no_token = candidate_for_plant(plant, question="Should this policy apply?")
-    grounded = candidate_for_plant(
-        plant,
-        question="Should this route apply?",
-    )
+    one_noun = candidate_for_plant(plant, question="Should this route apply?")
+    grounded = candidate_for_plant(plant)
 
     assert (
         question_utility_score(
@@ -820,9 +820,15 @@ def test_question_needs_an_informative_quote_token() -> None:
     )
     assert (
         question_utility_score(
+            [one_noun], [plant], panel_polarization=1.0, question_count=1
+        )
+        == 0.0
+    )
+    assert (
+        question_utility_score(
             [grounded], [plant], panel_polarization=1.0, question_count=1
         )
-        > 0.0
+        == 1.0
     )
 
 
@@ -950,12 +956,111 @@ def test_false_positive_strictly_reduces_precision_and_f1() -> None:
     row = dict(env.get_eval_dataset()[0])
     answer = correct_response_from_row(row)
     answer["findings"].append(
-        {"doc_id": "not-a-document", "quote": "This is a rule.", "type": "ambiguity"}
+        {
+            "doc_id": "not-a-document",
+            "quote": "This is a rule.",
+            "type": "ambiguity",
+            "diagnosis": "Should this rule apply?",
+            "related_evidence": None,
+        }
     )
 
     score = score_row(env, row, answer)["reward"]
 
     assert 0 < score < 1
+
+
+def test_type_hedging_same_span_under_three_types_is_rejected() -> None:
+    env = load_environment()
+    row = dict(env.get_eval_dataset()[0])
+    planted = json.loads(row["answer"])["findings"][0]
+    findings = [
+        {
+            "doc_id": planted["doc_id"],
+            "quote": planted["quote"],
+            "type": finding_type,
+            "diagnosis": planted["diagnosis"],
+            "related_evidence": (
+                planted["related_evidence"] if finding_type == "contradiction" else None
+            ),
+        }
+        for finding_type in ("ambiguity", "contradiction", "gap")
+    ]
+
+    assert score_row(env, row, {"findings": findings})["reward"] == 0.0
+
+
+def test_contradiction_requires_second_conflicting_rule() -> None:
+    env = load_environment()
+    row = dict(env.get_eval_dataset()[0])
+    response = correct_response_from_row(row)
+    contradiction = next(
+        finding
+        for finding in response["findings"]
+        if finding["type"] == "contradiction"
+    )
+    contradiction["related_evidence"] = None
+
+    state = score_row(env, row, response)
+
+    assert 0.0 < state["reward"] < 1.0
+    assert state["metrics"]["finding_localization_recall"] == 1.0
+    assert state["metrics"]["finding_type_accuracy"] == 1.0
+
+
+def test_contradiction_rejects_broad_second_document_evidence() -> None:
+    env = load_environment()
+    row = dict(env.get_eval_dataset()[0])
+    hidden = json.loads(row["answer"])
+    hidden_contradiction = next(
+        finding for finding in hidden["findings"] if finding["type"] == "contradiction"
+    )
+    response = correct_response_from_row(row)
+    contradiction = next(
+        finding
+        for finding in response["findings"]
+        if finding["type"] == "contradiction"
+    )
+    contradiction["related_evidence"]["quote"] = hidden_contradiction[
+        "related_document_text"
+    ]
+
+    state = score_row(env, row, response)
+
+    assert 0.0 < state["reward"] < 1.0
+    assert state["metrics"]["finding_localization_recall"] == 1.0
+    assert state["metrics"]["finding_type_accuracy"] == 1.0
+
+
+def test_gap_requires_semantic_missing_condition_diagnosis() -> None:
+    env = load_environment()
+    row = dict(env.get_eval_dataset()[0])
+    response = correct_response_from_row(row)
+    gap = next(finding for finding in response["findings"] if finding["type"] == "gap")
+    gap["diagnosis"] = "Should this policy apply?"
+
+    state = score_row(env, row, response)
+
+    assert 0.0 < state["reward"] < 1.0
+    assert state["metrics"]["finding_localization_recall"] == 1.0
+    assert state["metrics"]["finding_type_accuracy"] == 1.0
+
+
+def test_ask_rewards_top_k_selection_over_lower_value_issue() -> None:
+    env = load_environment(task="elicit-ask", question_count=2)
+    plants = planted_questions_from_row(dict(env.get_eval_dataset()[0]))
+    top_k = [candidate_for_plant(plant) for plant in plants[:2]]
+    lower_value = [candidate_for_plant(plants[0]), candidate_for_plant(plants[2])]
+
+    top_score = question_utility_score(
+        top_k, plants, panel_polarization=1.0, question_count=2
+    )
+    lower_score = question_utility_score(
+        lower_value, plants, panel_polarization=1.0, question_count=2
+    )
+
+    assert top_score == 1.0
+    assert 0.0 < lower_score < top_score
 
 
 def test_paraphrased_quote_cannot_claim_verbatim_document_evidence() -> None:
@@ -1132,7 +1237,7 @@ def test_matching_finds_global_maximum_instead_of_greedy_local_choice() -> None:
         },
         {
             "doc_id": "policy",
-            "quote": "alpha beta gamma delta",
+            "quote": "alpha beta gamma delta epsilon",
             "type": "ambiguity",
         },
     ]
@@ -1150,7 +1255,7 @@ def test_matching_finds_global_maximum_instead_of_greedy_local_choice() -> None:
         ("alpha beta", "alpha", 0),
         ("alpha beta gamma delta", "beta gamma", 0),
         ("alpha beta gamma delta", "alpha beta gamma", 0),
-        ("alpha beta gamma delta epsilon", "beta gamma delta epsilon", 1),
+        ("alpha beta gamma delta epsilon", "beta gamma delta epsilon", 0),
         (
             "alpha beta gamma delta epsilon zeta eta theta iota kappa",
             "gamma delta",
@@ -1159,12 +1264,12 @@ def test_matching_finds_global_maximum_instead_of_greedy_local_choice() -> None:
         (
             "alpha beta gamma delta epsilon zeta eta theta iota kappa",
             "alpha beta gamma delta epsilon zeta eta theta",
-            1,
+            0,
         ),
         (
             "alpha beta gamma delta",
             "before alpha beta gamma delta after",
-            1,
+            0,
         ),
     ],
 )
@@ -1223,6 +1328,8 @@ def test_tiny_fragment_cannot_turn_partial_output_credit_into_a_second_match() -
         "false_positive": 1,
         "false_negative": 1,
         "f1": 0.5,
+        "localization_recall": 0.5,
+        "type_accuracy": 1.0,
     }
 
 
@@ -1413,7 +1520,7 @@ def test_docs_count_removes_contradiction_without_all_supporting_documents() -> 
         plant for plant in scenario["planted_items"] if plant["type"] == "contradiction"
     )
 
-    assert {plant["type"] for plant in visible_plants} == {"gap"}
+    assert all(plant["type"] != "contradiction" for plant in visible_plants)
     assert contradiction["anchor_quote"] not in prompt_text
 
 
@@ -1476,7 +1583,7 @@ def test_loader_rejects_difficulty_view_with_no_planted_items() -> None:
 def test_loader_filters_individual_plant_free_rows() -> None:
     env = load_environment(docs_count=1)
 
-    assert 0 < len(env.get_eval_dataset()) <= 20
+    assert 0 < len(env.get_eval_dataset()) <= 100
     assert all(json.loads(row["answer"])["findings"] for row in env.get_eval_dataset())
 
 
@@ -1566,7 +1673,7 @@ def correct_response_from_row(row: dict[str, Any]) -> dict[str, Any]:
     response: dict[str, Any] = {"questions": questions}
     if info["allow_combined_questions"]:
         response["findings"] = [
-            {field: finding[field] for field in ("doc_id", "quote", "type")}
+            {field: finding[field] for field in FINDING_RESPONSE_FIELDS}
             for finding in answer["findings"]
         ]
     return response

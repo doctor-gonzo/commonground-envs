@@ -70,12 +70,12 @@ def _data_files(source_dir: Path, package_name: str) -> frozenset[str]:
 TARGETS = (
     WheelTarget(
         name="commonground-predict",
-        version="0.2.5",
+        version="0.3.0",
         source_dir=ROOT / "environments" / "commonground_predict",
         requirements=frozenset(
             {
-                "commonground-scenarios==0.1.1",
-                "commonground-score==0.1.1",
+                "commonground-scenarios==0.2.0",
+                "commonground-score==0.2.0",
                 "datasets<6.0.0,>=5.0.1",
                 "verifiers==0.3.0",
             }
@@ -89,12 +89,12 @@ TARGETS = (
     ),
     WheelTarget(
         name="commonground-elicit",
-        version="0.2.5",
+        version="0.3.0",
         source_dir=ROOT / "environments" / "commonground_elicit",
         requirements=frozenset(
             {
-                "commonground-scenarios==0.1.1",
-                "commonground-score==0.1.1",
+                "commonground-scenarios==0.2.0",
+                "commonground-score==0.2.0",
                 "datasets<6.0.0,>=5.0.1",
                 "verifiers==0.3.0",
             }
@@ -111,14 +111,14 @@ TARGETS = (
     ),
     WheelTarget(
         name="commonground-scenarios",
-        version="0.1.1",
+        version="0.2.0",
         source_dir=ROOT / "packages" / "commonground-scenarios",
         requirements=frozenset(),
         bundled_files=frozenset({"commonground_scenarios/schema/scenario.schema.json"}),
     ),
     WheelTarget(
         name="commonground-score",
-        version="0.1.1",
+        version="0.2.0",
         source_dir=ROOT / "packages" / "commonground-score",
         requirements=frozenset(),
         bundled_files=frozenset(),
@@ -374,14 +374,14 @@ import commonground_predict
 import commonground_scenarios
 import commonground_score
 
-assert version("commonground-predict") == "0.2.5"
-assert version("commonground-elicit") == "0.2.5"
-assert version("commonground-scenarios") == "0.1.1"
-assert version("commonground-score") == "0.1.1"
+assert version("commonground-predict") == "0.3.0"
+assert version("commonground-elicit") == "0.3.0"
+assert version("commonground-scenarios") == "0.2.0"
+assert version("commonground-score") == "0.2.0"
 
-assert len(commonground_predict.load_taskset().load()) == 20
-assert len(commonground_elicit.load_taskset().load()) == 20
-assert len(commonground_elicit.load_taskset(task="elicit-ask").load()) == 20
+assert len(commonground_predict.load_taskset().load()) == 100
+assert len(commonground_elicit.load_taskset().load()) == 100
+assert len(commonground_elicit.load_taskset(task="elicit-ask").load()) == 100
 
 import verifiers as legacy_vf
 from verifiers.types import State
@@ -398,9 +398,9 @@ elicit_ask_legacy = legacy_vf.load_environment(
 assert isinstance(predict_legacy, legacy_vf.SingleTurnEnv)
 assert isinstance(elicit_find_legacy, legacy_vf.SingleTurnEnv)
 assert isinstance(elicit_ask_legacy, legacy_vf.SingleTurnEnv)
-assert len(predict_legacy.get_eval_dataset()) == 20
-assert len(elicit_find_legacy.get_eval_dataset()) == 20
-assert len(elicit_ask_legacy.get_eval_dataset()) == 20
+assert len(predict_legacy.get_eval_dataset()) == 100
+assert len(elicit_find_legacy.get_eval_dataset()) == 100
+assert len(elicit_ask_legacy.get_eval_dataset()) == 100
 
 assert taskset_class("commonground-predict") is commonground_predict.CommonGroundPredictTaskset
 assert taskset_class("commonground-elicit") is commonground_elicit.ElicitTaskset
@@ -423,8 +423,17 @@ def score(env, row, response):
     return state["reward"]
 
 predict_row = dict(predict_legacy.get_eval_dataset()[0])
+predict_answer = json.loads(predict_row["answer"])
+predict_probabilities = {
+    cell: {
+        "agree": 1.0 if label == 1 else 0.0,
+        "disagree": 1.0 if label == -1 else 0.0,
+        "pass": 1.0 if label == 0 else 0.0,
+    }
+    for cell, label in predict_answer.items()
+}
 assert score(predict_legacy, predict_row, {
-    "predictions": json.loads(predict_row["answer"])
+    "predictions": predict_probabilities
 }) == 1.0
 
 def elicit_response(row):
@@ -442,7 +451,13 @@ def elicit_response(row):
         response["findings"] = [
             {
                 key: finding[key]
-                for key in ("doc_id", "quote", "type")
+                for key in (
+                    "doc_id",
+                    "quote",
+                    "type",
+                    "diagnosis",
+                    "related_evidence",
+                )
             }
             for finding in answer["findings"]
         ]

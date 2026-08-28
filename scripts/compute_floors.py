@@ -7,6 +7,7 @@ import importlib.util
 import json
 import random
 import re
+import sys
 from collections import Counter
 from collections.abc import Sequence
 from pathlib import Path
@@ -26,7 +27,9 @@ SYNTHETIC_GENERATOR_PATH = (
     / "scripts"
     / "generate_synthetic_eval.py"
 )
-_GENERATOR_SOURCE = re.compile(r"seeded_synthetic_generator:(\d+)")
+_GENERATOR_SOURCE = re.compile(
+    r"seeded-semantic-generator:heldout-archetype-threshold-v2:(\d+)"
+)
 _SYNTHETIC_SESSION_ID = re.compile(r"synthetic-session-(\d+)")
 
 
@@ -43,6 +46,8 @@ def compute_floors(
     visible_majority_correct = 0
     best_constant_correct = 0
     cluster_pattern_correct = 0
+    nearest_participant_correct = 0
+    five_neighbor_correct = 0
     target_count = 0
 
     snapshots: list[dict[str, Any]] = []
@@ -80,6 +85,21 @@ def compute_floors(
             visible_majority = max(VALID_VOTES, key=lambda vote: (counts[vote], vote))
             always_agree_correct += int(actual_vote == 1)
             visible_majority_correct += int(actual_vote == visible_majority)
+            nearest_participant_correct += int(
+                actual_vote
+                == nearest_participant_vote(
+                    prepared["votes"], participant_index, statement_index
+                )
+            )
+            five_neighbor_correct += int(
+                actual_vote
+                == nearest_participant_vote(
+                    prepared["votes"],
+                    participant_index,
+                    statement_index,
+                    neighbor_count=5,
+                )
+            )
             if cluster_patterns is not None:
                 snapshot_patterns = cluster_patterns[str(snapshot["session_id"])]
                 participant_cluster = int(prepared["clusters"][participant_index])
@@ -91,11 +111,56 @@ def compute_floors(
     floors = {
         "always-agree": always_agree_correct / target_count,
         "visible-majority": visible_majority_correct / target_count,
+        "nearest-participant": nearest_participant_correct / target_count,
+        "five-neighbor": five_neighbor_correct / target_count,
         "best-constant-oracle": best_constant_correct / target_count,
     }
     if cluster_patterns is not None:
         floors["cluster-pattern-oracle"] = cluster_pattern_correct / target_count
     return floors
+
+
+def nearest_participant_vote(
+    votes: Sequence[Sequence[int | None]],
+    participant_index: int,
+    statement_index: int,
+    *,
+    neighbor_count: int = 1,
+) -> int:
+    """Copy/aggregate the most similar prompt-visible participant rows."""
+
+    target_row = votes[participant_index]
+    ranked: list[tuple[float, int, int, int]] = []
+    for other_index, other_row in enumerate(votes):
+        if other_index == participant_index:
+            continue
+        target_vote = other_row[statement_index]
+        if target_vote not in VALID_VOTES:
+            continue
+        jointly_visible = [
+            index
+            for index, (left, right) in enumerate(
+                zip(target_row, other_row, strict=True)
+            )
+            if index != statement_index and left in VALID_VOTES and right in VALID_VOTES
+        ]
+        if not jointly_visible:
+            continue
+        matches = sum(
+            target_row[index] == other_row[index] for index in jointly_visible
+        )
+        ranked.append(
+            (matches / len(jointly_visible), matches, -other_index, int(target_vote))
+        )
+    if not ranked:
+        column = [
+            row[statement_index] for row in votes if row[statement_index] in VALID_VOTES
+        ]
+        counts = Counter(column)
+        return max(VALID_VOTES, key=lambda vote: (counts[vote], vote))
+    selected = sorted(ranked, reverse=True)[:neighbor_count]
+    counts = Counter(item[3] for item in selected)
+    return max(VALID_VOTES, key=lambda vote: (counts[vote], vote))
 
 
 def replay_cluster_patterns(
@@ -130,6 +195,9 @@ def replay_cluster_patterns(
 
 
 def load_synthetic_generator() -> SyntheticGenerator:
+    script_dir = str(SYNTHETIC_GENERATOR_PATH.parent)
+    if script_dir not in sys.path:
+        sys.path.insert(0, script_dir)
     spec = importlib.util.spec_from_file_location(
         "commonground_predict_synthetic_generator", SYNTHETIC_GENERATOR_PATH
     )
@@ -142,13 +210,27 @@ def load_synthetic_generator() -> SyntheticGenerator:
 
 def render_markdown(floors: dict[str, float]) -> str:
     labels = {
-        "always-agree": "Always agree",
-        "visible-majority": "Per-statement visible majority",
-        "best-constant-oracle": "Per-snapshot best constant oracle",
-        "cluster-pattern-oracle": "Planted cluster-pattern oracle (ceiling)",
+        "always-agree": ("Prompt-observable", "Always agree"),
+        "visible-majority": ("Prompt-observable", "Per-statement visible majority"),
+        "nearest-participant": ("Prompt-observable", "Nearest participant (1-NN)"),
+        "five-neighbor": ("Prompt-observable", "Five-neighbor vote"),
+        "best-constant-oracle": (
+            "Held-out-label diagnostic",
+            "Per-snapshot best constant",
+        ),
+        "cluster-pattern-oracle": (
+            "Generator diagnostic",
+            "Latent cluster-pattern replay",
+        ),
     }
-    lines = ["| Baseline | vote_accuracy |", "| --- | ---: |"]
-    lines.extend(f"| {labels[name]} | {score:.3f} |" for name, score in floors.items())
+    lines = [
+        "| Comparator class | Comparator | vote_accuracy |",
+        "| --- | --- | ---: |",
+    ]
+    lines.extend(
+        f"| {labels[name][0]} | {labels[name][1]} | {score:.3f} |"
+        for name, score in floors.items()
+    )
     return "\n".join(lines)
 
 

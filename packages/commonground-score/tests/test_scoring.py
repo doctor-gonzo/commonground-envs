@@ -73,10 +73,10 @@ def test_vote_accuracy_counts_missing_predictions_wrong() -> None:
 
 def test_brier_score_accepts_point_and_probabilistic_predictions() -> None:
     assert brier_score({"0,1": 1}, {"0,1": 1}) == 0.0
-    assert brier_score({"0,1": -1}, {"0,1": 1}) == 2.0
+    assert brier_score({"0,1": -1}, {"0,1": 1}) == 1.0
     assert isclose(
         brier_score({"0,1": {"agree": 0.8, "disagree": 0.1, "pass": 0.1}}, {"0,1": 1}),
-        0.06,
+        0.03,
         abs_tol=1e-12,
     )
 
@@ -84,7 +84,7 @@ def test_brier_score_accepts_point_and_probabilistic_predictions() -> None:
 def test_brier_score_normalizes_probabilistic_mapping_predictions() -> None:
     assert isclose(
         brier_score({"0,1": {"agree": 8, "disagree": 1, "pass": 1}}, {"0,1": 1}),
-        0.06,
+        0.03,
         abs_tol=1e-12,
     )
 
@@ -92,7 +92,7 @@ def test_brier_score_normalizes_probabilistic_mapping_predictions() -> None:
 def test_brier_score_all_zero_probability_mapping_scores_as_uniform() -> None:
     assert isclose(
         brier_score({"0,1": {"agree": 0, "disagree": 0, "pass": 0}}, {"0,1": 1}),
-        2 / 3,
+        1 / 3,
         abs_tol=1e-12,
     )
 
@@ -103,7 +103,7 @@ def test_brier_score_negative_probability_mapping_scores_as_uniform() -> None:
             {"0,1": {"agree": 0.4, "disagree": 0.9, "pass": -0.1}},
             {"0,1": -1},
         ),
-        2 / 3,
+        1 / 3,
         abs_tol=1e-12,
     )
 
@@ -114,6 +114,6 @@ def test_brier_score_nan_probability_mapping_scores_as_uniform() -> None:
             {"0,1": {"agree": nan, "disagree": 0.2, "pass": 0.1}},
             {"0,1": 1},
         ),
-        2 / 3,
+        1 / 3,
         abs_tol=1e-12,
     )

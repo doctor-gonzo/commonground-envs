@@ -86,9 +86,37 @@ def test_generated_scenario_contains_complete_planted_structure(
         isinstance(plant["canonical_question_aliases"], list)
         for plant in scenario["planted_items"]
     )
+    tendency_words = {
+        "agree": "leans toward yes",
+        "disagree": "leans toward no",
+        "pass": "has no settled position",
+    }
+    assert all(
+        ", ".join(plant["decision_terms"]) in faction["summary"]
+        and tendency_words[plant["target_stances"][faction["faction_id"]]]
+        in faction["summary"]
+        for faction in scenario["factions"]
+        for plant in scenario["planted_items"]
+    )
     assert scenario["human_feedback"] is None
     assert scenario["provenance"]["synthetic"] is True
     assert scenario["provenance"]["template_set"] == template.template_set
+
+
+def test_scope_terms_cannot_displace_the_actual_conflicting_rule() -> None:
+    template = next(
+        template
+        for template in HELDOUT_TEMPLATES
+        if template.template_id == "cooperative-housing-maintenance"
+    )
+    scenario = generate_scenario(8217, template)
+    contradiction = next(
+        plant for plant in scenario["planted_items"] if plant["type"] == "contradiction"
+    )
+
+    assert contradiction["related_evidence"]["quote"].startswith(
+        "Emergency crews may enter an occupied unit"
+    )
 
 
 @pytest.mark.parametrize(
@@ -147,7 +175,11 @@ def test_validator_and_schema_accept_supported_yes_no_auxiliary(
 
 def test_validator_preserves_punctuation_in_question_identity() -> None:
     scenario = generate_scenario(17, HELDOUT_TEMPLATES[0])
-    first_question = scenario["planted_items"][0]["canonical_question"]
+    first_question = next(
+        plant["canonical_question"]
+        for plant in scenario["planted_items"]
+        if "dispatchers " in plant["canonical_question"]
+    )
     scenario["planted_items"][1]["canonical_question"] = first_question.replace(
         "dispatchers ", "dispatchers, "
     )
@@ -324,7 +356,7 @@ def test_packaged_json_schema_names_every_top_level_field() -> None:
     schema = load_scenario_schema()
 
     assert schema["$schema"] == "https://json-schema.org/draft/2020-12/schema"
-    assert schema["$id"] == "urn:commonground:schema:scenario:1"
+    assert schema["$id"] == "urn:commonground:schema:scenario:2"
     assert set(schema["required"]) == {
         "scenario_id",
         "organization",

@@ -1,170 +1,140 @@
 # commonground-elicit
 
-`commonground-elicit` 0.2.5 is a deterministic native Verifiers v1 taskset for
-finding planted ambiguities, contradictions, and gaps in small sets of
-fictional policy documents. Its scenarios are synthetic, generated offline
-from committed templates, and carry explicit provenance.
+`commonground-elicit` 0.3.0 is a deterministic Verifiers environment for two
+structured tasks over fictional stakeholder-policy scenarios:
 
-This environment operationalizes a complementary
-[Context Engine](https://contextengine.sh) workflow: identifying unresolved
-policy issues and asking questions that reveal meaningful faction differences.
-Within an organization, that workflow can turn stakeholder input into auditable
-decision records and, through a planned governed export path, preference
-datasets that a consenting group could retain, license, or sell for evaluation
-or training. Release 0.2.5 is entirely synthetic; Context Engine is a planned
-future data source, not its current data source, and the exporter is not yet
-implemented.
+- `find`: localize and diagnose planted ambiguities, contradictions, and gaps.
+- `elicit-ask`: select the two highest-value clarification targets from three
+  planted issues and predict faction stances on each yes/no question.
 
-The find task accepts strict JSON containing `findings` and `questions`:
+Version 0.3.0 replaces the 0.2.x corpus and response contract. The prior
+held-out split exposed stable document IDs, issue positions, faction IDs, and
+stance patterns. The new generator uses opaque IDs, neutral randomized titles,
+varied document and sentence order, varied faction count/order, and
+issue-specific stance patterns. The exact legacy ID/position codebook now
+scores 0.000.
+
+This environment is associated with [Context Engine](https://contextengine.sh),
+whose organizational workflow can surface unresolved decisions and collect
+stakeholder responses. A future governed exporter could allow consenting
+individuals and groups to retain, license, or sell derived preference data.
+Version 0.3.0 is entirely synthetic and includes no such exporter.
+
+## Data and separation
+
+| Split | Rows | Templates × variants | Generator family |
+| --- | ---: | --- | --- |
+| `train` | 100 | 4 × 25 | `train-rotating-layout-v2` |
+| `eval` | 100 | 20 × 5 | `heldout-opaque-layout-v2` |
+
+Every row contains three planted issue types and three to five factions. Public
+faction summaries include row-specific decision tendencies, so varied stance
+targets remain inferable rather than becoming arbitrary hidden labels.
+Generation enforces unique prompt-only and answer-key fingerprints within each
+split, no exact prompt/answer overlap across splits, and disjoint generator
+families. Structural signatures cover issue locations, document/sentence
+counts, faction counts, stance patterns, evidence relationships, and generator
+family. These checks catch exact structural reuse; they are not a substitute
+for embedding-neighbor or low-complexity-classifier audits.
+
+## Find contract
+
+Return one diagnosis per suspected issue:
 
 ```json
-{"findings":[{"doc_id":"policy","quote":"ambiguous passage","type":"ambiguity"}],"questions":[{"doc_id":"policy","quote":"ambiguous passage","question":"Should this threshold be made explicit?","target_stances":{"operations":"agree","risk":"disagree","support":"pass"}}]}
+{
+  "findings": [{
+    "doc_id": "doc-a1b2c3d4",
+    "quote": "The copied primary passage.",
+    "type": "contradiction",
+    "diagnosis": "Should the emergency exception override prior approval?",
+    "related_evidence": {
+      "doc_id": "doc-e5f6a7b8",
+      "quote": "The copied conflicting rule."
+    }
+  }]
+}
 ```
 
-The reward is global one-to-one finding F1 against the planted answer key. A
-candidate quote must first be a normalized ordered contiguous token span of the
-claimed visible document. It must then match the document, finding type, and
-planted anchor with at least 80% contiguous anchor coverage and a
-longest-common-contiguous-token F1 of at least 0.5. This permits a close quote
-or modest surrounding context without letting a tiny anchor fragment count as
-a full true positive. Semantic operators are preserved during normalization,
-so symbolic negation, inequality, sign, and percentage changes cannot inherit
-the original quote's grounding. Reordered tokens, fabricated spans,
-paraphrases, and actor/object reversals likewise receive no credit. Extra
-findings reduce precision. Question utility is computed beside finding F1 as a
-logged metric with weight zero.
+`diagnosis` must be a yes/no question that identifies at least half of the
+hidden decision terms. A contradiction must cite a contiguous related passage
+from a different document; ambiguity and gap findings require
+`related_evidence: null`. A gap's diagnosis must state the missing decision,
+not merely label a passage vague. Duplicate normalized spans make the response
+invalid, so repeating one anchor under all three types cannot hedge.
 
-Set `task="elicit-ask"` for the question-raising split. It requires exactly K
-strict-JSON questions with a quote copied from the visible document and a
-predicted stance for every listed faction. Utility is credited only when the
-raw document ID and exact quote match a planted anchor. The question must use
-strict yes/no form and reuse at least one informative token from its quoted
-passage; its wording does not have to match a hidden authored sentence.
-One-to-one assignment prevents duplicate questions from claiming the same
-planting twice. Half of each matched utility comes from issue grounding and
-half from per-faction stance accuracy, so partially correct stance vectors earn
-partial credit. The result is scaled by panel polarization and the planting's
-mean normalized vote entropy/faction-pair separation from
-`commonground-score`. No judge model or network call is used.
-Questions are yes/no propositions: `agree` predicts yes, `disagree` predicts
-no, and `pass` means that faction takes no position.
+End-to-end matching requires the correct document and type, at least 90%
+contiguous anchor coverage, at least 80% evidence-token precision, and the
+structured diagnosis/relationship fields. The environment reports:
 
-This deterministic contract measures grounded issue selection and stance
-prediction. Beyond yes/no form and lexical connection to the evidence, it does
-not attempt to judge the prose quality or semantic equivalence of an open-ended
-question. Use a judge-backed or human-reviewed layer when that distinction is
-the research target.
+- `finding_f1` as the primary reward;
+- `finding_localization_recall` as an evidence-location diagnostic;
+- `finding_type_accuracy` as a type-classification diagnostic;
+- `question_utility` as a companion issue/question signal.
 
-Difficulty arguments are `docs_count`, `docs_length`, `planted_density`,
-`distractor_density`, `panel_polarization`, and `question_count`. Generation,
-loading, and scoring do not use the network, wall clock, or a judge model. On
-the find task, a row with fewer visible plants caps its logged companion
-question count to the visible answer-key size.
+## Ask contract
 
-Native Verifiers rows use typed `TaskData` with only the model prompt and
-scoring-side answer/info fields. The hidden answer carries the planted findings
-and question oracle; prompts are rendered only from visible documents and
-public faction descriptions. Completion parsing is bounded to 32,768
-characters, 64 object starts, depth 32, and 10,000 decoded nodes. Malformed or
-over-limit output fails closed to zero reward.
+The default row has three candidate issues and requires exactly two questions,
+so selection is real but modest. Each response item copies the source
+document/quote, asks a yes/no question expressing at least two latent decision
+terms, and predicts `agree`, `disagree`, or `pass` for every visible faction.
 
-## Configuration
-
-The `split` loader argument selects the bundled rollout/eval file by name:
-`"eval"` (the default held-out scenarios) or `"train"`. An explicit
-`data_path` or `COMMONGROUND_ELICIT_DATA_PATH` takes precedence over `split`;
-`train_data_path` or `COMMONGROUND_ELICIT_TRAIN_DATA_PATH` independently takes
-precedence for the environment's training dataset.
-
-Validate the native v1 training taskset without a model:
-
-```bash
-uv run validate commonground-elicit --taskset.split train \
-  --runtime.type subprocess --rich false
+```json
+{
+  "questions": [{
+    "doc_id": "doc-a1b2c3d4",
+    "quote": "The copied issue passage.",
+    "question": "Should an emergency exception override prior approval?",
+    "target_stances": {"group-1a2b3c": "agree", "group-4d5e6f": "disagree"}
+  }]
+}
 ```
 
-The packaged `commonground_elicit/dependency-manifest.txt` records the exact
-no-dev resolution used for this 0.2.5 candidate, including a closure-scoped
-resolution SHA-256, Python scope, and uv generator version. Workspace sources
-appear as immutable distribution pins; the manifest is provenance rather than
-a cross-platform installer.
+Utility combines exact visible grounding, semantic decision identification,
+faction-stance accuracy, panel disagreement, and an issue decision-value
+weight. Global assignment prevents duplicate claims. The raw numerator is
+divided by the sum of the best two attainable issue utilities for that row, so
+an exact top-two response scores 1.0 under every polarization setting. Replacing
+a selected issue with a lower-value issue scores strictly less.
 
-For model evaluation, taskset controls live below `env.taskset`:
+This deterministic metric does not judge elegance, conversational usefulness,
+or real-world information gain. Three candidates versus K=2 is a first
+selection benchmark, not the suggested harder 8–12-candidate design.
 
-```bash
-uv run eval commonground-elicit --env.taskset.split train -m MODEL --no-push
-uv run eval commonground-elicit --env.taskset.task-mode elicit-ask -m MODEL --no-push
-```
+## Model-free comparators
 
-## Bundled splits and floors
+Exact results on the bundled 100-row evaluation split:
 
-`commonground_elicit/data/train_synthetic.jsonl` contains 40 semantically
-unique scenarios across four committed training templates and ten operative
-contexts each. `commonground_elicit/data/eval_synthetic_heldout.jsonl`
-contains 20 semantically unique scenarios across twenty disjoint held-out
-domains. Fingerprints cover document and answer-key semantics while ignoring
-seed, organization name, and document order; generation fails on duplicates.
-Every row is explicitly labeled `synthetic: true`. Regenerate both files with:
+| Comparator class | Task | Comparator | mean reward |
+| --- | --- | --- | ---: |
+| Prompt-observable | find | Random visible spans | 0.030 |
+| Prompt-observable | find | Flag vague-sounding spans | 0.140 |
+| Prompt-observable | find | Legacy 0.2 document-ID/position codebook | 0.000 |
+| Prompt-observable | elicit-ask | Template clarity questions | 0.000 |
+| Prompt-observable | elicit-ask | Randomly targeted questions | 0.000 |
+| Component oracle | elicit-ask | Exact top-K issues + random stances | 0.655 |
+| Component oracle | elicit-ask | Exact top-K issues + visible-summary stances | 1.000 |
 
-```bash
-uv run python scripts/generate_elicit_splits.py
-```
+The zero Ask rows are weak floors that rarely clear the structured grounding
+gate; they do not establish model competence. The component oracles read the
+hidden top-K issue targets and therefore are not prompt-observable baselines.
+Their 0.655-to-1.000 gap isolates the stance component and verifies that the
+visible summaries contain enough information for exact stance recovery.
+Stronger prompt-only issue detectors remain useful follow-up work.
 
-The generation script is byte-reproducible. Baselines receive only the visible
-documents and public faction descriptions; the planted answer key is used only
-after generation to score their responses. Running
-`uv run python scripts/compute_elicit_floors.py` on the bundled held-out split
-prints:
-
-| Task | Baseline | mean reward |
-| --- | --- | ---: |
-| find | Random visible spans | 0.133 |
-| find | Flag vague-sounding spans | 0.195 |
-| elicit-ask | Template clarity questions | 0.000 |
-| elicit-ask | Randomly targeted questions | 0.000 |
-
-See the bundled data directory's dataset card for the planting and separation
-methodology.
-
-The 0.1.x model table is intentionally removed: 0.2.0 replaced the held-out
-semantic corpus and 0.2.2 replaced the question reward, so those historical
-scores are not comparable. Fresh baselines must be run on the exact private
-0.2.5 candidate before any public performance claim.
-
-The public package contains every planted answer key for reproducibility and
-open training. It is not contamination-resistant. A leaderboard or
-consequential comparison needs a private server-side evaluation split.
-
-## The commonground family
-
-`commonground-elicit` and `commonground-predict` are separate Hub IDs in one
-program. Predict scores masked-vote inference; elicit scores document-grounded
-finding and question raising. They share `commonground-score` and the same
-synthetic-data provenance conventions without combining incompatible rubrics
-behind a mode flag. The bundled 0.2.x scenarios are synthetic. The optional
-advanced custom `human_feedback` path uses the same fail-closed validator as
-Predict; see
-[human-data governance](https://github.com/doctor-gonzo/commonground-envs/blob/master/docs/human-data-governance.md).
-
-## Evaluation
-
-After installing the locked workspace dependencies, run the model-free native
-v1 validation gate:
+## Usage
 
 ```bash
 uv run validate commonground-elicit --runtime.type subprocess --rich false
-```
-
-Run a model evaluation without uploading results with:
-
-```bash
+uv run validate commonground-elicit --taskset.task-mode elicit-ask \
+  --runtime.type subprocess --rich false
 uv run eval commonground-elicit -m MODEL --no-push
+uv run eval commonground-elicit --env.taskset.task-mode elicit-ask \
+  -m MODEL --no-push
 ```
 
-The package also exposes a genuine legacy `SingleTurnEnv` from
-`load_environment()` because Prime CLI 0.6.28 Hosted Evaluations still use the
-v0 runner. Native v1 resolves `ElicitTaskset` and its bundled pure-chat
-`ElicitHarness` directly from the package exports.
-
-The test suite, split generator, rewards, validation, and floor baselines are
-hermetic and require no API key.
+Difficulty controls are `docs_count`, `docs_length`, `planted_density`,
+`distractor_density`, `panel_polarization`, and `question_count`. Parsing is
+bounded and malformed output fails closed. Public planted keys support open
+training but not contamination-resistant comparison; use a fresh private
+generator family for consequential evaluation.

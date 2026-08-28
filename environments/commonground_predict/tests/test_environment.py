@@ -49,7 +49,7 @@ def test_legacy_hosted_eval_loader_returns_full_environment() -> None:
     assert isinstance(load_legacy_environment(), legacy_vf.SingleTurnEnv)
     assert env.env_id == "commonground-predict"
     assert env.env_args["split"] == "eval"
-    assert len(env.get_eval_dataset()) == 20
+    assert len(env.get_eval_dataset()) == 100
     assert all(
         callable(getattr(env, method))
         for method in ("set_kwargs", "start_server", "evaluate", "stop_server")
@@ -86,15 +86,15 @@ def test_load_environment_builds_bundled_split() -> None:
     assert isinstance(env, CommonGroundPredictTaskset)
     assert isinstance(env, vf.Taskset)
     assert env.config.id == "commonground-predict"
-    assert len(list(env)) == 20
+    assert len(list(env)) == 100
     assert all(isinstance(task, PredictionTask) for task in env)
 
 
 @pytest.mark.parametrize(
     ("split", "expected_path", "expected_rows", "masked_vote_count"),
     [
-        ("eval", BUNDLED_EVAL_PATH, 20, None),
-        ("train", BUNDLED_TRAIN_PATH, 150, None),
+        ("eval", BUNDLED_EVAL_PATH, 100, None),
+        ("train", BUNDLED_TRAIN_PATH, 200, None),
         ("ce-demo", BUNDLED_CE_DEMO_PATH, 1, 3),
     ],
 )
@@ -129,7 +129,7 @@ def test_explicit_data_path_takes_precedence_over_split() -> None:
     env = load_environment(data_path=BUNDLED_EVAL_PATH, split="train")
 
     assert env.config.data_path == BUNDLED_EVAL_PATH
-    assert len(list(env)) == 20
+    assert len(list(env)) == 100
 
 
 def test_unknown_split_lists_valid_names() -> None:
@@ -445,10 +445,33 @@ def test_rubric_scores_all_wrong_completion_at_zero() -> None:
     assert state["rewards"]["vote_accuracy"] == 0.0
 
 
-def test_brier_scores_correct_probability_vector() -> None:
-    score = score_brier_prediction({"1": 0.8, "-1": 0.1, "0": 0.1})
+def test_hard_label_response_is_rejected_by_probability_contract() -> None:
+    env = load_environment()
+    row = task_rows(env)[0]
+    task = next(task for task in env if task.data.idx == row["idx"])
+    trace = vf.Trace(
+        task=vf.TraceTask(type=type(task).__name__, data=task.data),
+        agent=vf.AgentInfo(config=vf.AgentConfig()),
+        nodes=[
+            vf.MessageNode(
+                message=vf.AssistantMessage(
+                    content=json.dumps({"predictions": row["answer"]})
+                ),
+                sampled=True,
+            )
+        ],
+    )
 
-    assert isclose(score, 0.06, abs_tol=1e-12)
+    asyncio.run(task.score(trace))
+
+    assert trace.reward == 0.0
+    assert 0.0 <= trace.metrics["brier"] <= 1.0
+
+
+def test_brier_scores_correct_probability_vector() -> None:
+    score = score_brier_prediction({"agree": 0.8, "disagree": 0.1, "pass": 0.1})
+
+    assert isclose(score, 0.03, abs_tol=1e-12)
 
 
 def test_brier_scores_perfect_one_hot_probability_vector() -> None:
@@ -460,14 +483,14 @@ def test_brier_scores_perfect_one_hot_probability_vector() -> None:
 def test_brier_scores_uniform_probability_vector() -> None:
     score = score_brier_prediction({"agree": 1 / 3, "disagree": 1 / 3, "pass": 1 / 3})
 
-    # (1/3 - 1)^2 + (1/3 - 0)^2 + (1/3 - 0)^2 = 2/3
-    assert isclose(score, 2 / 3, abs_tol=1e-12)
+    # The conventional 2/3 multiclass score is divided by two.
+    assert isclose(score, 1 / 3, abs_tol=1e-12)
 
 
 def test_brier_invalid_probability_mapping_scores_as_uniform() -> None:
     score = score_brier_prediction({"agree": 0.8, "disagree": -0.1, "pass": 0.3})
 
-    assert isclose(score, 2 / 3, abs_tol=1e-12)
+    assert isclose(score, 1 / 3, abs_tol=1e-12)
 
 
 def test_masked_vote_count_knob_changes_held_out_count() -> None:
@@ -548,7 +571,7 @@ def test_file_masked_cells_keep_selection_precedence() -> None:
 def score_row(
     env: CommonGroundPredictTaskset,
     row: dict[str, Any],
-    predictions: dict[str, int],
+    predictions: dict[str, Any],
 ) -> dict[str, Any]:
     task = next(task for task in env if task.data.idx == row["idx"])
     trace = vf.Trace(
@@ -557,7 +580,10 @@ def score_row(
         nodes=[
             vf.MessageNode(
                 message=vf.AssistantMessage(
-                    content=json.dumps({"predictions": predictions}, sort_keys=True)
+                    content=json.dumps(
+                        {"predictions": probability_predictions(predictions)},
+                        sort_keys=True,
+                    )
                 ),
                 sampled=True,
             )
@@ -579,14 +605,16 @@ def score_row(
 def score_legacy_row(
     env: legacy_vf.SingleTurnEnv,
     row: dict[str, Any],
-    predictions: dict[str, int],
+    predictions: dict[str, Any],
 ) -> State:
     task = {key: row[key] for key in CANONICAL_TASK_COLUMNS if key in row}
     state = State.for_task(task)
     state["completion"] = [
         {
             "role": "assistant",
-            "content": json.dumps({"predictions": predictions}, sort_keys=True),
+            "content": json.dumps(
+                {"predictions": probability_predictions(predictions)}, sort_keys=True
+            ),
         }
     ]
     asyncio.run(env.rubric.score_rollout(state))
@@ -601,6 +629,23 @@ def score_brier_prediction(prediction: dict[Any, float]) -> float:
         }
     ]
     return asyncio.run(brier(completion, {"0,1": 1}, PredictionJsonParser()))
+
+
+def probability_predictions(predictions: dict[str, Any]) -> dict[str, Any]:
+    """Convert point-label test fixtures to the 0.3.0 probability contract."""
+
+    labels = {1: "agree", -1: "disagree", 0: "pass"}
+    converted: dict[str, Any] = {}
+    for cell_id, prediction in predictions.items():
+        if isinstance(prediction, dict):
+            converted[cell_id] = prediction
+            continue
+        label = labels[int(prediction)]
+        converted[cell_id] = {
+            candidate: float(candidate == label)
+            for candidate in ("agree", "disagree", "pass")
+        }
+    return converted
 
 
 def assert_env_rows_have_no_masks(env: CommonGroundPredictTaskset) -> None:

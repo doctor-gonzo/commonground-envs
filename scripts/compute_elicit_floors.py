@@ -15,11 +15,12 @@ from commonground_elicit.environment import (
     BUNDLED_EVAL_PATH,
     ElicitJsonParser,
     finding_f1,
+    panel_disagreement,
     question_utility,
 )
 from commonground_scenarios import validate_scenario
 
-QUESTION_COUNT = 3
+QUESTION_COUNT = 2
 FINDING_BUDGET = 3
 FINDING_TYPES = ("ambiguity", "contradiction", "gap")
 STANCES = ("agree", "disagree", "pass")
@@ -85,7 +86,7 @@ def public_factions(scenario: Mapping[str, Any]) -> list[dict[str, str]]:
 
 def random_span_findings(
     documents: Sequence[Mapping[str, str]], rng: random.Random
-) -> list[dict[str, str]]:
+) -> list[dict[str, Any]]:
     """Flag a fixed budget of visible sentences with random finding types."""
 
     spans = [
@@ -99,6 +100,8 @@ def random_span_findings(
             "doc_id": doc_id,
             "quote": quote,
             "type": rng.choice(FINDING_TYPES),
+            "diagnosis": sentence_question(quote),
+            "related_evidence": None,
         }
         for doc_id, quote in spans[:FINDING_BUDGET]
     ]
@@ -106,10 +109,10 @@ def random_span_findings(
 
 def vague_sounding_findings(
     documents: Sequence[Mapping[str, str]],
-) -> list[dict[str, str]]:
+) -> list[dict[str, Any]]:
     """Flag every visible sentence containing a fixed vague-term marker."""
 
-    findings: list[dict[str, str]] = []
+    findings: list[dict[str, Any]] = []
     for document in documents:
         for sentence in split_sentences(str(document["text"])):
             folded = sentence.casefold()
@@ -119,6 +122,8 @@ def vague_sounding_findings(
                         "doc_id": str(document["doc_id"]),
                         "quote": sentence,
                         "type": "ambiguity",
+                        "diagnosis": sentence_question(sentence),
+                        "related_evidence": None,
                     }
                 )
     return findings
@@ -182,14 +187,107 @@ def randomly_targeted_questions(
     return questions
 
 
+def exact_issue_component_questions(
+    planted: Sequence[Mapping[str, Any]],
+    factions: Sequence[Mapping[str, str]],
+    *,
+    question_count: int,
+    rng: random.Random | None,
+) -> list[dict[str, Any]]:
+    """Use exact top-K issue targets while isolating faction-stance inference."""
+
+    selected = sorted(
+        planted,
+        key=lambda plant: (
+            -float(plant["decision_value"])
+            * panel_disagreement(plant["target_stances"]),
+            str(plant["doc_id"]),
+            str(plant["quote"]),
+        ),
+    )[:question_count]
+    return [
+        {
+            "doc_id": str(plant["doc_id"]),
+            "quote": str(plant["quote"]),
+            "question": str(plant["question"]),
+            "target_stances": {
+                str(faction["faction_id"]): (
+                    rng.choice(STANCES)
+                    if rng is not None
+                    else stance_from_visible_summary(faction["summary"], plant)
+                )
+                for faction in factions
+            },
+        }
+        for plant in selected
+    ]
+
+
+def stance_from_visible_summary(
+    summary: str,
+    plant: Mapping[str, Any],
+) -> str:
+    """Read one issue-specific yes/no tendency from a public faction summary."""
+
+    terms = ", ".join(str(term) for term in plant["decision_terms"])
+    marker = f"For decisions involving {terms}, "
+    _, separator, suffix = summary.partition(marker)
+    if not separator:
+        return "pass"
+    if suffix.startswith("leans toward yes"):
+        return "agree"
+    if suffix.startswith("leans toward no"):
+        return "disagree"
+    return "pass"
+
+
+def sentence_question(sentence: str) -> str:
+    """Turn visible policy terms into a deterministic yes/no decision probe."""
+
+    words = re.findall(r"[^\W_]+", sentence, flags=re.UNICODE)
+    body = " ".join(words[:12]).casefold()
+    return f"Should {body} be made explicit?"
+
+
+def legacy_codebook_findings(
+    documents: Sequence[Mapping[str, str]],
+) -> list[dict[str, Any]]:
+    """Reproduce the exact 0.2.5 document-ID/position shortcut if present."""
+
+    issue_types = {
+        "scope-note": "ambiguity",
+        "authority-bulletin": "contradiction",
+        "exception-card": "gap",
+    }
+    if {document["doc_id"] for document in documents} != set(issue_types):
+        return []
+    findings = []
+    for document in documents:
+        sentences = split_sentences(document["text"])
+        quote = sentences[-2] if len(sentences) > 1 else sentences[-1]
+        findings.append(
+            {
+                "doc_id": document["doc_id"],
+                "quote": quote,
+                "type": issue_types[document["doc_id"]],
+                "diagnosis": sentence_question(quote),
+                "related_evidence": None,
+            }
+        )
+    return findings
+
+
 def compute_elicit_floors(path: Path = BUNDLED_EVAL_PATH) -> dict[str, float]:
-    """Score four deterministic baselines on a validated scenario split."""
+    """Score prompt baselines and component oracles on a validated split."""
 
     totals = {
         "find/random-span": 0.0,
         "find/vague-sounding": 0.0,
+        "find/legacy-0.2-codebook": 0.0,
         "elicit-ask/template-question": 0.0,
         "elicit-ask/randomly-targeted": 0.0,
+        "elicit-ask/exact-issue-random-stance": 0.0,
+        "elicit-ask/exact-issue-summary-stance": 0.0,
     }
     scenarios = load_scenarios(path)
     for scenario in scenarios:
@@ -198,11 +296,15 @@ def compute_elicit_floors(path: Path = BUNDLED_EVAL_PATH) -> dict[str, float]:
         scenario_id = str(scenario["scenario_id"])
         random_find_rng = random.Random(f"{scenario_id}:random-span")
         random_ask_rng = random.Random(f"{scenario_id}:randomly-targeted")
+        component_rng = random.Random(f"{scenario_id}:component-random-stance")
         planted_findings = [
             {
                 "doc_id": str(plant["doc_id"]),
                 "quote": str(plant["anchor_quote"]),
                 "type": str(plant["type"]),
+                "diagnosis": str(plant["canonical_question"]),
+                "decision_terms": list(plant["decision_terms"]),
+                "related_evidence": plant["related_evidence"],
             }
             for plant in scenario["planted_items"]
         ]
@@ -216,6 +318,8 @@ def compute_elicit_floors(path: Path = BUNDLED_EVAL_PATH) -> dict[str, float]:
                 "question": str(plant["canonical_question"]),
                 "question_aliases": list(plant["canonical_question_aliases"]),
                 "target_stances": dict(plant["target_stances"]),
+                "decision_terms": list(plant["decision_terms"]),
+                "decision_value": float(plant["decision_value"]),
                 "document_text": documents_by_id[str(plant["doc_id"])],
             }
             for plant in scenario["planted_items"]
@@ -245,6 +349,15 @@ def compute_elicit_floors(path: Path = BUNDLED_EVAL_PATH) -> dict[str, float]:
             asyncio.run(
                 finding_f1(
                     completion_for({"findings": vague_sounding_findings(documents)}),
+                    answer,
+                    ElicitJsonParser(),
+                )
+            )
+        )
+        totals["find/legacy-0.2-codebook"] += float(
+            asyncio.run(
+                finding_f1(
+                    completion_for({"findings": legacy_codebook_findings(documents)}),
                     answer,
                     ElicitJsonParser(),
                 )
@@ -283,6 +396,40 @@ def compute_elicit_floors(path: Path = BUNDLED_EVAL_PATH) -> dict[str, float]:
                 ElicitJsonParser("questions"),
             )
         )
+        totals["elicit-ask/exact-issue-random-stance"] += asyncio.run(
+            question_utility(
+                completion_for(
+                    {
+                        "questions": exact_issue_component_questions(
+                            planted_questions,
+                            factions,
+                            question_count=QUESTION_COUNT,
+                            rng=component_rng,
+                        )
+                    }
+                ),
+                answer,
+                info,
+                ElicitJsonParser("questions"),
+            )
+        )
+        totals["elicit-ask/exact-issue-summary-stance"] += asyncio.run(
+            question_utility(
+                completion_for(
+                    {
+                        "questions": exact_issue_component_questions(
+                            planted_questions,
+                            factions,
+                            question_count=QUESTION_COUNT,
+                            rng=None,
+                        )
+                    }
+                ),
+                answer,
+                info,
+                ElicitJsonParser("questions"),
+            )
+        )
     return {name: total / len(scenarios) for name, total in totals.items()}
 
 
@@ -305,14 +452,44 @@ def completion_for(response: Mapping[str, Any]) -> list[dict[str, str]]:
 
 def render_markdown(floors: Mapping[str, float]) -> str:
     labels = {
-        "find/random-span": ("find", "Random visible spans"),
-        "find/vague-sounding": ("find", "Flag vague-sounding spans"),
-        "elicit-ask/template-question": ("elicit-ask", "Template clarity questions"),
-        "elicit-ask/randomly-targeted": ("elicit-ask", "Randomly targeted questions"),
+        "find/random-span": ("Prompt-observable", "find", "Random visible spans"),
+        "find/vague-sounding": (
+            "Prompt-observable",
+            "find",
+            "Flag vague-sounding spans",
+        ),
+        "find/legacy-0.2-codebook": (
+            "Prompt-observable",
+            "find",
+            "Legacy 0.2 document-ID/position codebook",
+        ),
+        "elicit-ask/template-question": (
+            "Prompt-observable",
+            "elicit-ask",
+            "Template clarity questions",
+        ),
+        "elicit-ask/randomly-targeted": (
+            "Prompt-observable",
+            "elicit-ask",
+            "Randomly targeted questions",
+        ),
+        "elicit-ask/exact-issue-random-stance": (
+            "Component oracle",
+            "elicit-ask",
+            "Exact top-K issues + random stances",
+        ),
+        "elicit-ask/exact-issue-summary-stance": (
+            "Component oracle",
+            "elicit-ask",
+            "Exact top-K issues + visible-summary stances",
+        ),
     }
-    lines = ["| Task | Baseline | mean reward |", "| --- | --- | ---: |"]
+    lines = [
+        "| Comparator class | Task | Comparator | mean reward |",
+        "| --- | --- | --- | ---: |",
+    ]
     lines.extend(
-        f"| {labels[name][0]} | {labels[name][1]} | {score:.3f} |"
+        f"| {labels[name][0]} | {labels[name][1]} | {labels[name][2]} | {score:.3f} |"
         for name, score in floors.items()
     )
     return "\n".join(lines)

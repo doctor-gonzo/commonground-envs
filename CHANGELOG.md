@@ -2,6 +2,29 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.3.0 - Unreleased
+
+- Replace both public evaluation corpora with 100-row, breaking benchmark
+  revisions and expand their synthetic training splits to 200 Predict rows and
+  100 Elicit rows.
+- Make Predict votes depend on explicit statement dimensions and use disjoint
+  training/evaluation profile-generator families; require three-class
+  probabilities, normalize multiclass Brier to `[0,1]`, and publish 1-NN/5-NN
+  alongside clearly labeled held-out and generator diagnostics.
+- Remove Elicit's fixed document/faction codebook with opaque identifiers,
+  randomized visible structure, varying faction counts, and varied stance
+  patterns; add prompt, answer, structural, and cross-split integrity audits.
+- Redesign Find around precise evidence, semantic diagnosis, paired
+  contradiction evidence, duplicate-span rejection, and separate localization
+  and type metrics.
+- Redesign Ask as normalized top-two selection from three candidate issues,
+  strengthen the semantic decision-term gate, and make an exact response attain
+  1.0 under every polarization setting.
+- Bump `commonground-score` and `commonground-scenarios` to 0.2.0 for the
+  breaking score and scenario-schema contracts. Mark 0.3.0 model results as
+  pending until exact private artifacts complete the 100-task/five-rollout
+  multi-model sweep.
+
 ## 0.2.3 - 2026-08-27
 
 - Reissue both Hub environments with closure-scoped dependency provenance so

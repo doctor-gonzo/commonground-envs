@@ -1,74 +1,106 @@
 # Methodology and benchmark scope
 
-## Vote statistics
+## Shared vote statistics
 
-commonground-score independently implements the one-proportion and smoothed
-two-proportion equations used by Polis for comment and group comparison
-statistics. The immutable upstream reference is Computational Democracy
-Project Polismath at commit 5089c6bef9eb1a1e454beb34354fb29dd0a2b6f0:
+`commonground-score` independently implements the one-proportion and smoothed
+two-proportion equations used by Computational Democracy Project Polismath at
+immutable commit `5089c6bef9eb1a1e454beb34354fb29dd0a2b6f0`:
 
 https://github.com/compdemocracy/polis/blob/5089c6bef9eb1a1e454beb34354fb29dd0a2b6f0/math/src/polismath/math/stats.clj
 
-The functions prop_test and two_prop_test implement those equations in
-independent Python code. The package tests pin numerical fixtures and edge-case
-behavior. No Polis source file is copied into this Apache-licensed package.
+Numerical fixtures and edge cases are pinned in tests; no upstream source is
+copied. `vote_entropy` and `cluster_separation` are Common Ground metrics, not
+Polis implementations. Multiclass Brier is the conventional squared-error sum
+divided by two, bounded to `[0,1]`.
 
-The broader Polis method is described in:
+## Predict 0.3.0 construct
 
-https://www.e-revistes.uji.es/index.php/recerca/article/view/5516/6558
+Predict contains 200 training and 100 evaluation snapshots. Training and
+evaluation have disjoint statement text, session IDs, seeds, and profile
+generator families. Each statement has an explicit policy dimension. A
+cluster's latent preference for that dimension, plus item bias, pass threshold,
+and participant noise, causally determines the vote. A regression test changes
+the dimension while preserving statement position and verifies the vote
+changes.
 
-vote_entropy and cluster_separation are Common Ground metrics. They are not
-claimed to be Polis implementations: entropy measures normalized
-agree/disagree/pass uncertainty, while separation measures the fraction of
-observed faction pairs taking different stances.
+This improves on the 0.2 generator, whose vote pattern depended on statement
+position rather than text meaning. It does not remove matrix completion as a
+major task component: prompt-observable 1-NN and 5-NN score 0.819 and 0.891.
+Accordingly, semantic-conditioned matrix completion is the supported claim.
+Text-only, matrix-only, shuffled-text, item-item, factorization, and spectral
+ablations are recommended before claiming a specific role for language.
 
-## Predict scope
+The per-snapshot best-constant comparator reads held-out labels and is a
+diagnostic, not a floor. Latent-pattern replay reads generator state and is a
+generator diagnostic, not a model-achievable universal ceiling.
 
-The 0.2.0 predict evaluation is session-heldout and uses a policy-text bank
-disjoint from its synthetic training bank. It tests inference of masked votes
-from visible votes and statement text under a planted-cluster generator. It
-does not establish performance on human deliberation or on a private,
-contamination-resistant benchmark.
+## Elicit 0.3.0 construct
 
-The bundled evaluation labels are deliberately public. The CE demo fixture is
-also synthetic and open-answer; its immutable source, transformation boundary,
-hashes, and MPL-2.0 treatment are recorded in the predict package NOTICE.
+Elicit contains 100 training and 100 evaluation scenarios. The splits use
+disjoint generator-family labels. Each split enforces unique prompt-only and
+answer-key hashes, and cross-split exact overlap is blocked. A structural
+signature records generator family, document and faction counts, issue types,
+anchor positions, document lengths, stance multisets, and contradiction-pair
+presence. Evaluation uses opaque document and faction IDs, randomized order,
+neutral randomized titles/styles, shuffled sentence locations, three to five
+factions, and varied stance vectors. A regression baseline that implements the
+0.2 document-ID/position codebook scores zero. Row-specific decision tendencies
+in public faction summaries keep the varied stance targets model-inferable; an
+exact-issue component oracle recovers all stances from those summaries.
 
-## Elicit scope
+The train/held-out family labels select disjoint template registries and some
+different ID behavior, but both still share the same core scenario-generation
+implementation. This is stronger than the 0.2 structural reuse but does not
+satisfy the longer-term goal of several independently implemented generator
+families or an embedding-based cross-split similarity audit.
 
-The 0.2.0 elicit corpus contains 40 unique synthetic training tasks and 20
-unique synthetic held-out tasks. Semantic fingerprints include document text,
-document identity/style, planted anchors and types, canonical questions,
-aliases, and faction stances while ignoring seed, organization name, and
-document order. Generation fails on a duplicate fingerprint.
+Find separates evidence localization, type accuracy, and end-to-end diagnosis.
+A valid result requires a precise contiguous passage, correct type, a yes/no
+diagnosis covering the issue's decision terms, and—only for contradictions—a
+second contiguous passage from another document. Duplicate normalized spans
+invalidate a response, preventing three-type hedging.
 
-Finding reward is document-grounded: a candidate quote must be a normalized,
-ordered, contiguous span in its claimed visible document before it can be
-matched to an answer-key anchor. Matching then uses longest-common-contiguous
-token overlap, requires at least 80% contiguous coverage of the planted anchor,
-and retains the 0.5 symmetric overlap-F1 floor. Semantic operators are tokens,
-so normalization does not erase negation, inequality, sign, or percentage
-changes. Question reward remains deterministic but no longer depends on hidden
-authored wording. A candidate must name the planted document, copy its exact
-visible anchor, use strict yes/no form, and reuse at least one informative
-token from that quote. Global one-to-one assignment prevents duplicate claims.
-Half of matched utility comes from issue grounding and half from per-faction
-stance accuracy, then the result is scaled by the planted faction disagreement
-and configured panel polarization. Neither path calls a judge model.
-Consequently, Elicit-ask measures grounded issue selection and stance
-prediction; it validates question form and lexical grounding but does not
-semantically grade prose quality.
+Ask exposes three candidate issues and requires the best two. Questions must
+be grounded in exact visible evidence, use yes/no form, and cover at least two
+decision terms. Utility combines grounding, stance accuracy, disagreement, and
+an issue decision-value weight. It is normalized by the best attainable K-item
+sum, so an exact response scores one. This is genuine but small top-K selection;
+8–12 candidate issues, answer-conditioned faction updates, and measured
+information gain remain longer-term work.
 
-This is a reproducible synthetic policy-reasoning environment, not evidence of
-human deliberation validity. Because the public package contains planted answer
-keys, consequential comparisons require a private server-side split. The 0.2.0
-corpus and 0.2.2 question reward invalidate earlier elicit model baselines;
-fresh private-candidate baselines are required before public performance
-claims.
+No judge model is called. The deterministic rewards establish conformance to
+these structured synthetic contracts, not prose quality, real organizational
+usefulness, or human-deliberation validity.
+
+## Evaluation design
+
+`configs/eval/baseline-sweep.toml` specifies 100 tasks and five rollouts. The
+100 tasks provide structural coverage; repeated rollouts only estimate sampling
+variation. Model comparisons should preserve per-task pairing and use a paired
+task or task-cluster bootstrap rather than treating all 500 observations as
+independent. Reports should include source commit, artifact hashes, environment
+content hash, exact config, provider/model identifiers, sampling settings,
+retry/error fields, and per-example traces.
+
+At least four model families, including open-weight trainable models, should be
+run before comparative claims. Training-utility claims require multiple
+independent training seeds and evaluation on a procedurally fresh or private
+generator family.
+
+## Public-answer and human-data limits
+
+All bundled data is synthetic and every public evaluation key is included for
+reproducibility and open training. Same-row evaluation after training is not a
+valid generalization test. The operator-authored Predict demo fixture is also
+synthetic and open-answer.
+
+Non-synthetic custom input is a separate governed path. Automated validation
+can enforce metadata and structural requirements but cannot prove consent,
+privacy, or redistribution authority. See `docs/human-data-governance.md`.
 
 ## Schema identity
 
-The scenario JSON Schema uses the stable identifier
-urn:commonground:schema:scenario:1. Consumers should load the packaged schema
-through commonground_scenarios.load_scenario_schema rather than dereferencing a
+Scenario 0.3 data uses Draft 2020-12 schema identifier
+`urn:commonground:schema:scenario:2`. Consumers should call
+`commonground_scenarios.load_scenario_schema()` rather than dereferencing a
 website.

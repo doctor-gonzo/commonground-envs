@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:commonground:schema:scenario:1",
+  "$id": "urn:commonground:schema:scenario:2",
   "title": "Common Ground planted policy scenario",
   "type": "object",
   "additionalProperties": false,
@@ -134,7 +134,7 @@
     "plantedItem": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["plant_id", "doc_id", "anchor_quote", "type", "canonical_question", "canonical_question_aliases", "target_dimension", "target_stances"],
+      "required": ["plant_id", "doc_id", "anchor_quote", "type", "canonical_question", "canonical_question_aliases", "target_dimension", "target_stances", "decision_terms", "decision_value", "related_evidence"],
       "properties": {
         "plant_id": {"$ref": "#/$defs/identifier"},
         "doc_id": {"$ref": "#/$defs/identifier"},
@@ -157,6 +157,27 @@
           "type": "object",
           "minProperties": 3,
           "additionalProperties": {"enum": ["agree", "disagree", "pass"]}
+        },
+        "decision_terms": {
+          "type": "array",
+          "minItems": 2,
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^[^\\W_]+$"}
+        },
+        "decision_value": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+        "related_evidence": {
+          "oneOf": [
+            {"type": "null"},
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["doc_id", "quote"],
+              "properties": {
+                "doc_id": {"$ref": "#/$defs/identifier"},
+                "quote": {"type": "string", "minLength": 1}
+              }
+            }
+          ]
         }
       }
     },
@@ -173,14 +194,15 @@
     "provenance": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["seed", "template_id", "template_set", "generated_at", "synthetic", "generation_mode"],
+      "required": ["seed", "template_id", "template_set", "generated_at", "synthetic", "generation_mode", "generator_family"],
       "properties": {
         "seed": {"type": "integer"},
         "template_id": {"$ref": "#/$defs/identifier"},
         "template_set": {"enum": ["train", "heldout"]},
         "generated_at": {"type": "string", "format": "date"},
         "synthetic": {"type": "boolean"},
-        "generation_mode": {"enum": ["template", "operator-polished", "human"]}
+        "generation_mode": {"enum": ["template", "operator-polished", "human"]},
+        "generator_family": {"$ref": "#/$defs/identifier"}
       }
     },
     "contextEngineSnapshot": {

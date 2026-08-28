@@ -27,13 +27,16 @@ Run:
     uv run pytest -q
 
 The committed generated files must remain byte-identical, and both floor tables
-must exactly match their environment READMEs. Elicit generation must report 40
-unique training semantic tasks and 20 unique evaluation semantic tasks, with
-disjoint template families. The grounded-quote, wrong-document, semantic-
-operator, malformed JSON, depth, size, duplicate-assignment, and short-fragment
-tests must pass. The Elicit-ask regression must prove that hidden canonical
-wording cannot alter a grounded paraphrase's score. Predict training and
-evaluation policy texts must remain disjoint.
+must exactly match their environment READMEs. Elicit generation must report 100
+unique training prompts and answers and 100 unique evaluation prompts and
+answers, with disjoint template/generator families and no cross-split exact
+overlap. The grounded-quote, evidence-precision, contradiction-pair, gap-
+diagnosis, wrong-document, type-hedging, malformed JSON, depth, size, and
+duplicate-span tests must pass. The Elicit-ask regressions must prove that K=2
+requires selection, an exact top-K answer reaches 1.0, and one shared noun is
+insufficient. Predict must retain 200/100 rows, disjoint policy text and
+generator families, causal statement dimensions, normalized Brier, and exact
+1-NN/5-NN comparator values.
 
 The public distributions contain evaluation answers. Never describe a public
 score as contamination-resistant. Use a private server-side split for a
@@ -72,10 +75,10 @@ resolved-version diff, and rerun `--check`. Do not hand-edit the manifests.
 
 Publish immutable shared packages first:
 
-1. commonground-score 0.1.1
-2. commonground-scenarios 0.1.1
-3. commonground-predict 0.2.5
-4. commonground-elicit 0.2.5
+1. commonground-score 0.2.0
+2. commonground-scenarios 0.2.0
+3. commonground-predict 0.3.0
+4. commonground-elicit 0.3.0
 
 The environment packages exactly pin the shared versions. Do not reuse a
 published version number.
@@ -106,8 +109,9 @@ Push the new versions privately first. On the exact private artifacts:
 - pull and repeat clean install, import, taskset load, and shipped-test checks;
 - run a small native-v1 server evaluation and a standalone hosted legacy
   evaluation for predict and both elicit task modes;
-- rerun and publish elicit model baselines because its corpus changed in 0.2.0
-  and its question reward changed in 0.2.2;
+- run the full 100-task/five-rollout sweep on at least four model families for
+  Predict and both Elicit modes; preserve exact configs and per-example traces;
+- analyze paired per-task differences or task-cluster bootstrap intervals;
 - review the rendered README and license/provenance notice.
 
 Only then should an operator manually make a listing public. Publishing and

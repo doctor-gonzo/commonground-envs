@@ -1,6 +1,6 @@
 [project]
 name = "commonground-score"
-version = "0.1.1"
+version = "0.2.0"
 description = "Pure-Python scoring utilities for Common Ground deliberation evaluations."
 authors = [{ name = "Common Ground contributors" }]
 license = "Apache-2.0"

@@ -1,156 +1,125 @@
 # commonground-envs
 
-Standalone workspace for Common Ground deliberation and collective-preference
-training and evaluation environments. The current candidates expose two independent
-native Verifiers v1 tasksets: `commonground-predict` estimates held-out
-stakeholder votes on fictional company AI policies, while
-`commonground-elicit` finds planted policy problems and raises questions that
-expose latent faction disagreement. They share deterministic data and scoring
-packages but remain separate because their rubrics are not interchangeable.
+Two open, deterministic Verifiers environments for structured reasoning over
+synthetic stakeholder data:
 
-This is [Context Engine](https://contextengine.sh)'s reinforcement-learning
-environment family for evaluating models on collective-preference reasoning.
-Context Engine is an open-source deliberation platform that helps organizations
-collect statements and votes, map agreement and disagreement across stakeholder
-groups, and turn ratified preferences into auditable decisions. Its planned
-governed export path is designed so that, subject to participant consent and
-applicable privacy and data-rights terms, a group can retain, license, or sell
-datasets derived from its own sessions for evaluation or training. Release
-0.2.5 contains only seeded synthetic data and one explicitly synthetic demo
-fixture, not live participant records, and does not yet include that exporter.
+- `commonground-predict` requires calibrated probabilities for masked votes in
+  a partially visible stakeholder-by-policy matrix.
+- `commonground-elicit` requires grounded diagnosis of policy ambiguities,
+  contradictions, and gaps, or selection of the two most valuable
+  clarification questions from three candidate issues.
+
+Version 0.3.0 is a breaking benchmark-design release. It replaces the 0.2.x
+evaluation corpora and response contracts after an independent review found
+structural shortcuts in Elicit and a non-semantic vote generator in Predict.
+The current release is suitable for open training and experimental evaluation;
+its public answer keys make it unsuitable for contamination-resistant
+leaderboards.
+
+This is the reinforcement-learning environment family associated with
+[Context Engine](https://contextengine.sh), an open-source deliberation system
+for collecting statements and votes, mapping agreement and disagreement, and
+turning the results into auditable organizational decisions. A future governed
+export path could allow consenting individuals and groups to retain, license,
+or sell preference datasets derived from their sessions. No such exporter is
+included here. Every bundled row is synthetic, apart from one explicitly
+synthetic, operator-authored demo fixture.
 
 ![Common Ground Predict and Elicit use synthetic data in the current release; reviewed human data is shown only as a future option.](docs/assets/commonground-envs-overview.png)
 
 ## Packages
 
-| Path | Package | Purpose |
+| Path | Distribution | Purpose |
 | --- | --- | --- |
-| `packages/commonground-score` | `commonground-score` | Pure-Python Polis-style vote statistics and reward helpers. |
-| `packages/commonground-scenarios` | `commonground-scenarios` | Seeded offline policy-scenario generation, schema, and validation. |
-| `environments/commonground_predict` | `commonground-predict` | Native Verifiers v1 taskset for predicting held-out deliberation votes. |
-| `environments/commonground_elicit` | `commonground-elicit` | Native Verifiers v1 taskset for document-grounded finding and question raising. |
+| `packages/commonground-score` | `commonground-score` 0.2.0 | Vote statistics and normalized scoring helpers. |
+| `packages/commonground-scenarios` | `commonground-scenarios` 0.2.0 | Offline scenario generation, schema, and validation. |
+| `environments/commonground_predict` | `commonground-predict` 0.3.0 | Probabilistic masked-vote prediction. |
+| `environments/commonground_elicit` | `commonground-elicit` 0.3.0 | Structured finding diagnosis and top-K clarification. |
 
-Both environment packages are dual-interface at the platform boundary. Native
-Verifiers v1 evaluation and Hosted Training discover the exported `Taskset` and
-pure-chat `Harness` classes. Prime's current standalone Hosted Evaluation
-runner still calls the legacy `load_environment()` convention, so each package
-also returns a real `SingleTurnEnv` adapter built from the same hardened rows
-and scoring functions. `load_taskset()` is the direct native-v1 construction
-helper; neither path is a partial shim.
+Both environments export native Verifiers v1 `Taskset`/`Harness` plugins and a
+real legacy `SingleTurnEnv` adapter for the current Prime Hosted Evaluation
+runner. The same rows and scoring functions back both interfaces.
 
-## Setup
+## What 0.3.0 changes
 
-The repository is a uv workspace. From a fresh checkout, install every member
-from the exact lock before running root-level tests, scripts, or tasksets:
+Predict now generates votes from explicit statement dimensions and latent
+cluster preference profiles. Training and evaluation use disjoint text banks,
+seeds, session IDs, and generator families. The response contract requires a
+three-class probability distribution per cell, and Brier is normalized to
+`[0,1]`. Standard collaborative-filtering comparators remain strong—5-NN
+scores 0.891—so the environment should be described as semantic-conditioned
+matrix completion, not evidence of general collective-preference reasoning.
+
+Elicit now uses opaque randomized document/faction IDs, varied order, titles,
+styles, sentence positions, faction counts, and issue-specific stance vectors.
+Train and evaluation contain 100 rows each with disjoint generator families
+and separate prompt, answer, and structural audits. Find requires a concise
+diagnosis and paired second-document evidence for contradictions. Ask selects
+two of three issues, requires at least two decision terms, and normalizes reward
+by the row's attainable maximum. The exact 0.2 ID/position shortcut scores zero.
+
+See the [0.3.0 evaluation report](docs/evaluation-report-0.3.0.md) and
+[methodology](docs/methodology.md) for exact comparator definitions and limits.
+
+## Setup and verification
 
 ```bash
 uv sync --all-packages --locked
 uv run pytest -q
+uv run ruff check .
+uv run ruff format --check .
+uv run mypy
+uv run python scripts/check_dependency_manifests.py --check
+uv run python scripts/check_release_wheel.py
 ```
 
-Each environment source archive and wheel includes a
-`dependency-manifest.txt` inside its import package. The manifest records the
-exact no-dev resolution exported from the root `uv.lock`, a closure-scoped
-resolution SHA-256, Python scope, and pinned uv generator version; workspace
-paths are converted to published distribution pins. The digest covers the
-environment's resolved dependency closure, so changing an unrelated workspace
-member cannot mutate an already published artifact. It is release provenance,
-not a replacement for platform-specific installation resolution. Verify it with
-`uv run python scripts/check_dependency_manifests.py --check`.
+Each environment artifact bundles an exact, hashed no-dev dependency manifest
+generated from `uv.lock`. Workspace sources appear as immutable distribution
+pins. The manifest is provenance, not a cross-platform installation lock.
+Python is intentionally constrained to `>=3.12,<3.13` for the currently tested
+Prime/Verifiers runtime; broader interpreter support has not been attested.
 
-## Data Provenance
+## Comparator and model sweep
 
-Release 0.2.x ships synthetic data only. `commonground-predict` uses seeded
-enterprise AI-policy vote snapshots, disjoint training and evaluation policy
-text banks, and an operator-authored synthetic Context Engine demo fixture.
-`commonground-elicit` uses committed templates that plant known ambiguities,
-contradictions, and gaps in fictional policy documents. Its 40 training rows
-and 20 held-out rows have unique semantic fingerprints, use disjoint template
-families, and carry explicit synthetic provenance.
-
-Bundled 0.2.x data is synthetic. An advanced governed custom-data path is
-documented separately in
-[human-data governance](docs/human-data-governance.md).
-
-The default bundled eval split is synthetic. It is generated by the committed
-seeded script at
-`environments/commonground_predict/scripts/generate_synthetic_eval.py` with seed
-`20260709`. The repo also ships
-`environments/commonground_predict/commonground_predict/data/eval_ce_demo.jsonl`,
-an operator-authored synthetic demo-corpus split with
-`meta.source: "ce-demo-authored"` and `meta.synthetic: true`.
-
-## Attribution
-
-`prop_test` and `two_prop_test` independently implement equations used by
-Computational Democracy Project Polismath at immutable commit
-`5089c6bef9eb1a1e454beb34354fb29dd0a2b6f0`. `vote_entropy` and
-`cluster_separation` are Common Ground metrics, not Polis implementations.
-See [methodology and benchmark scope](docs/methodology.md).
-
-## Baseline Sweep
-
-The checked-in native-v1 config is a 20-task, three-rollout Predict template.
-Run it once per model, then override the taskset for the two Elicit modes. All
-three commands keep results local while writing a complete `config.toml` and
-`traces.jsonl` run directory:
+The checked-in native-v1 config runs 100 tasks with five rollouts. Run it for
+at least four model families, overriding the taskset for both Elicit modes:
 
 ```bash
-for M in <models>; do
-  uv run eval @ configs/eval/baseline-sweep.toml \
-    -m "$M" --no-push --rich false
+for MODEL in <models>; do
+  uv run eval @ configs/eval/baseline-sweep.toml -m "$MODEL" --no-push --rich false
   uv run eval @ configs/eval/baseline-sweep.toml \
     --env.taskset.id commonground-elicit \
-    -m "$M" --no-push --rich false
+    --env.taskset.task-mode find \
+    -m "$MODEL" --no-push --rich false
   uv run eval @ configs/eval/baseline-sweep.toml \
     --env.taskset.id commonground-elicit \
     --env.taskset.task-mode elicit-ask \
-    -m "$M" --no-push --rich false
+    -m "$MODEL" --no-push --rich false
 done
 ```
 
-After every requested run is complete, render a deterministic, README-ready
-table from the saved results. The aggregator validates the native taskset
-profile, run identity, reward/metric schema, successful completion, and exact
-task-by-rollout counts. It keeps Elicit find and ask results separate and
-reports successful rollouts that recovered from a recorded retry. Historical
-Verifiers 0.1.x `metadata.json`/`results.jsonl` runs remain readable. By
-default the newest complete run for each environment/model pair is selected;
-an incomplete or mixed-format run is an error and produces no partial table.
-Use `--all-runs` only when comparing historical runs:
+Render only complete saved runs with:
 
 ```bash
 uv run python scripts/aggregate_baselines.py
-uv run python scripts/aggregate_baselines.py --all-runs
 uv run python scripts/aggregate_baselines.py --csv /path/to/baselines.csv
 ```
 
-## The `commonground` family
+Repeated rollouts estimate sampling variation, not independent task coverage.
+Comparative claims should use per-task paired or task-cluster bootstrap
+intervals and disclose model/provider settings, retries, environment hashes,
+and per-example traces.
 
-`commonground` is an environment family, not a one-off. The validated
-`commonground-predict` 0.2.5 candidate and `commonground-elicit` 0.2.5 candidate
-are separate Hub IDs backed by the shared score and scenario packages. Planned
-follow-ons are:
+## Provenance, scope, and license
 
-- `commonground-bridge` — bridging-statement generation scored by a frozen
-  vote-predictor plus a cross-cluster diversity bonus; eval splits scored
-  against real human votes from later sessions (sim-to-real transfer).
-- `commonground-facilitate` — multi-turn facilitation of simulated
-  participants seeded from real cluster centroids; reward is the terminal
-  delta in group-informed consensus versus a no-facilitator baseline.
-- `commonground-calibration` — predict vote *distributions* rather than
-  majorities, Brier-scored, with fresh eval splits from live sessions.
-- `commonground-route` — statement dedup/routing scored as F1/ARI against
-  ground-truth duplicate clusters from real session data.
+All bundled evaluation answers are published for reproducibility and open
+training. Consequential comparison requires a fresh private or server-side
+generator family. Non-synthetic custom snapshots are accepted only through the
+separate fail-closed contract in
+[human-data governance](docs/human-data-governance.md); automated validation
+cannot establish consent or legal authority.
 
-Related project and planned governed data source:
-[contextengine.sh](https://contextengine.sh) ·
-[Context Engine repository](https://github.com/AgalmicSoftware/context-engine)
-
-## Release and license
-
-See the [public release checklist](docs/public-release-checklist.md) before any
-Hub visibility change. The repository code is licensed under
-[Apache License 2.0](LICENSE). The predict package's adapted synthetic Context
-Engine demo fixture remains under MPL-2.0; its packaged `NOTICE` records the
-immutable source, transformation boundary, hashes, and license treatment.
+Repository code is [Apache-2.0](LICENSE). Predict's adapted synthetic Context
+Engine demo fixture remains MPL-2.0; its packaged `NOTICE` records the immutable
+source, transformation boundary, hashes, and license treatment. Follow the
+[public release checklist](docs/public-release-checklist.md) before publishing.

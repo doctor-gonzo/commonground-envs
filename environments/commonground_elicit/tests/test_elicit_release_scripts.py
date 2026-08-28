@@ -94,8 +94,8 @@ def test_bundled_splits_are_synthetic_and_template_separated() -> None:
         scenario["provenance"]["template_id"] for scenario in heldout
     }
 
-    assert len(train) == 40
-    assert len(heldout) == 20
+    assert len(train) == 100
+    assert len(heldout) == 100
     assert train_template_ids == {
         template.template_id for template in generator.TRAIN_TEMPLATES
     }
@@ -112,8 +112,32 @@ def test_bundled_splits_are_synthetic_and_template_separated() -> None:
         generator.scenario_semantic_key(scenario) for scenario in train
     ]
     semantic_keys = [generator.scenario_semantic_key(scenario) for scenario in heldout]
-    assert len(train_semantic_keys) == len(set(train_semantic_keys)) == 40
-    assert len(semantic_keys) == len(set(semantic_keys)) == 20
+    assert len(train_semantic_keys) == len(set(train_semantic_keys)) == 100
+    assert len(semantic_keys) == len(set(semantic_keys)) == 100
+    generator.assert_split_integrity(train, heldout)
+    assert {
+        scenario["provenance"]["generator_family"] for scenario in train
+    }.isdisjoint({scenario["provenance"]["generator_family"] for scenario in heldout})
+    assert len({generator.prompt_fingerprint(scenario) for scenario in heldout}) == 100
+    assert len({generator.answer_fingerprint(scenario) for scenario in heldout}) == 100
+    assert len({generator.structural_signature(scenario) for scenario in heldout}) >= 95
+    assert {len(scenario["factions"]) for scenario in heldout} == {3, 4, 5}
+    assert all(
+        document["doc_id"].startswith("doc-")
+        for scenario in heldout
+        for document in scenario["documents"]
+    )
+    assert all(
+        document["title"].split()[0]
+        in {"Operations", "Service", "Implementation", "Review", "Field", "Decision"}
+        for scenario in heldout
+        for document in scenario["documents"]
+    )
+    assert all(
+        "For decisions involving" in faction["summary"]
+        for scenario in heldout
+        for faction in scenario["factions"]
+    )
 
 
 def test_generator_rejects_duplicate_semantic_tasks() -> None:
@@ -160,19 +184,25 @@ def test_compute_elicit_floors_reproduces_published_values() -> None:
     computed = floors.compute_elicit_floors(EVAL_SPLIT)
 
     assert computed == {
-        "find/random-span": 2 / 15,
-        "find/vague-sounding": 39 / 200,
+        "find/random-span": 0.03,
+        "find/vague-sounding": 0.14,
+        "find/legacy-0.2-codebook": 0.0,
         "elicit-ask/template-question": 0.0,
         "elicit-ask/randomly-targeted": 0.0,
+        "elicit-ask/exact-issue-random-stance": 0.655391831599561,
+        "elicit-ask/exact-issue-summary-stance": 1.0,
     }
     assert floors.render_markdown(computed) == "\n".join(
         [
-            "| Task | Baseline | mean reward |",
-            "| --- | --- | ---: |",
-            "| find | Random visible spans | 0.133 |",
-            "| find | Flag vague-sounding spans | 0.195 |",
-            "| elicit-ask | Template clarity questions | 0.000 |",
-            "| elicit-ask | Randomly targeted questions | 0.000 |",
+            "| Comparator class | Task | Comparator | mean reward |",
+            "| --- | --- | --- | ---: |",
+            "| Prompt-observable | find | Random visible spans | 0.030 |",
+            "| Prompt-observable | find | Flag vague-sounding spans | 0.140 |",
+            "| Prompt-observable | find | Legacy 0.2 document-ID/position codebook | 0.000 |",
+            "| Prompt-observable | elicit-ask | Template clarity questions | 0.000 |",
+            "| Prompt-observable | elicit-ask | Randomly targeted questions | 0.000 |",
+            "| Component oracle | elicit-ask | Exact top-K issues + random stances | 0.655 |",
+            "| Component oracle | elicit-ask | Exact top-K issues + visible-summary stances | 1.000 |",
         ]
     )
 

@@ -5,6 +5,7 @@ import hashlib
 import importlib.util
 import json
 import random
+import sys
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -121,10 +122,10 @@ def test_statement_bank_is_enterprise_ai_policy() -> None:
 
 def test_bundled_eval_split_matches_seeded_policy_generator() -> None:
     expected = render_generated_split(
+        generator=eval_generator_module,
         seed=eval_generator_module.SEED,
         snapshot_count=eval_generator_module.SNAPSHOT_COUNT,
         session_index_offset=0,
-        statement_bank=eval_generator_module.STATEMENT_BANK,
     )
 
     assert SYNTHETIC_SPLIT.read_bytes() == expected
@@ -132,10 +133,10 @@ def test_bundled_eval_split_matches_seeded_policy_generator() -> None:
 
 def test_bundled_train_split_matches_seeded_policy_generator() -> None:
     expected = render_generated_split(
+        generator=train_generator_module,
         seed=train_generator_module.TRAIN_SEED,
         snapshot_count=train_generator_module.TRAIN_SNAPSHOT_COUNT,
         session_index_offset=train_generator_module.SESSION_INDEX_OFFSET,
-        statement_bank=train_generator_module.TRAIN_STATEMENT_BANK,
     )
 
     assert TRAIN_SPLIT.read_bytes() == expected
@@ -143,24 +144,16 @@ def test_bundled_train_split_matches_seeded_policy_generator() -> None:
 
 def render_generated_split(
     *,
+    generator: Any,
     seed: int,
     snapshot_count: int,
     session_index_offset: int,
-    statement_bank: list[str],
 ) -> bytes:
-    original_seed = eval_generator_module.SEED
-    original_statement_bank = eval_generator_module.STATEMENT_BANK
-    eval_generator_module.SEED = seed
-    eval_generator_module.STATEMENT_BANK = statement_bank
-    try:
-        rng = random.Random(seed)
-        snapshots = [
-            eval_generator_module.make_snapshot(rng, session_index_offset + index)
-            for index in range(snapshot_count)
-        ]
-    finally:
-        eval_generator_module.SEED = original_seed
-        eval_generator_module.STATEMENT_BANK = original_statement_bank
+    rng = random.Random(seed)
+    snapshots = [
+        generator.make_snapshot(rng, session_index_offset + index)
+        for index in range(snapshot_count)
+    ]
     return "".join(
         json.dumps(snapshot, separators=(",", ":")) + "\n" for snapshot in snapshots
     ).encode()
@@ -170,21 +163,50 @@ def test_compute_floors_reproduces_rethemed_synthetic_values() -> None:
     floors = compute_floors(SYNTHETIC_SPLIT, masked_vote_count=8, seed="42")
 
     assert floors == {
-        "always-agree": 0.425,
-        "visible-majority": 0.49375,
-        "best-constant-oracle": 0.525,
-        "cluster-pattern-oracle": 0.875,
+        "always-agree": 0.59,
+        "visible-majority": 0.58125,
+        "nearest-participant": 0.81875,
+        "five-neighbor": 0.89125,
+        "best-constant-oracle": 0.63125,
+        "cluster-pattern-oracle": 0.91625,
     }
     assert render_markdown(floors) == "\n".join(
         [
-            "| Baseline | vote_accuracy |",
-            "| --- | ---: |",
-            "| Always agree | 0.425 |",
-            "| Per-statement visible majority | 0.494 |",
-            "| Per-snapshot best constant oracle | 0.525 |",
-            "| Planted cluster-pattern oracle (ceiling) | 0.875 |",
+            "| Comparator class | Comparator | vote_accuracy |",
+            "| --- | --- | ---: |",
+            "| Prompt-observable | Always agree | 0.590 |",
+            "| Prompt-observable | Per-statement visible majority | 0.581 |",
+            "| Prompt-observable | Nearest participant (1-NN) | 0.819 |",
+            "| Prompt-observable | Five-neighbor vote | 0.891 |",
+            "| Held-out-label diagnostic | Per-snapshot best constant | 0.631 |",
+            "| Generator diagnostic | Latent cluster-pattern replay | 0.916 |",
         ]
     )
+
+
+def test_train_and_eval_use_disjoint_generator_families() -> None:
+    assert (
+        eval_generator_module.GENERATOR_FAMILY
+        != train_generator_module.GENERATOR_FAMILY
+    )
+    eval_row = json.loads(SYNTHETIC_SPLIT.read_text(encoding="utf-8").splitlines()[0])
+    train_row = json.loads(TRAIN_SPLIT.read_text(encoding="utf-8").splitlines()[0])
+    assert (
+        eval_row["meta"]["generator_family"] == eval_generator_module.GENERATOR_FAMILY
+    )
+    assert (
+        train_row["meta"]["generator_family"] == train_generator_module.GENERATOR_FAMILY
+    )
+
+
+def test_semantic_dimension_not_statement_index_causes_latent_vote() -> None:
+    core = sys.modules["synthetic_core"]
+    profile = {"evidence": 0.9, "privacy": -0.9}
+    evidence = core.StatementSpec("same presentation index", "evidence")
+    privacy = core.StatementSpec("same presentation index", "privacy")
+
+    assert core.semantic_vote(random.Random(7), profile, evidence) == 1
+    assert core.semantic_vote(random.Random(7), profile, privacy) == -1
 
 
 def test_cluster_pattern_oracle_replays_hidden_generator_signal() -> None:

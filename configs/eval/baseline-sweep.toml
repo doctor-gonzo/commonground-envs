@@ -2,8 +2,8 @@
 # Predict; override env.taskset.id with commonground-elicit for the Elicit run.
 # Supply the model at invocation time. Native runs always save config.toml and
 # traces.jsonl, so no save-results switch is needed.
-num_tasks = 20
-num_rollouts = 3
+num_tasks = 100
+num_rollouts = 5
 shuffle = false
 push = false
 

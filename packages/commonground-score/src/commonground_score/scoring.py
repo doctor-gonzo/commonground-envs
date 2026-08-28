@@ -120,14 +120,15 @@ def brier_score(
     predictions: Mapping[str, Prediction],
     held_out: Mapping[str, int],
 ) -> float:
-    """Return mean multiclass Brier score for agree/disagree/pass predictions.
+    """Return normalized multiclass Brier score for agree/disagree/pass.
 
     Probabilistic predictions are dictionaries keyed by ``agree``, ``disagree``,
     and ``pass``. Valid non-negative finite mappings are normalized to sum to
     one. Invalid or non-normalizable mappings score as the uniform
     distribution, representing no information. Point predictions using ``1``,
     ``-1``, or ``0`` are converted to one-hot probabilities. Missing
-    predictions use an all-zero vector.
+    predictions use the uniform distribution. The conventional three-class
+    squared-error sum is divided by two, giving a documented ``[0, 1]`` range.
     """
 
     if not held_out:
@@ -136,7 +137,7 @@ def brier_score(
     for cell_id, actual_vote in held_out.items():
         pred_probs = _prediction_probs(predictions.get(cell_id))
         actual_label = _VOTE_TO_LABEL[actual_vote]
-        total += sum(
+        total += 0.5 * sum(
             (pred_probs[label] - float(label == actual_label)) ** 2 for label in _LABELS
         )
     return total / len(held_out)
@@ -148,7 +149,7 @@ def _prediction_probs(prediction: Prediction | None) -> dict[str, float]:
     if prediction in _VOTE_TO_LABEL:
         label = _VOTE_TO_LABEL[prediction]
         return {candidate: float(candidate == label) for candidate in _LABELS}
-    return {label: 0.0 for label in _LABELS}
+    return _uniform_probs()
 
 
 def _mapping_prediction_probs(prediction: Mapping[object, object]) -> dict[str, float]:

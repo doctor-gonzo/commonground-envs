@@ -1,7 +1,7 @@
 [project]
 name = "commonground-elicit"
-version = "0.2.5"
-description = "Policy-issue finding and faction-splitting question selection over synthetic scenarios."
+version = "0.3.0"
+description = "Structured policy-issue diagnosis and top-k clarification over synthetic stakeholder scenarios."
 authors = [{ name = "Common Ground contributors" }]
 license = "Apache-2.0"
 license-files = ["LICENSE"]
@@ -18,8 +18,8 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
-    "commonground-scenarios==0.1.1",
-    "commonground-score==0.1.1",
+    "commonground-scenarios==0.2.0",
+    "commonground-score==0.2.0",
     "datasets>=5.0.1,<6.0.0",
     "verifiers==0.3.0",
 ]
@@ -37,5 +37,5 @@ include = [
 ]
 
 [tool.verifiers.eval]
-num_examples = 20
+num_examples = 100
 rollouts_per_example = 1

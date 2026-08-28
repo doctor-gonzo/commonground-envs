@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import random
+import re
 from collections.abc import Callable
 from typing import Any
 
@@ -57,10 +59,22 @@ def generate_scenario(
 
     documents = copy.deepcopy(list(template.documents))
     planted_items = copy.deepcopy(list(template.planted_items))
+    distractors = copy.deepcopy(list(template.distractors))
     semantic_scope = SEMANTIC_SCOPES[seed % len(SEMANTIC_SCOPES)]
     if semantic_scope is not None:
         _apply_semantic_scope(documents, planted_items, semantic_scope)
-    rng.shuffle(documents)
+    generator_family = (
+        "heldout-opaque-layout-v2"
+        if template.template_set == "heldout"
+        else "train-rotating-layout-v2"
+    )
+    _randomize_visible_structure(
+        rng,
+        documents,
+        planted_items,
+        distractors,
+        template_set=template.template_set,
+    )
     if prose_polisher is not None:
         for document in documents:
             polished = prose_polisher(document["text"])
@@ -68,13 +82,22 @@ def generate_scenario(
                 raise TypeError("prose_polisher must return text")
             document["text"] = polished
 
+    for planted in planted_items:
+        planted["decision_terms"] = _decision_terms(str(planted["canonical_question"]))
+        planted["decision_value"] = _decision_value(
+            str(planted["canonical_question"]),
+            str(planted["anchor_quote"]),
+        )
+        planted["related_evidence"] = _related_evidence(documents, planted)
     factions = copy.deepcopy(list(template.factions))
+    _randomize_faction_structure(rng, factions, planted_items)
     for planted in planted_items:
         dimension = planted["target_dimension"]
         planted["target_stances"] = {
             faction["faction_id"]: _stance_for(float(faction["priors"][dimension]))
             for faction in factions
         }
+    _add_visible_faction_tendencies(factions, planted_items)
 
     scenario = {
         "scenario_id": scenario_id_for(template.template_id, seed),
@@ -86,7 +109,7 @@ def generate_scenario(
         "factions": factions,
         "documents": documents,
         "planted_items": planted_items,
-        "distractors": copy.deepcopy(list(template.distractors)),
+        "distractors": distractors,
         "persona_panel": {
             "vote_rule": "dimension-threshold-v1",
             "pass_threshold": PASS_THRESHOLD,
@@ -102,6 +125,7 @@ def generate_scenario(
             "generation_mode": "operator-polished"
             if prose_polisher is not None
             else "template",
+            "generator_family": generator_family,
         },
     }
     validate_scenario(scenario)
@@ -153,3 +177,211 @@ def _apply_semantic_scope(
             f"{alias.removesuffix('?')} {scope}?"
             for alias in plant["canonical_question_aliases"]
         ]
+
+
+_QUESTION_STOPWORDS = frozenset(
+    {
+        "after",
+        "allowed",
+        "before",
+        "could",
+        "decide",
+        "does",
+        "during",
+        "each",
+        "from",
+        "have",
+        "instead",
+        "into",
+        "must",
+        "should",
+        "than",
+        "that",
+        "their",
+        "them",
+        "this",
+        "under",
+        "what",
+        "when",
+        "which",
+        "with",
+        "without",
+        "would",
+    }
+)
+_SCOPE_TERMS = frozenset(
+    token
+    for scope in SEMANTIC_SCOPES
+    if scope is not None
+    for token in re.findall(r"[^\W_]+", scope.casefold())
+    if len(token) >= 4
+)
+
+
+def _randomize_visible_structure(
+    rng: random.Random,
+    documents: list[dict[str, str]],
+    planted_items: list[dict[str, Any]],
+    distractors: list[dict[str, str]],
+    *,
+    template_set: str,
+) -> None:
+    """Remove stable ID, order, style, and anchor-position codebooks."""
+
+    old_to_new: dict[str, str] = {}
+    used_ids: set[str] = set()
+    styles = ["brief", "procedure", "guide", "record", "notice", "appendix"]
+    title_roots = [
+        "Operations note",
+        "Service reference",
+        "Implementation record",
+        "Review packet",
+        "Field guidance",
+        "Decision memo",
+    ]
+    for document_index, document in enumerate(documents):
+        if template_set == "heldout":
+            digest = hashlib.sha256(
+                f"{rng.random()}:{document['doc_id']}".encode()
+            ).hexdigest()[:8]
+            new_id = f"doc-{digest}"
+        else:
+            new_id = f"train-doc-{document_index + 1}-{rng.randrange(100, 1000)}"
+        while new_id in used_ids:
+            new_id = f"doc-{rng.randrange(16**8):08x}"
+        used_ids.add(new_id)
+        old_to_new[document["doc_id"]] = new_id
+        document["doc_id"] = new_id
+        document["title"] = f"{rng.choice(title_roots)} {rng.randrange(100, 1000)}"
+        document["style"] = rng.choice(styles)
+        sentences = re.split(r"(?<=[.!?])\s+", document["text"])
+        rng.shuffle(sentences)
+        document["text"] = " ".join(sentences)
+    for plant in planted_items:
+        plant["doc_id"] = old_to_new[plant["doc_id"]]
+        plant["plant_id"] = f"issue-{rng.randrange(16**8):08x}"
+    for distractor in distractors:
+        distractor["doc_id"] = old_to_new[distractor["doc_id"]]
+    rng.shuffle(documents)
+    rng.shuffle(planted_items)
+
+
+def _randomize_faction_structure(
+    rng: random.Random,
+    factions: list[dict[str, Any]],
+    planted_items: list[dict[str, Any]],
+) -> None:
+    """Use opaque faction IDs and varying order/count without changing summaries."""
+
+    dimensions = [str(plant["target_dimension"]) for plant in planted_items]
+    extra_factions = (
+        (
+            "Implementation council",
+            "Balances operational continuity with reviewable safeguards.",
+        ),
+        (
+            "Access delegates",
+            "Prioritizes workable exceptions for people facing access barriers.",
+        ),
+    )
+    for name, summary in extra_factions[: rng.randrange(3)]:
+        priors = {}
+        for dimension in dimensions:
+            magnitude = rng.choice((0.15, 0.45, 0.75))
+            priors[dimension] = magnitude if rng.random() < 0.5 else -magnitude
+        factions.append(
+            {
+                "faction_id": "placeholder",
+                "name": name,
+                "summary": summary,
+                "priors": priors,
+            }
+        )
+    rng.shuffle(factions)
+    for faction in factions:
+        faction["faction_id"] = f"group-{rng.randrange(16**8):08x}"
+
+
+def _add_visible_faction_tendencies(
+    factions: list[dict[str, Any]],
+    planted_items: list[dict[str, Any]],
+) -> None:
+    """Make varied synthetic stance targets inferable from the model prompt."""
+
+    tendency = {
+        "agree": "leans toward yes",
+        "disagree": "leans toward no",
+        "pass": "has no settled position",
+    }
+    for faction in factions:
+        clauses = []
+        for plant in planted_items:
+            terms = ", ".join(str(term) for term in plant["decision_terms"])
+            clauses.append(
+                f"For decisions involving {terms}, "
+                f"{tendency[plant['target_stances'][faction['faction_id']]]}."
+            )
+        faction["summary"] = f"{faction['summary']} {' '.join(clauses)}"
+
+
+def _decision_terms(question: str) -> list[str]:
+    """Extract a deterministic multi-token latent decision signature."""
+
+    tokens = re.findall(r"[^\W_]+", question.casefold())
+    terms = [
+        token
+        for token in tokens
+        if len(token) >= 4 and token not in _QUESTION_STOPWORDS
+    ]
+    return list(dict.fromkeys(terms))[:8]
+
+
+def _decision_value(question: str, anchor: str) -> float:
+    """Derive heterogeneous value from model-visible policy consequences."""
+
+    text = f"{question} {anchor}".casefold()
+    if any(term in text for term in ("safety", "emergency", "urgent", "harm")):
+        return 1.0
+    if any(
+        term in text
+        for term in ("authority", "authorize", "approval", "prohibit", "require")
+    ):
+        return 0.85
+    if any(
+        term in text
+        for term in ("access", "unavailable", "unreachable", "offline", "cannot")
+    ):
+        return 0.7
+    return 0.55
+
+
+def _related_evidence(
+    documents: list[dict[str, str]],
+    plant: dict[str, Any],
+) -> dict[str, str] | None:
+    """Identify the second visible rule for a planted contradiction."""
+
+    if plant["type"] != "contradiction":
+        return None
+    anchor_terms = set(_decision_terms(str(plant["anchor_quote"]))) - _SCOPE_TERMS
+    question_terms = (
+        set(_decision_terms(str(plant["canonical_question"]))) - _SCOPE_TERMS
+    )
+    candidates: list[tuple[int, int, str, str]] = []
+    for document in documents:
+        if document["doc_id"] == plant["doc_id"]:
+            continue
+        for sentence in re.split(r"(?<=[.!?])\s+", document["text"]):
+            sentence_terms = set(_decision_terms(sentence))
+            candidates.append(
+                (
+                    len(anchor_terms & sentence_terms),
+                    len(question_terms & sentence_terms),
+                    document["doc_id"],
+                    sentence,
+                )
+            )
+    if not candidates:
+        return None
+    _, _, doc_id, quote = max(candidates, key=lambda item: (item[0], item[1], item[3]))
+    return {"doc_id": doc_id, "quote": quote}

@@ -24,7 +24,9 @@ by `commonground-elicit`; missing votes are excluded from both calculations.
 probability mappings keyed by `agree`, `disagree`, and `pass` or their numeric
 equivalents. Valid non-negative finite mappings are normalized before scoring.
 Invalid or non-normalizable mappings score as the uniform distribution
-(`1/3`, `1/3`, `1/3`) to represent no information.
+(`1/3`, `1/3`, `1/3`) to represent no information. Version 0.2 divides the
+three-class squared-error sum by two, so the returned score is bounded to
+`[0,1]`; callers requiring the unnormalized convention must multiply by two.
 
 `rating_to_vote(value)` implements the canonical 0-10 rating conversion used for
 dataset parity:
