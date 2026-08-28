@@ -5,8 +5,8 @@
 #   prime login
 #   prime config set-api-key
 #
-# Then run this script from anywhere:
-#   bash ~/Desktop/xoCortex/projects/commonground-envs/scripts/local_smoke.sh
+# Then run this script from the repository root:
+#   bash scripts/local_smoke.sh
 #
 # Never pass an API key as a command argument or commit it to a file in this repo.
 
