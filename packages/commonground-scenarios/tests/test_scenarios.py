@@ -13,6 +13,7 @@ from commonground_scenarios import (
     scenario_to_bytes,
     validate_scenario,
 )
+from commonground_scenarios import generator as generator_module
 from jsonschema import Draft202012Validator, FormatChecker
 
 ALL_TEMPLATES = TRAIN_TEMPLATES + HELDOUT_TEMPLATES
@@ -86,15 +87,26 @@ def test_generated_scenario_contains_complete_planted_structure(
         isinstance(plant["canonical_question_aliases"], list)
         for plant in scenario["planted_items"]
     )
-    tendency_words = {
-        "agree": "leans toward yes",
-        "disagree": "leans toward no",
-        "pass": "has no settled position",
-    }
     assert all(
-        ", ".join(plant["decision_terms"]) in faction["summary"]
-        and tendency_words[plant["target_stances"][faction["faction_id"]]]
-        in faction["summary"]
+        "For decisions involving" not in faction["summary"]
+        and "leans toward yes" not in faction["summary"]
+        and "leans toward no" not in faction["summary"]
+        and all(
+            ", ".join(plant["decision_terms"]) not in faction["summary"]
+            for plant in scenario["planted_items"]
+        )
+        for faction in scenario["factions"]
+    )
+    assert all(
+        any(
+            phrase in faction["summary"]
+            for phrase in generator_module._PRINCIPLE_EXAMPLES[
+                (
+                    plant["type"],
+                    plant["target_stances"][faction["faction_id"]],
+                )
+            ]
+        )
         for faction in scenario["factions"]
         for plant in scenario["planted_items"]
     )

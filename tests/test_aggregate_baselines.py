@@ -82,9 +82,14 @@ def write_native_run(
     )
     (run_dir / "config.toml").write_text(config, encoding="utf-8")
 
+    is_predict = (
+        aggregate.environment_package_name(environment) == "commonground-predict"
+    )
     reward_name = (
         "vote_accuracy"
-        if environment == "commonground-predict"
+        if is_predict and environment.endswith("@0.3.0")
+        else "probability_reward"
+        if is_predict
         else "question_utility"
         if task_mode == "elicit-ask"
         else "finding_f1"
@@ -94,8 +99,10 @@ def write_native_run(
         for rollout_index in range(num_rollouts):
             score = 1.0 if rollout_index % 3 != 1 else 0.0
             metrics: dict[str, float] = {}
-            if environment == "commonground-predict":
+            if is_predict:
                 metrics["brier"] = 1.0 - score
+                if not environment.endswith("@0.3.0"):
+                    metrics["vote_accuracy"] = score
             elif task_mode == "find":
                 metrics["finding_localization_recall"] = score
                 metrics["finding_type_accuracy"] = score
@@ -108,9 +115,7 @@ def write_native_run(
                 "verifiers": {"version": "0.3.0"},
                 "run": {"type": "eval", "id": run_id},
                 "task": {
-                    "type": "PredictionTask"
-                    if environment == "commonground-predict"
-                    else "ElicitTask",
+                    "type": "PredictionTask" if is_predict else "ElicitTask",
                     "data": {"idx": task_index, "info": task_info},
                 },
                 "agent": {"config": {}, "trainable": True},
@@ -182,6 +187,20 @@ def test_native_v1_run_aggregates_weighted_rewards_and_named_signals(
     assert run.task_ids == (0, 0, 0, 1, 1, 1)
 
 
+def test_native_predict_030_reward_contract_remains_readable(tmp_path: Path) -> None:
+    write_native_run(
+        tmp_path,
+        environment="charliethompson/commonground-predict@0.3.0",
+        run_id="historical-native-run",
+    )
+
+    [summary] = aggregate.load_summaries(tmp_path)
+
+    assert summary.reward_mean == pytest.approx(2 / 3)
+    assert summary.metrics["vote_accuracy"] == pytest.approx((2 / 3, math.sqrt(2) / 3))
+    assert summary.metrics["brier"] == pytest.approx((1 / 3, math.sqrt(2) / 3))
+
+
 def test_native_elicit_modes_never_collapse_to_one_environment_key(
     tmp_path: Path,
 ) -> None:
@@ -214,7 +233,7 @@ def test_native_elicit_modes_never_collapse_to_one_environment_key(
     [
         ("missing-rollout", r"expected 6 rollouts.*found 5"),
         ("failed-episode", r"episode must be ok"),
-        ("null-reward", r"reward 'vote_accuracy' must be an object"),
+        ("null-reward", r"reward 'probability_reward' must be an object"),
         ("duplicate-episode", r"duplicate episode id"),
         ("wrong-distribution", r"expected 2 distinct examples, found 1"),
         ("mixed-run-ids", r"exactly one eval run id"),
@@ -235,7 +254,7 @@ def test_native_v1_complete_run_validation_fails_closed(
     elif case == "failed-episode":
         rows[0]["ok"] = False
     elif case == "null-reward":
-        rows[0]["traces"][0]["rewards"]["vote_accuracy"] = None
+        rows[0]["traces"][0]["rewards"]["probability_reward"] = None
     elif case == "duplicate-episode":
         rows[1]["id"] = rows[0]["id"]
     elif case == "wrong-distribution":

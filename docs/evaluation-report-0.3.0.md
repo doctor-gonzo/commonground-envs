@@ -8,6 +8,17 @@ This report records the model-free and model-evaluation evidence for the
 breaking 0.3.0 redesign. It intentionally contains no 0.2.x model scores: both
 corpora and both response contracts changed, so those runs are not comparable.
 
+## Post-release audit note
+
+An external audit found that 0.3 faction summaries repeated each planted
+issue's decision terms and exact yes/no/pass stance. A new prompt-only parser
+that uses only public documents and faction summaries scores **0.787** on Ask,
+so the 0.3 Ask results must be interpreted partly as structured extraction,
+not latent stance inference. The public 0.3 artifacts and scores remain
+historical facts; the unreleased 0.4 candidate removes these clauses and the
+same parser scores 0.000. The audit also prompted the hierarchical
+template/variant intervals recorded below.
+
 ## Release scope
 
 | Environment | Eval rows | Train rows | Primary reward | Important diagnostics |
@@ -41,14 +52,15 @@ remains the dominant comparator; any model claim must report it.
 | Prompt-observable | find | Legacy 0.2 document-ID/position codebook | 0.000 |
 | Prompt-observable | elicit-ask | Template clarity questions | 0.000 |
 | Prompt-observable | elicit-ask | Randomly targeted questions | 0.000 |
+| Prompt-observable | elicit-ask | 0.3 summary/stance codebook parser | 0.787 |
 | Component oracle | elicit-ask | Exact top-K issues + random stances | 0.655 |
 | Component oracle | elicit-ask | Exact top-K issues + visible-summary stances | 1.000 |
 
 These values come from `scripts/compute_elicit_floors.py`. The legacy-codebook
 regression directly tests the critical 0.2 shortcut. The other prompt baselines
-are weak floors, not a complete difficulty ladder. The component oracles use
-hidden top-K issue targets; their gap isolates stance inference and confirms
-that public faction summaries support exact stance recovery.
+are weak floors, not a complete difficulty ladder. The 0.787 parser establishes
+that the public summary clauses were a material shortcut. The component oracles
+use hidden top-K issue targets; their gap diagnoses the same stance disclosure.
 
 ## Exact-artifact model study
 
@@ -56,48 +68,50 @@ Four model families, including one open-weight model, each ran all 100 tasks
 with five rollouts for all three task modes: 6,000 rollouts total. Every rollout
 completed successfully and none used recovered retry/error history.
 
-| Task | Model | Reward mean ± rollout SD | 95% task-cluster CI | Diagnostic mean | Zero-reward tasks |
+| Task | Model | Reward mean ± rollout SD | 95% clustered bootstrap CI | Diagnostic mean | Zero-reward tasks |
 | --- | --- | ---: | ---: | --- | ---: |
 | Predict | Claude Sonnet 4.5 | 0.730 ± 0.173 | [0.698, 0.761] | Brier 0.191 | 0 |
-| Predict | Gemini 2.5 Flash | 0.694 ± 0.202 | [0.657, 0.730] | Brier 0.226 | 0 |
+| Predict | Gemini 2.5 Flash | 0.694 ± 0.202 | [0.656, 0.730] | Brier 0.226 | 0 |
 | Predict | GPT-4.1 | 0.653 ± 0.169 | [0.621, 0.683] | Brier 0.270 | 0 |
 | Predict | Qwen3 30B A3B Instruct | 0.572 ± 0.201 | [0.537, 0.607] | Brier 0.286 | 0 |
-| Find | Claude Sonnet 4.5 | 0.235 ± 0.307 | [0.186, 0.286] | localization 0.420; type 0.382 | 34 |
-| Find | GPT-4.1 | 0.228 ± 0.249 | [0.187, 0.271] | localization 0.603; type 0.543 | 32 |
-| Find | Gemini 2.5 Flash | 0.172 ± 0.215 | [0.138, 0.207] | localization 0.711; type 0.545 | 28 |
-| Find | Qwen3 30B A3B Instruct | 0.120 ± 0.201 | [0.087, 0.154] | localization 0.483; type 0.675 | 58 |
-| Ask | Claude Sonnet 4.5 | 0.296 ± 0.229 | [0.255, 0.338] | — | 15 |
-| Ask | Gemini 2.5 Flash | 0.155 ± 0.213 | [0.122, 0.190] | — | 34 |
-| Ask | Qwen3 30B A3B Instruct | 0.052 ± 0.112 | [0.035, 0.072] | — | 61 |
-| Ask | GPT-4.1 | 0.052 ± 0.120 | [0.036, 0.071] | — | 62 |
+| Find | Claude Sonnet 4.5 | 0.235 ± 0.307 | [0.158, 0.317] | localization 0.420; type 0.382 | 34 |
+| Find | GPT-4.1 | 0.228 ± 0.249 | [0.168, 0.294] | localization 0.603; type 0.543 | 32 |
+| Find | Gemini 2.5 Flash | 0.172 ± 0.215 | [0.122, 0.225] | localization 0.711; type 0.545 | 28 |
+| Find | Qwen3 30B A3B Instruct | 0.120 ± 0.201 | [0.066, 0.180] | localization 0.483; type 0.675 | 58 |
+| Ask | Claude Sonnet 4.5 | 0.296 ± 0.229 | [0.232, 0.361] | — | 15 |
+| Ask | Gemini 2.5 Flash | 0.155 ± 0.213 | [0.110, 0.206] | — | 34 |
+| Ask | Qwen3 30B A3B Instruct | 0.052 ± 0.112 | [0.026, 0.085] | — | 61 |
+| Ask | GPT-4.1 | 0.052 ± 0.120 | [0.024, 0.088] | — | 62 |
 
-Intervals use 50,000 deterministic percentile bootstrap resamples of the 100
-task means (seed `20260828`). A task mean first averages its five repeated
-rollouts. Paired model comparisons reuse the same resampled task indices;
-individual rollouts are never treated as 500 independent tasks.
+Intervals use 20,000 deterministic percentile bootstrap resamples (seed
+`20260828`). A task mean first averages its five repeated rollouts. Predict
+resamples 100 tasks. Elicit first resamples 20 base templates, then resamples
+five variants within each selected template. Paired model comparisons reuse
+the same hierarchical draw; individual rollouts are never treated as 500
+independent tasks.
 
 Selected paired differences show the main ranking structure:
 
-| Task | Comparison | Mean difference | 95% paired task-bootstrap CI |
+| Task | Comparison | Mean difference | 95% paired clustered bootstrap CI |
 | --- | --- | ---: | ---: |
-| Predict | Sonnet − Gemini | +0.037 | [+0.007, +0.068] |
-| Predict | Gemini − GPT-4.1 | +0.041 | [+0.006, +0.073] |
-| Predict | GPT-4.1 − Qwen | +0.081 | [+0.047, +0.114] |
-| Find | Sonnet − GPT-4.1 | +0.007 | [-0.059, +0.074] |
-| Find | GPT-4.1 − Gemini | +0.056 | [+0.011, +0.103] |
-| Find | Gemini − Qwen | +0.053 | [+0.011, +0.095] |
-| Ask | Sonnet − Gemini | +0.141 | [+0.093, +0.190] |
-| Ask | Gemini − Qwen | +0.102 | [+0.064, +0.142] |
-| Ask | Qwen − GPT-4.1 | +0.000 | [-0.026, +0.026] |
+| Predict | Sonnet − Gemini | +0.037 | [+0.007, +0.067] |
+| Predict | Gemini − GPT-4.1 | +0.041 | [+0.006, +0.074] |
+| Predict | GPT-4.1 − Qwen | +0.081 | [+0.046, +0.114] |
+| Find | Sonnet − GPT-4.1 | +0.007 | [-0.094, +0.111] |
+| Find | GPT-4.1 − Gemini | +0.056 | [+0.001, +0.114] |
+| Find | Gemini − Qwen | +0.053 | [-0.005, +0.112] |
+| Ask | Sonnet − Gemini | +0.141 | [+0.067, +0.216] |
+| Ask | Gemini − Qwen | +0.102 | [+0.047, +0.163] |
+| Ask | Qwen − GPT-4.1 | +0.000 | [-0.045, +0.041] |
 
 The complete 18-comparison table is generated by
 `scripts/analyze_release_study.py`. Predict separates all four models but none
 beats the prompt-observable 1-NN (0.819) or 5-NN (0.891) comparators; Qwen's
 0.572 also trails the always-agree mean of 0.590. Find is difficult and
 non-saturated: Sonnet and GPT-4.1 are statistically unresolved, while the
-Qwen mean falls below the 0.140 vague-span heuristic. Ask has substantial
-headroom below the 0.655 exact-issue/random-stance component oracle and
-separates Sonnet and Gemini from the two lowest-scoring models.
+Qwen mean falls below the 0.140 vague-span heuristic. Ask is compromised by the
+0.787 public-summary parser; the model ranking therefore cannot be presented as
+evidence of latent faction inference.
 
 These are reference-model results on published synthetic answers, not a
 contamination-resistant leaderboard and not evidence of human-preference
@@ -129,8 +143,9 @@ and native/legacy task-loading verification.
 - Predict train/eval text, session IDs, seeds, and generator families are
   disjoint; statement dimension changes alter generated votes.
 - Elicit has 100 distinct prompt hashes and answer hashes per split, no exact
-  cross-split prompt/answer overlap, disjoint generator families, opaque IDs,
-  and varied structural signatures.
+  cross-split prompt/answer overlap, disjoint template/layout labels, opaque
+  IDs, and varied structural signatures. These 0.3 checks were identity/layout
+  sensitive and did not detect the public summary codebook.
 - Exact Elicit answers attain 1.0. Type hedging, missing contradiction pairs,
   generic gap labels, broad evidence, duplicate spans, and one-noun questions
   are regression-tested.

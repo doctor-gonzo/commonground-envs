@@ -122,6 +122,32 @@ def test_native_v1_taskset_scores_a_trace_without_the_legacy_bridge() -> None:
     assert trace.metrics["question_utility"] > 0.0
 
 
+def test_optional_shaped_find_reward_preserves_strict_f1_as_metric() -> None:
+    strict_env = load_environment()
+    shaped_env = load_environment(reward_mode="shaped")
+    row = dict(shaped_env.get_eval_dataset()[0])
+    exact = correct_response_from_row(row)
+    partial_finding = dict(exact["findings"][0])
+    partial_finding["type"] = "gap" if partial_finding["type"] != "gap" else "ambiguity"
+    partial_finding["related_evidence"] = None
+    response = {"findings": [partial_finding]}
+
+    strict_state = score_row(strict_env, row, response)
+    shaped_state = score_row(shaped_env, row, response)
+    exact_shaped_state = score_row(shaped_env, row, exact)
+
+    assert strict_state["reward"] == 0.0
+    assert shaped_state["reward"] == pytest.approx(1 / 12)
+    assert shaped_state["metrics"]["finding_f1"] == 0.0
+    assert exact_shaped_state["reward"] == 1.0
+    assert shaped_env.env_args["reward_mode"] == "shaped"
+
+
+def test_unknown_reward_mode_is_rejected() -> None:
+    with pytest.raises(ValueError, match="unknown reward_mode"):
+        load_environment(reward_mode="dense")
+
+
 @pytest.mark.parametrize(
     ("split", "expected_path", "expected_rows", "expected_template_set"),
     [
@@ -921,6 +947,7 @@ def test_configured_short_yes_no_question_and_anchor_are_scorable(
     document["text"] = document["text"].replace(plant["anchor_quote"], "Pause now.")
     plant["anchor_quote"] = "Pause now."
     plant["canonical_question"] = "Should we pause now?"
+    plant["decision_terms"] = ["pause", "now"]
     data_path = tmp_path / "short-configured.jsonl"
     data_path.write_text(json.dumps(scenario, sort_keys=True) + "\n", encoding="utf-8")
     env = load_environment(task="elicit-ask", question_count=1, data_path=data_path)
@@ -1330,6 +1357,9 @@ def test_tiny_fragment_cannot_turn_partial_output_credit_into_a_second_match() -
         "f1": 0.5,
         "localization_recall": 0.5,
         "type_accuracy": 1.0,
+        "type_recall": 0.5,
+        "diagnosis_recall": 0.5,
+        "relation_recall": 0.5,
     }
 
 

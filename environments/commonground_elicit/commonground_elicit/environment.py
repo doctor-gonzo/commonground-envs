@@ -44,6 +44,7 @@ MAX_JSON_STARTS = 64
 MAX_JSON_DEPTH = 32
 MAX_JSON_NODES = 10_000
 VALID_TASKS = frozenset({"find", "elicit-ask"})
+VALID_REWARD_MODES = frozenset({"strict", "shaped"})
 STANCE_TO_VOTE = {"agree": 1, "disagree": -1, "pass": 0}
 QUESTION_GROUNDING_WEIGHT = 0.5
 STANCE_ACCURACY_WEIGHT = 0.5
@@ -142,10 +143,13 @@ class ElicitTask(vf.Task[ElicitTaskData]):
             )
             return {"question_utility": score}
         score = await finding_f1(
-            completion,
-            self.data.answer,
-            ElicitJsonParser("findings"),
+            completion, self.data.answer, ElicitJsonParser("findings")
         )
+        if self.data.info.get("reward_mode") == "shaped":
+            score = await finding_training_reward(
+                completion, self.data.answer, ElicitJsonParser("findings")
+            )
+            return {"finding_training_reward": score}
         return {"finding_f1": score}
 
     @vf.metric
@@ -169,11 +173,16 @@ class ElicitTask(vf.Task[ElicitTaskData]):
             self.data.answer,
             ElicitJsonParser("findings"),
         )
-        return {
+        metrics = {
             "question_utility": question_score,
             "finding_localization_recall": localization,
             "finding_type_accuracy": type_score,
         }
+        if self.data.info.get("reward_mode") == "shaped":
+            metrics["finding_f1"] = await finding_f1(
+                completion, self.data.answer, ElicitJsonParser("findings")
+            )
+        return metrics
 
 
 class ElicitTasksetConfig(vf.TasksetConfig):
@@ -189,6 +198,7 @@ class ElicitTasksetConfig(vf.TasksetConfig):
     panel_polarization: float = 1.0
     question_count: int = 2
     split: Literal["eval", "train"] = "eval"
+    reward_mode: Literal["strict", "shaped"] = "strict"
 
 
 class ElicitHarness(NullHarness):
@@ -197,6 +207,9 @@ class ElicitHarness(NullHarness):
 
 class _CompatibilityRubric:
     """Small adapter for existing local score probes; native runs use ElicitTask."""
+
+    def __init__(self, reward_mode: str = "strict") -> None:
+        self.reward_mode = reward_mode
 
     async def score_rollout(self, state: Mapping[str, Any]) -> None:
         completion = state["completion"]
@@ -210,8 +223,17 @@ class _CompatibilityRubric:
             )
             metrics["question_utility"] = reward
         else:
-            reward = await finding_f1(completion, answer, ElicitJsonParser("findings"))
-            metrics["finding_f1"] = reward
+            strict_reward = await finding_f1(
+                completion, answer, ElicitJsonParser("findings")
+            )
+            reward = (
+                await finding_training_reward(
+                    completion, answer, ElicitJsonParser("findings")
+                )
+                if self.reward_mode == "shaped"
+                else strict_reward
+            )
+            metrics["finding_f1"] = strict_reward
             metrics["finding_localization_recall"] = await finding_localization_recall(
                 completion, answer, ElicitJsonParser("findings")
             )
@@ -275,7 +297,7 @@ class ElicitTaskset(vf.Taskset[ElicitTask, ElicitTasksetConfig]):
                 "difficulty arguments remove all planted items from the dataset"
             )
         self.env_id = ENV_ID
-        self.rubric = _CompatibilityRubric()
+        self.rubric = _CompatibilityRubric(config.reward_mode)
         self.env_args = {
             "task": config.task_mode,
             "docs_count": config.docs_count,
@@ -287,6 +309,7 @@ class ElicitTaskset(vf.Taskset[ElicitTask, ElicitTasksetConfig]):
             "data_path": str(self.eval_path),
             "train_data_path": str(self.train_path),
             "split": config.split,
+            "reward_mode": config.reward_mode,
         }
 
     def load(self) -> Sequence[ElicitTask]:
@@ -297,7 +320,10 @@ class ElicitTaskset(vf.Taskset[ElicitTask, ElicitTasksetConfig]):
                     name=str(json.loads(row["info"])["scenario_id"]),
                     prompt=row["prompt"],
                     answer=json.loads(row["answer"]),
-                    info=json.loads(row["info"]),
+                    info={
+                        **json.loads(row["info"]),
+                        "reward_mode": self.config.reward_mode,
+                    },
                 )
             )
             for index, row in enumerate(self._eval_rows)
@@ -326,6 +352,7 @@ def load_taskset(
     question_count: int = 2,
     train_data_path: str | os.PathLike[str] | None = None,
     split: str = "eval",
+    reward_mode: str = "strict",
     **kwargs: Any,
 ) -> ElicitTaskset:
     """Build the native Verifiers v1 taskset with the public load controls."""
@@ -340,6 +367,10 @@ def load_taskset(
         task=task,
     )
     _bundled_data_path(split)
+    if reward_mode not in VALID_REWARD_MODES:
+        raise ValueError(
+            f"unknown reward_mode {reward_mode!r}; valid modes: strict, shaped"
+        )
     if kwargs:
         raise TypeError(f"unknown taskset arguments: {sorted(kwargs)}")
     return ElicitTaskset(
@@ -357,6 +388,7 @@ def load_taskset(
             panel_polarization=panel_polarization,
             question_count=question_count,
             split=split,
+            reward_mode=reward_mode,
         )
     )
 
@@ -373,6 +405,7 @@ def load_environment(
     question_count: int = 2,
     train_data_path: str | os.PathLike[str] | None = None,
     split: str = "eval",
+    reward_mode: str = "strict",
     **kwargs: Any,
 ) -> legacy_vf.SingleTurnEnv:
     """Build the legacy adapter required by Prime Hosted Evaluations."""
@@ -391,19 +424,34 @@ def load_environment(
         question_count=question_count,
         train_data_path=train_data_path,
         split=split,
+        reward_mode=reward_mode,
     )
     parser = ElicitJsonParser("questions" if task == "elicit-ask" else "findings")
     rubric = (
         legacy_vf.Rubric(funcs=[question_utility], weights=[1.0], parser=parser)
         if task == "elicit-ask"
         else legacy_vf.Rubric(
-            funcs=[
-                finding_f1,
-                finding_localization_recall,
-                finding_type_accuracy,
-                question_utility,
-            ],
-            weights=[1.0, 0.0, 0.0, 0.0],
+            funcs=(
+                [
+                    finding_training_reward,
+                    finding_f1,
+                    finding_localization_recall,
+                    finding_type_accuracy,
+                    question_utility,
+                ]
+                if reward_mode == "shaped"
+                else [
+                    finding_f1,
+                    finding_localization_recall,
+                    finding_type_accuracy,
+                    question_utility,
+                ]
+            ),
+            weights=(
+                [1.0, 0.0, 0.0, 0.0, 0.0]
+                if reward_mode == "shaped"
+                else [1.0, 0.0, 0.0, 0.0]
+            ),
             parser=parser,
         )
     )
@@ -750,7 +798,7 @@ def render_prompt(
                 '"questions":[{"doc_id":"<document id>","quote":"<passage>","question":"<specific yes/no clarifying question>",'
                 '"target_stances":{"<faction id>":"agree|disagree|pass"}}]}'
             ),
-            f"Return exactly {question_count} question objects. Select the issues with the greatest visible decision impact and faction disagreement. The findings determine reward; questions are scored as a logged weight-zero companion metric.",
+            f"Return exactly {question_count} question objects. Select the issues most likely to reveal faction disagreement. The findings determine reward; questions are scored as a logged weight-zero companion metric.",
             "Phrase each question as yes/no: agree means that faction predicts yes, disagree means no, and pass means no position.",
             "For every finding and question, identify the concrete unresolved threshold, exception, authority conflict, or alternative; sharing one noun with the quote is insufficient.",
             "For contradictions, related_evidence must quote the second conflicting rule. For other finding types it must be null.",
@@ -770,7 +818,7 @@ def render_ask_prompt(
         f"Select and raise exactly {question_count} clarifying questions grounded in these policy documents.",
         "Each question should expose a specific ambiguity, contradiction, or uncovered case that could split the listed stakeholder factions.",
         "Phrase every question as yes/no. Predict every faction's answer: agree means yes, disagree means no, and pass means no position.",
-        "Choose from more candidate issues than the output budget. Prioritize visible operational impact and faction disagreement.",
+        "Choose from more candidate issues than the output budget. Prioritize questions whose answers would distinguish the factions' stated policy principles.",
         "Copy the exact supporting passage into quote. The question must name the concrete unresolved threshold, exception, authority conflict, or decision alternative; sharing one noun is insufficient.",
         "Generic questions about whether rules should exist are not useful.",
         "",
@@ -954,7 +1002,7 @@ def _plant_attainable_question_utility(
     *,
     panel_polarization: float,
 ) -> float:
-    """Return model-inferable issue value used to normalize the row maximum."""
+    """Return disagreement-weighted issue value used to normalize the row maximum."""
 
     stances = plant.get("target_stances", {})
     if not isinstance(stances, Mapping) or not stances:
@@ -1107,6 +1155,28 @@ async def finding_type_accuracy(
     return float(result.get("type_accuracy", 0.0))
 
 
+async def finding_training_reward(
+    completion: list[dict[str, Any]],
+    answer: Mapping[str, Any] | str,
+    parser: ElicitJsonParser,
+) -> float:
+    """Optional dense curriculum reward; strict F1 remains the eval default."""
+
+    result = _scored_findings(completion, answer, parser)
+    return float(
+        0.25
+        * sum(
+            float(result.get(component, 0.0))
+            for component in (
+                "localization_recall",
+                "type_recall",
+                "diagnosis_recall",
+                "relation_recall",
+            )
+        )
+    )
+
+
 def _scored_findings(
     completion: list[dict[str, Any]],
     answer: Mapping[str, Any] | str,
@@ -1238,6 +1308,9 @@ def match_findings(
     typed_adjacency: dict[int, list[tuple[float, int]]] = {
         candidate_index: [] for candidate_index in range(len(candidates))
     }
+    diagnosis_adjacency: dict[int, list[tuple[float, int]]] = {
+        candidate_index: [] for candidate_index in range(len(candidates))
+    }
     adjacency: dict[int, list[tuple[float, int]]] = {
         candidate_index: [] for candidate_index in range(len(candidates))
     }
@@ -1270,15 +1343,22 @@ def match_findings(
                 typed_adjacency[candidate_index].append((overlap, plant_index))
                 if not _finding_diagnosis_matches(candidate, plant):
                     continue
+                diagnosis_adjacency[candidate_index].append((overlap, plant_index))
                 if not _related_evidence_matches(candidate, plant):
                     continue
                 adjacency[candidate_index].append((overlap, plant_index))
-    for graph in (localization_adjacency, typed_adjacency, adjacency):
+    for graph in (
+        localization_adjacency,
+        typed_adjacency,
+        diagnosis_adjacency,
+        adjacency,
+    ):
         for edges in graph.values():
             edges.sort(key=lambda item: (-item[0], item[1]))
 
     localization_true_positive = _maximum_cardinality_matches(localization_adjacency)
     typed_true_positive = _maximum_cardinality_matches(typed_adjacency)
+    diagnosis_true_positive = _maximum_cardinality_matches(diagnosis_adjacency)
     true_positive = _maximum_cardinality_matches(adjacency)
 
     false_positive = len(candidates) - true_positive
@@ -1293,6 +1373,7 @@ def match_findings(
         if localization_true_positive == 0
         else typed_true_positive / localization_true_positive
     )
+    planted_count = len(planted)
     return {
         "true_positive": true_positive,
         "false_positive": false_positive,
@@ -1300,6 +1381,13 @@ def match_findings(
         "f1": f1,
         "localization_recall": localization_recall,
         "type_accuracy": type_accuracy,
+        "type_recall": 0.0
+        if not planted_count
+        else typed_true_positive / planted_count,
+        "diagnosis_recall": (
+            0.0 if not planted_count else diagnosis_true_positive / planted_count
+        ),
+        "relation_recall": 0.0 if not planted_count else true_positive / planted_count,
     }
 
 

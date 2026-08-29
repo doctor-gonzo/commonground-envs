@@ -15,10 +15,10 @@ PROJECTS = {
     "commonground-predict": (
         ROOT / "environments" / "commonground_predict",
         "commonground_predict",
-        "0.3.0",
+        "0.4.0",
         [
-            "commonground-scenarios==0.2.0",
-            "commonground-score==0.2.0",
+            "commonground-scenarios==0.3.0",
+            "commonground-score==0.3.0",
             "datasets>=5.0.1,<6.0.0",
             "verifiers==0.3.0",
         ],
@@ -26,10 +26,10 @@ PROJECTS = {
     "commonground-elicit": (
         ROOT / "environments" / "commonground_elicit",
         "commonground_elicit",
-        "0.3.0",
+        "0.4.0",
         [
-            "commonground-scenarios==0.2.0",
-            "commonground-score==0.2.0",
+            "commonground-scenarios==0.3.0",
+            "commonground-score==0.3.0",
             "datasets>=5.0.1,<6.0.0",
             "verifiers==0.3.0",
         ],
@@ -37,13 +37,13 @@ PROJECTS = {
     "commonground-score": (
         ROOT / "packages" / "commonground-score",
         "commonground_score",
-        "0.2.0",
+        "0.3.0",
         [],
     ),
     "commonground-scenarios": (
         ROOT / "packages" / "commonground-scenarios",
         "commonground_scenarios",
-        "0.2.0",
+        "0.3.0",
         [],
     ),
 }

@@ -1,6 +1,6 @@
 # commonground-predict
 
-`commonground-predict` 0.3.0 is a deterministic Verifiers environment for
+`commonground-predict` 0.4.0 is a deterministic Verifiers environment for
 probabilistic masked-vote prediction over synthetic stakeholder panels. It has
 no judge model: reward is computed locally against eight masked cells per
 snapshot.
@@ -15,7 +15,7 @@ human-preference validity, or general collective-preference reasoning.
 This environment is associated with [Context Engine](https://contextengine.sh),
 which can structure stakeholder statements and votes into auditable preference
 maps. A planned governed export path could let consenting individuals and
-groups retain, license, or sell derived preference datasets. Version 0.3.0
+groups retain, license, or sell derived preference datasets. Version 0.4.0
 contains no live participant data and no live-data exporter.
 
 ## Data
@@ -55,21 +55,25 @@ cell:
 }
 ```
 
-The keys must exactly equal the masked cells and each mapping must contain
+The normalized keys must exactly equal the masked cells, with no duplicates,
+and each mapping must contain
 exactly `agree`, `disagree`, and `pass` with a positive total. Values are
 normalized before scoring. Bare hard labels are rejected. The argmax label
 drives accuracy, with deterministic tie ordering. Completion parsing is
-bounded and malformed output scores zero.
+bounded. Missing, extra, duplicate-normalized, or malformed output receives
+zero reward; its diagnostic Brier loss is 1.0 for non-empty tasks.
 
 ## Scoring and comparators
 
-- `vote_accuracy`, reward weight 1.0: exact argmax accuracy over masked cells.
+- `probability_reward`, reward weight 1.0: `1 - normalized Brier`, so calibrated
+  confidence changes the optimized objective.
+- `vote_accuracy`, metric only: exact argmax accuracy over masked cells.
 - `brier`, metric only: conventional three-class squared error divided by two,
-  bounded to `[0,1]`; it now measures calibration as well as classification.
+  bounded to `[0,1]`.
 
 Exact model-free results on the bundled 100-row evaluation split:
 
-| Comparator class | Comparator | vote_accuracy |
+| Comparator class | Comparator | one-hot probability reward / vote_accuracy |
 | --- | --- | ---: |
 | Prompt-observable | Always agree | 0.590 |
 | Prompt-observable | Per-statement visible majority | 0.581 |
@@ -78,7 +82,8 @@ Exact model-free results on the bundled 100-row evaluation split:
 | Held-out-label diagnostic | Per-snapshot best constant | 0.631 |
 | Generator diagnostic | Latent cluster-pattern replay | 0.916 |
 
-The last two rows are not floors: one reads held-out labels and one replays
+The deterministic comparators emit one-hot forecasts, for which probability
+reward equals vote accuracy. The last two rows are not floors: one reads held-out labels and one replays
 hidden generator state. The narrow gap between 5-NN and latent replay is a
 central limitation and should accompany any model result. Matrix-factorization,
 item-item, spectral, text-only, matrix-only, and shuffled-text ablations remain

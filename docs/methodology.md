@@ -13,7 +13,7 @@ copied. `vote_entropy` and `cluster_separation` are Common Ground metrics, not
 Polis implementations. Multiclass Brier is the conventional squared-error sum
 divided by two, bounded to `[0,1]`.
 
-## Predict 0.3.0 construct
+## Predict 0.4.0 construct
 
 Predict contains 200 training and 100 evaluation snapshots. Training and
 evaluation have disjoint statement text, session IDs, seeds, and profile
@@ -34,25 +34,32 @@ The per-snapshot best-constant comparator reads held-out labels and is a
 diagnostic, not a floor. Latent-pattern replay reads generator state and is a
 generator diagnostic, not a model-achievable universal ceiling.
 
-## Elicit 0.3.0 construct
+The required response contains exactly one complete three-class probability
+map for every masked cell. The primary reward is `1 - normalized Brier`;
+argmax accuracy and Brier loss are diagnostics. Missing, extra,
+duplicate-normalized, and malformed keys fail the response contract.
+
+## Elicit 0.4.0 construct
 
 Elicit contains 100 training and 100 evaluation scenarios. The splits use
-disjoint generator-family labels. Each split enforces unique prompt-only and
-answer-key hashes, and cross-split exact overlap is blocked. A structural
-signature records generator family, document and faction counts, issue types,
+disjoint template/layout-profile labels while sharing one core generator. Each
+split enforces unique instance, canonical-prompt, policy-issue, prompt, and
+answer hashes, and corresponding cross-split overlap is blocked. A structural
+signature records the profile, document and faction counts, issue types,
 anchor positions, document lengths, stance multisets, and contradiction-pair
 presence. Evaluation uses opaque document and faction IDs, randomized order,
 neutral randomized titles/styles, shuffled sentence locations, three to five
 factions, and varied stance vectors. A regression baseline that implements the
-0.2 document-ID/position codebook scores zero. Row-specific decision tendencies
-in public faction summaries keep the varied stance targets model-inferable; an
-exact-issue component oracle recovers all stances from those summaries.
+0.2 document-ID/position codebook scores zero. The 0.3 summaries exposed exact
+issue terms and stance labels; a prompt-only parser scores 0.787 there. Version
+0.4 replaces them with indirect policy principles and that parser scores zero.
 
-The train/held-out family labels select disjoint template registries and some
-different ID behavior, but both still share the same core scenario-generation
-implementation. This is stronger than the 0.2 structural reuse but does not
-satisfy the longer-term goal of several independently implemented generator
-families or an embedding-based cross-split similarity audit.
+The split audit removes opaque identity and neutral layout before hashing
+policy propositions, unresolved decisions, evidence relations, and faction
+stances. It also measures cross-split token-set Jaccard and word-ngram TF-IDF
+cosine. Observed maxima are 0.207 and 0.755, below gates of 0.85 and 0.90.
+These deterministic lexical audits do not replace an embedding audit or a
+fresh independently implemented private generator.
 
 Find separates evidence localization, type accuracy, and end-to-end diagnosis.
 A valid result requires a precise contiguous passage, correct type, a yes/no
@@ -63,10 +70,18 @@ invalidate a response, preventing three-type hedging.
 Ask exposes three candidate issues and requires the best two. Questions must
 be grounded in exact visible evidence, use yes/no form, and cover at least two
 decision terms. Utility combines grounding, stance accuracy, disagreement, and
-an issue decision-value weight. It is normalized by the best attainable K-item
-sum, so an exact response scores one. This is genuine but small top-K selection;
-8–12 candidate issues, answer-conditioned faction updates, and measured
-information gain remain longer-term work.
+the fraction of factions whose simulated answer is agree/disagree rather than
+pass. This replaces the hidden keyword table with an answer-conditioned
+coverage signal. It is normalized by the best attainable K-item sum, so an
+exact response scores one. This is genuine but small top-K selection; 8–12
+candidate issues and measured downstream decision change remain longer-term
+work.
+
+Find's default reward remains strict end-to-end F1. Optional shaped mode
+averages localization, type, diagnosis, and relation-evidence recalls for a
+bounded curriculum and logs strict F1. It must not be used for reported strict
+evaluation scores. Multi-seed shaped-versus-strict learning and transfer to a
+fresh private generator remain unproven.
 
 No judge model is called. The deterministic rewards establish conformance to
 these structured synthetic contracts, not prose quality, real organizational
@@ -76,9 +91,10 @@ usefulness, or human-deliberation validity.
 
 `configs/eval/baseline-sweep.toml` specifies 100 tasks and five rollouts. The
 100 tasks provide structural coverage; repeated rollouts only estimate sampling
-variation. Model comparisons should preserve per-task pairing and use a paired
-task or task-cluster bootstrap rather than treating all 500 observations as
-independent. Reports should include source commit, artifact hashes, environment
+variation. Model comparisons should preserve per-task pairing. Elicit analyses
+resample base templates and then variants within selected templates; Predict
+resamples tasks. Reports must not treat all 500 observations as independent
+and should include source commit, artifact hashes, environment
 content hash, exact config, provider/model identifiers, sampling settings,
 retry/error fields, and per-example traces.
 

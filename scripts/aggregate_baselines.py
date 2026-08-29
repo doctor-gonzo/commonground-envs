@@ -667,6 +667,14 @@ def environment_package_name(environment: str) -> str:
     return taskset_id.split("@", 1)[0].rstrip("/").rsplit("/", 1)[-1]
 
 
+def uses_historical_predict_reward(environment: str) -> bool:
+    """Return whether a pinned Predict environment predates the 0.4 reward contract."""
+
+    taskset_id = environment.rsplit("+", 1)[-1]
+    _, separator, version = taskset_id.partition("@")
+    return bool(separator and version.startswith(("0.1.", "0.2.", "0.3.")))
+
+
 def is_elicit_environment(environment: str) -> bool:
     return environment_package_name(environment) == "commonground-elicit"
 
@@ -738,7 +746,9 @@ def expected_native_signals(
 ) -> tuple[tuple[str, ...], tuple[str, ...]]:
     package_name = environment_package_name(environment)
     if package_name == "commonground-predict":
-        return ("vote_accuracy",), ("brier",)
+        if uses_historical_predict_reward(environment):
+            return ("vote_accuracy",), ("brier",)
+        return ("probability_reward",), ("brier", "vote_accuracy")
     if package_name == "commonground-elicit" and task_mode == "find":
         return ("finding_f1",), (
             "finding_localization_recall",

@@ -7,7 +7,7 @@ import hashlib
 import json
 import random
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from commonground_scenarios.templates import DomainTemplate, get_template
@@ -30,6 +30,21 @@ SEMANTIC_SCOPES: tuple[str | None, ...] = (
     "when an accessibility accommodation is active",
     "for requests received through an offline channel",
     "while a formal appeal is pending",
+    "during a declared service interruption",
+    "for requests involving a delegated representative",
+    "when two responsible teams disagree",
+    "for decisions made outside normal business hours",
+    "when the affected person cannot provide the usual record",
+    "during a temporary capacity shortage",
+    "for cases involving an imminent deadline",
+    "when the designated reviewer has a conflict of interest",
+    "for decisions that affect more than one jurisdiction",
+    "when the standard communication channel is inaccessible",
+    "during a documented emergency exception",
+    "for first-time appeals of an automated decision",
+    "when required evidence arrives after the normal cutoff",
+    "for cases transferred between operating teams",
+    "when a safety accommodation conflicts with the default process",
 )
 
 
@@ -64,9 +79,9 @@ def generate_scenario(
     if semantic_scope is not None:
         _apply_semantic_scope(documents, planted_items, semantic_scope)
     generator_family = (
-        "heldout-opaque-layout-v2"
+        "heldout-template-layout-profile-v3"
         if template.template_set == "heldout"
-        else "train-rotating-layout-v2"
+        else "train-template-layout-profile-v3"
     )
     _randomize_visible_structure(
         rng,
@@ -84,10 +99,9 @@ def generate_scenario(
 
     for planted in planted_items:
         planted["decision_terms"] = _decision_terms(str(planted["canonical_question"]))
-        planted["decision_value"] = _decision_value(
-            str(planted["canonical_question"]),
-            str(planted["anchor_quote"]),
-        )
+        # Final value is computed from simulated faction answers after stance
+        # generation. No policy keyword table participates in issue ranking.
+        planted["decision_value"] = 1.0
         planted["related_evidence"] = _related_evidence(documents, planted)
     factions = copy.deepcopy(list(template.factions))
     _randomize_faction_structure(rng, factions, planted_items)
@@ -97,7 +111,8 @@ def generate_scenario(
             faction["faction_id"]: _stance_for(float(faction["priors"][dimension]))
             for faction in factions
         }
-    _add_visible_faction_tendencies(factions, planted_items)
+        planted["decision_value"] = _answer_conditioned_value(planted["target_stances"])
+    _add_visible_faction_principles(rng, factions, planted_items)
 
     scenario = {
         "scenario_id": scenario_id_for(template.template_id, seed),
@@ -302,25 +317,61 @@ def _randomize_faction_structure(
         faction["faction_id"] = f"group-{rng.randrange(16**8):08x}"
 
 
-def _add_visible_faction_tendencies(
+_PRINCIPLE_EXAMPLES: dict[tuple[str, str], tuple[str, ...]] = {
+    ("ambiguity", "agree"): (
+        "For open thresholds, usually favors case-specific judgment over one fixed cutoff.",
+        "When a standard is vague, tends to leave room for local discretion.",
+    ),
+    ("ambiguity", "disagree"): (
+        "For open thresholds, usually favors one fixed cutoff over case-specific judgment.",
+        "When a standard is vague, tends to prefer a centrally defined boundary.",
+    ),
+    ("ambiguity", "pass"): (
+        "For open thresholds, weighs local judgment and fixed cutoffs case by case.",
+        "Has no general preference between discretion and a fixed boundary.",
+    ),
+    ("contradiction", "agree"): (
+        "When written rules conflict, tends to give a practical exception more weight.",
+        "In authority conflicts, usually favors the instruction that preserves operations.",
+    ),
+    ("contradiction", "disagree"): (
+        "When written rules conflict, tends to give the default authority rule more weight.",
+        "In authority conflicts, usually resists exceptions to the stated control.",
+    ),
+    ("contradiction", "pass"): (
+        "When written rules conflict, reviews which authority should control case by case.",
+        "Has no general preference between a default rule and an operational exception.",
+    ),
+    ("gap", "agree"): (
+        "When a standard channel fails, tends to favor a workable alternate path.",
+        "Usually supports a fallback for people unable to use the normal process.",
+    ),
+    ("gap", "disagree"): (
+        "When a standard channel fails, tends to retain the normal requirement.",
+        "Usually resists creating a fallback outside the established process.",
+    ),
+    ("gap", "pass"): (
+        "When a standard channel fails, decides whether to allow a fallback case by case.",
+        "Has no general preference about alternatives to the normal process.",
+    ),
+}
+
+
+def _add_visible_faction_principles(
+    rng: random.Random,
     factions: list[dict[str, Any]],
     planted_items: list[dict[str, Any]],
 ) -> None:
-    """Make varied synthetic stance targets inferable from the model prompt."""
+    """Expose indirect policy principles without issue signatures or stance labels."""
 
-    tendency = {
-        "agree": "leans toward yes",
-        "disagree": "leans toward no",
-        "pass": "has no settled position",
-    }
     for faction in factions:
-        clauses = []
+        clauses: list[str] = []
         for plant in planted_items:
-            terms = ", ".join(str(term) for term in plant["decision_terms"])
+            stance = str(plant["target_stances"][faction["faction_id"]])
             clauses.append(
-                f"For decisions involving {terms}, "
-                f"{tendency[plant['target_stances'][faction['faction_id']]]}."
+                rng.choice(_PRINCIPLE_EXAMPLES[(str(plant["type"]), stance)])
             )
+        rng.shuffle(clauses)
         faction["summary"] = f"{faction['summary']} {' '.join(clauses)}"
 
 
@@ -336,23 +387,20 @@ def _decision_terms(question: str) -> list[str]:
     return list(dict.fromkeys(terms))[:8]
 
 
-def _decision_value(question: str, anchor: str) -> float:
-    """Derive heterogeneous value from model-visible policy consequences."""
+def _answer_conditioned_value(target_stances: Mapping[str, str]) -> float:
+    """Value questions by the share of factions with an actionable answer.
 
-    text = f"{question} {anchor}".casefold()
-    if any(term in text for term in ("safety", "emergency", "urgent", "harm")):
-        return 1.0
-    if any(
-        term in text
-        for term in ("authority", "authorize", "approval", "prohibit", "require")
-    ):
-        return 0.85
-    if any(
-        term in text
-        for term in ("access", "unavailable", "unreachable", "offline", "cannot")
-    ):
-        return 0.7
-    return 0.55
+    The companion disagreement term rewards a split panel; this term rewards
+    questions whose simulated answer would update more than a small minority.
+    It replaces the 0.3 policy-keyword lookup with an answer-conditioned signal.
+    """
+
+    if not target_stances:
+        return 0.25
+    answer_coverage = sum(
+        stance in {"agree", "disagree"} for stance in target_stances.values()
+    ) / len(target_stances)
+    return max(0.25, answer_coverage)
 
 
 def _related_evidence(

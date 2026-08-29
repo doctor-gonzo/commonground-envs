@@ -19,6 +19,7 @@ from commonground_scenarios import (
     validate_human_snapshot,
 )
 from commonground_score import brier_score as score_brier_score
+from commonground_score import probability_reward as score_probability_reward
 from commonground_score import vote_accuracy as score_vote_accuracy
 from datasets import Dataset
 from verifiers.v1.harnesses.null import NullHarness
@@ -89,18 +90,33 @@ class PredictionTask(vf.Task[PredictionTaskData]):
     """Native Verifiers v1 prediction task."""
 
     @vf.reward
+    async def probability_reward(self, trace: vf.Trace) -> float:
+        predictions = exact_probability_predictions(
+            parse_prediction_text(trace.last_reply), self.data.answer
+        )
+        if predictions is None:
+            return 0.0
+        return float(score_probability_reward(predictions, self.data.answer))
+
+    @vf.metric
     async def vote_accuracy(self, trace: vf.Trace) -> float:
-        predictions = parse_prediction_text(trace.last_reply)
+        predictions = exact_probability_predictions(
+            parse_prediction_text(trace.last_reply), self.data.answer
+        )
+        if predictions is None:
+            return 0.0
         return float(
             score_vote_accuracy(coerce_point_predictions(predictions), self.data.answer)
         )
 
     @vf.metric
     async def brier(self, trace: vf.Trace) -> float:
-        predictions = parse_prediction_text(trace.last_reply)
-        return float(
-            score_brier_score(coerce_brier_predictions(predictions), self.data.answer)
+        predictions = exact_probability_predictions(
+            parse_prediction_text(trace.last_reply), self.data.answer
         )
+        if predictions is None:
+            return 1.0 if self.data.answer else 0.0
+        return float(score_brier_score(predictions, self.data.answer))
 
 
 class CommonGroundPredictConfig(vf.TasksetConfig):
@@ -177,8 +193,8 @@ def load_environment(
     dataset = Dataset.from_list(rows)
     parser = PredictionJsonParser()
     rubric = legacy_vf.Rubric(
-        funcs=[vote_accuracy, brier],
-        weights=[1.0, 0.0],
+        funcs=[probability_reward, vote_accuracy, brier],
+        weights=[1.0, 0.0, 0.0],
         parser=parser,
     )
     configured_path = data_path or os.environ.get(DATA_ENV_VAR)
@@ -744,9 +760,30 @@ async def vote_accuracy(
 ) -> float:
     """Reward: exact point-prediction accuracy over masked cells."""
 
-    parsed = parse_completion_predictions(completion, parser)
+    held_out = parse_held_out(answer)
+    parsed = exact_probability_predictions(
+        parse_completion_predictions(completion, parser), held_out
+    )
+    if parsed is None:
+        return 0.0
     point_predictions = coerce_point_predictions(parsed)
-    return float(score_vote_accuracy(point_predictions, parse_held_out(answer)))
+    return float(score_vote_accuracy(point_predictions, held_out))
+
+
+async def probability_reward(
+    completion: list[dict[str, Any]],
+    answer: Mapping[str, int] | str,
+    parser: PredictionJsonParser,
+) -> float:
+    """Reward: one minus normalized Brier under the exact response contract."""
+
+    held_out = parse_held_out(answer)
+    parsed = exact_probability_predictions(
+        parse_completion_predictions(completion, parser), held_out
+    )
+    if parsed is None:
+        return 0.0
+    return float(score_probability_reward(parsed, held_out))
 
 
 async def brier(
@@ -756,9 +793,13 @@ async def brier(
 ) -> float:
     """Metric: normalized 0-1 Brier; invalid forecasts score as uniform."""
 
-    parsed = parse_completion_predictions(completion, parser)
-    brier_predictions = coerce_brier_predictions(parsed)
-    return float(score_brier_score(brier_predictions, parse_held_out(answer)))
+    held_out = parse_held_out(answer)
+    parsed = exact_probability_predictions(
+        parse_completion_predictions(completion, parser), held_out
+    )
+    if parsed is None:
+        return 1.0 if held_out else 0.0
+    return float(score_brier_score(parsed, held_out))
 
 
 def parse_completion_predictions(
@@ -806,6 +847,22 @@ def coerce_brier_predictions(
         normalized_cell_id = "".join(str(cell_id).split())
         if valid_probability_mapping(prediction):
             coerced[normalized_cell_id] = dict(prediction)
+    return coerced
+
+
+def exact_probability_predictions(
+    predictions: Mapping[str, Any], held_out: Mapping[str, int]
+) -> dict[str, dict[Any, Any]] | None:
+    """Validate exactly one complete forecast for every held-out cell."""
+
+    coerced: dict[str, dict[Any, Any]] = {}
+    for cell_id, prediction in predictions.items():
+        normalized_cell_id = "".join(str(cell_id).split())
+        if normalized_cell_id in coerced or not valid_probability_mapping(prediction):
+            return None
+        coerced[normalized_cell_id] = dict(prediction)
+    if set(coerced) != set(held_out):
+        return None
     return coerced
 
 

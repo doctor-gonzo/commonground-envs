@@ -9,12 +9,12 @@ synthetic stakeholder data:
   contradictions, and gaps, or selection of the two most valuable
   clarification questions from three candidate issues.
 
-Version 0.3.0 is a breaking benchmark-design release. It replaces the 0.2.x
-evaluation corpora and response contracts after an independent review found
-structural shortcuts in Elicit and a non-semantic vote generator in Predict.
-The current release is suitable for open training and experimental evaluation;
-its public answer keys make it unsuitable for contamination-resistant
-leaderboards.
+Version 0.4.0 is an unreleased, review-driven candidate. It removes a
+prompt-visible 0.3 Elicit stance codebook, makes calibrated probabilities the
+Predict objective, strengthens semantic split audits, and adds optional Find
+training shaping. Keep it private until the exact candidate passes the full
+model study. Public answer keys make every release unsuitable for
+contamination-resistant leaderboards.
 
 This is the reinforcement-learning environment family associated with
 [Context Engine](https://contextengine.sh), an open-source deliberation system
@@ -31,35 +31,34 @@ synthetic, operator-authored demo fixture.
 
 | Path | Distribution | Purpose |
 | --- | --- | --- |
-| `packages/commonground-score` | `commonground-score` 0.2.0 | Vote statistics and normalized scoring helpers. |
-| `packages/commonground-scenarios` | `commonground-scenarios` 0.2.0 | Offline scenario generation, schema, and validation. |
-| `environments/commonground_predict` | `commonground-predict` 0.3.0 | Probabilistic masked-vote prediction. |
-| `environments/commonground_elicit` | `commonground-elicit` 0.3.0 | Structured finding diagnosis and top-K clarification. |
+| `packages/commonground-score` | `commonground-score` 0.3.0 | Vote statistics and calibrated-reward helpers. |
+| `packages/commonground-scenarios` | `commonground-scenarios` 0.3.0 | Offline scenario generation, schema, and validation. |
+| `environments/commonground_predict` | `commonground-predict` 0.4.0 | Probabilistic masked-vote prediction. |
+| `environments/commonground_elicit` | `commonground-elicit` 0.4.0 | Structured finding diagnosis and top-K clarification. |
 
 Both environments export native Verifiers v1 `Taskset`/`Harness` plugins and a
 real legacy `SingleTurnEnv` adapter for the current Prime Hosted Evaluation
 runner. The same rows and scoring functions back both interfaces.
 
-## What 0.3.0 changes
+## What 0.4.0 changes
 
-Predict now generates votes from explicit statement dimensions and latent
-cluster preference profiles. Training and evaluation use disjoint text banks,
-seeds, session IDs, and generator families. The response contract requires a
-three-class probability distribution per cell, and Brier is normalized to
-`[0,1]`. Standard collaborative-filtering comparators remain strong—5-NN
-scores 0.891—so the environment should be described as semantic-conditioned
-matrix completion, not evidence of general collective-preference reasoning.
+Predict now optimizes `1 - normalized Brier`; argmax accuracy and Brier remain
+diagnostics. The exact masked-cell key set is mandatory. Standard
+collaborative-filtering comparators remain strong—one-hot 5-NN scores 0.891—so
+the environment is semantic-conditioned matrix completion, not evidence of
+general collective-preference reasoning.
 
-Elicit now uses opaque randomized document/faction IDs, varied order, titles,
-styles, sentence positions, faction counts, and issue-specific stance vectors.
-Train and evaluation contain 100 rows each with disjoint generator families
-and separate prompt, answer, and structural audits. Find requires a concise
-diagnosis and paired second-document evidence for contradictions. Ask selects
-two of three issues, requires at least two decision terms, and normalizes reward
-by the row's attainable maximum. The exact 0.2 ID/position shortcut scores zero.
+Elicit faction summaries now state indirect policy principles instead of exact
+issue terms and yes/no/pass answers. A parser exploiting the old 0.3 clauses
+scores 0.787 on the historical corpus and 0.000 on 0.4. Split audits separately
+track instance identity, canonical visible meaning, policy-issue meaning,
+token Jaccard, and word-ngram TF-IDF similarity. Ask value derives from
+simulated answer coverage and disagreement, not policy keywords. Find keeps
+strict F1 for evaluation and offers an explicit staged training reward.
 
-See the [0.3.0 evaluation report](docs/evaluation-report-0.3.0.md) and
-[methodology](docs/methodology.md) for exact comparator definitions and limits.
+See the historical [0.3.0 evaluation report](docs/evaluation-report-0.3.0.md),
+the [0.4.0 evaluation plan](docs/evaluation-plan-0.4.0.md), and
+[methodology](docs/methodology.md) for exact definitions and limits.
 
 ## Setup and verification
 
@@ -105,18 +104,19 @@ uv run python scripts/aggregate_baselines.py
 uv run python scripts/aggregate_baselines.py --csv /path/to/baselines.csv
 ```
 
-The 0.3.0 release study completed all 6,000 planned rollouts across Claude
+The historical 0.3.0 release study completed all 6,000 planned rollouts across Claude
 Sonnet 4.5, Gemini 2.5 Flash, GPT-4.1, and Qwen3 30B A3B Instruct with no
 recovered rollouts. Predict rewards ranged from 0.572 to 0.730, Find from 0.120
-to 0.235, and Ask from 0.052 to 0.296. The exact task-cluster intervals,
+to 0.235, and Ask from 0.052 to 0.296. The exact clustered intervals,
 pairwise comparisons, configs, artifact hashes, and limitations are in the
 [0.3.0 evaluation report](docs/evaluation-report-0.3.0.md).
 
-Reproduce the independent-task analysis with:
+Reproduce the task-level Predict and template-hierarchical Elicit analysis with:
 
 ```bash
 uv run python scripts/analyze_release_study.py \
   --root /path/to/study \
+  --elicit-eval-split environments/commonground_elicit/commonground_elicit/data/eval_synthetic_heldout.jsonl \
   --bootstrap-samples 50000 \
   --seed 20260828 \
   --expected-model-count 4 \
@@ -126,9 +126,9 @@ uv run python scripts/analyze_release_study.py \
 ```
 
 Repeated rollouts estimate sampling variation, not independent task coverage.
-Comparative claims should use per-task paired or task-cluster bootstrap
-intervals and disclose model/provider settings, retries, environment hashes,
-and per-example traces.
+Elicit intervals resample base templates and then variants; Predict intervals
+resample tasks. Version 0.3 model scores are historical and must not be used as
+0.4 evidence because both corpora/objectives changed.
 
 ## Provenance, scope, and license
 

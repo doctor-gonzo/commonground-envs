@@ -2,7 +2,28 @@
 
 All notable changes to this project are documented in this file.
 
-## 0.3.0 - Unreleased
+## 0.4.0 - Unreleased
+
+- Remove Elicit's public issue-signature and exact-stance clauses. Faction
+  summaries now expose indirect policy principles, and the prompt-only 0.3
+  summary-codebook baseline falls from 0.787 on the historical corpus to 0.000.
+- Separate exact-instance, canonical-prompt, and policy-issue fingerprints;
+  block cross-split semantic overlap and add token-Jaccard and word-ngram
+  TF-IDF nearest-neighbor audits. Rename Elicit split provenance as
+  template/layout profiles rather than independent generator families.
+- Replace the hidden Ask keyword-value table with simulated answer coverage
+  combined with faction disagreement. Add optional staged Find training reward
+  while retaining strict end-to-end F1 as the default evaluation objective.
+- Make Predict's primary reward `1 - normalized Brier`, retain argmax accuracy
+  and Brier as diagnostics, and reject missing, extra, duplicate-normalized, or
+  malformed prediction maps.
+- Add hierarchical Elicit uncertainty analysis that resamples 20 base
+  templates and then their five variants; record corrected historical 0.3
+  intervals and the measured 0.3 leakage baseline.
+- Bump both Hub environments to 0.4.0 and both shared packages to 0.3.0. A new
+  exact-artifact model study is required before the candidate is published.
+
+## 0.3.0 - 2026-08-28
 
 - Replace both public evaluation corpora with 100-row, breaking benchmark
   revisions and expand their synthetic training splits to 200 Predict rows and

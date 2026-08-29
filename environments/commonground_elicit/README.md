@@ -1,41 +1,40 @@
 # commonground-elicit
 
-`commonground-elicit` 0.3.0 is a deterministic Verifiers environment for two
+`commonground-elicit` 0.4.0 is a deterministic Verifiers environment for two
 structured tasks over fictional stakeholder-policy scenarios:
 
 - `find`: localize and diagnose planted ambiguities, contradictions, and gaps.
 - `elicit-ask`: select the two highest-value clarification targets from three
   planted issues and predict faction stances on each yes/no question.
 
-Version 0.3.0 replaces the 0.2.x corpus and response contract. The prior
-held-out split exposed stable document IDs, issue positions, faction IDs, and
-stance patterns. The new generator uses opaque IDs, neutral randomized titles,
-varied document and sentence order, varied faction count/order, and
-issue-specific stance patterns. The exact legacy ID/position codebook now
-scores 0.000.
+Version 0.4.0 removes a shortcut discovered in the 0.3 corpus: public faction
+summaries repeated each hidden issue signature and its exact yes/no/pass
+stance. A prompt-only parser scores 0.787 on historical 0.3 and 0.000 here.
+Summaries now provide indirect policy principles from which issue-specific
+stances must be inferred.
 
 This environment is associated with [Context Engine](https://contextengine.sh),
 whose organizational workflow can surface unresolved decisions and collect
 stakeholder responses. A future governed exporter could allow consenting
 individuals and groups to retain, license, or sell derived preference data.
-Version 0.3.0 is entirely synthetic and includes no such exporter.
+Version 0.4.0 is entirely synthetic and includes no such exporter.
 
 ## Data and separation
 
-| Split | Rows | Templates × variants | Generator family |
+| Split | Rows | Templates × variants | Template/layout profile |
 | --- | ---: | --- | --- |
-| `train` | 100 | 4 × 25 | `train-rotating-layout-v2` |
-| `eval` | 100 | 20 × 5 | `heldout-opaque-layout-v2` |
+| `train` | 100 | 4 × 25 | `train-template-layout-profile-v3` |
+| `eval` | 100 | 20 × 5 | `heldout-template-layout-profile-v3` |
 
-Every row contains three planted issue types and three to five factions. Public
-faction summaries include row-specific decision tendencies, so varied stance
-targets remain inferable rather than becoming arbitrary hidden labels.
-Generation enforces unique prompt-only and answer-key fingerprints within each
-split, no exact prompt/answer overlap across splits, and disjoint generator
-families. Structural signatures cover issue locations, document/sentence
-counts, faction counts, stance patterns, evidence relationships, and generator
-family. These checks catch exact structural reuse; they are not a substitute
-for embedding-neighbor or low-complexity-classifier audits.
+Every row contains three planted issue types and three to five factions.
+Generation separately audits exact instances, canonical visible propositions,
+and policy-issue semantics after removing opaque identity/layout fields. It
+blocks cross-split overlap for all three relevant hashes. The maximum observed
+cross-split token Jaccard is 0.207 (limit 0.85); the maximum word unigram/bigram
+TF-IDF cosine is 0.755 (limit 0.90). These are useful deterministic neighbor
+audits, not an embedding-based proof of conceptual independence. Both splits
+still share one core generator; the labels above intentionally claim only
+template/layout separation.
 
 ## Find contract
 
@@ -91,8 +90,9 @@ terms, and predicts `agree`, `disagree`, or `pass` for every visible faction.
 ```
 
 Utility combines exact visible grounding, semantic decision identification,
-faction-stance accuracy, panel disagreement, and an issue decision-value
-weight. Global assignment prevents duplicate claims. The raw numerator is
+faction-stance accuracy, panel disagreement, and the share of factions whose
+simulated answer is actionable rather than pass. There is no policy-keyword
+value table. Global assignment prevents duplicate claims. The raw numerator is
 divided by the sum of the best two attainable issue utilities for that row, so
 an exact top-two response scores 1.0 under every polarization setting. Replacing
 a selected issue with a lower-value issue scores strictly less.
@@ -112,15 +112,14 @@ Exact results on the bundled 100-row evaluation split:
 | Prompt-observable | find | Legacy 0.2 document-ID/position codebook | 0.000 |
 | Prompt-observable | elicit-ask | Template clarity questions | 0.000 |
 | Prompt-observable | elicit-ask | Randomly targeted questions | 0.000 |
-| Component oracle | elicit-ask | Exact top-K issues + random stances | 0.655 |
-| Component oracle | elicit-ask | Exact top-K issues + visible-summary stances | 1.000 |
+| Prompt-observable | elicit-ask | Removed 0.3 summary/stance codebook | 0.000 |
+| Component oracle | elicit-ask | Exact top-K issues + random stances | 0.659 |
 
 The zero Ask rows are weak floors that rarely clear the structured grounding
-gate; they do not establish model competence. The component oracles read the
-hidden top-K issue targets and therefore are not prompt-observable baselines.
-Their 0.655-to-1.000 gap isolates the stance component and verifies that the
-visible summaries contain enough information for exact stance recovery.
-Stronger prompt-only issue detectors remain useful follow-up work.
+gate; they do not establish model competence. The removed-codebook regression
+is the exact parser that scores 0.787 on the historical public 0.3 corpus. The
+remaining component oracle reads hidden top-K issues and is not a
+prompt-observable floor. Stronger prompt-only issue detectors remain useful.
 
 ## Usage
 
@@ -138,3 +137,10 @@ Difficulty controls are `docs_count`, `docs_length`, `planted_density`,
 bounded and malformed output fails closed. Public planted keys support open
 training but not contamination-resistant comparison; use a fresh private
 generator family for consequential evaluation.
+
+Find additionally accepts `reward_mode="shaped"` for training. It averages
+four monotonic stages—localization, type, diagnosis, and relation evidence—on
+`[0,1]` while logging strict F1. The default is `reward_mode="strict"`, and all
+reported evaluation claims must use that default. The shaped objective is a
+curriculum mechanism, not evidence of learning value until multi-seed training
+and fresh-family transfer are demonstrated.

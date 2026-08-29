@@ -1,9 +1,10 @@
 """Analyze complete Common Ground studies at the independent-task level.
 
 Repeated rollouts for one task are correlated observations. This script first
-averages reward within each task, then resamples tasks (not individual
-rollouts) to produce percentile bootstrap intervals. The same task resamples
-are shared across models so pairwise intervals remain paired by task.
+averages reward within each task. It then resamples tasks, or generator
+templates followed by variants within each template, to produce percentile
+bootstrap intervals. The same resamples are shared across models so pairwise
+intervals remain paired.
 """
 
 from __future__ import annotations
@@ -42,6 +43,8 @@ class RunEstimate:
     ci_low: float
     ci_high: float
     zero_reward_tasks: int
+    cluster_count: int
+    resampling_unit: str
 
 
 @dataclass(frozen=True)
@@ -66,7 +69,10 @@ class StudyAnalysis:
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Compute task-cluster bootstrap evidence for saved Common Ground runs."
+        description=(
+            "Compute task-level or template-hierarchical bootstrap evidence "
+            "for saved Common Ground runs."
+        )
     )
     parser.add_argument(
         "--root",
@@ -83,6 +89,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--require-no-recoveries",
         action="store_true",
         help="Reject any run with recovered retry/error history.",
+    )
+    parser.add_argument(
+        "--elicit-eval-split",
+        type=Path,
+        help=(
+            "Elicit JSONL whose row-order template IDs define hierarchical "
+            "template/variant bootstrap clusters."
+        ),
     )
     parser.add_argument("--csv", type=Path, help="Write run estimates as CSV.")
     parser.add_argument(
@@ -146,6 +160,7 @@ def analyze_runs(
     expected_task_count: int | None = None,
     expected_rollouts_per_task: int | None = None,
     require_no_recoveries: bool = False,
+    task_cluster_labels: Mapping[str, Mapping[int, str]] | None = None,
 ) -> StudyAnalysis:
     if bootstrap_samples < 1_000:
         raise aggregate.InvalidRunError("bootstrap_samples must be at least 1000")
@@ -230,8 +245,34 @@ def analyze_runs(
         }
         generator = random.Random(stable_seed(seed, environment))
         task_positions = list(range(len(task_ids)))
+        cluster_labels = (
+            task_cluster_labels.get(environment, {}) if task_cluster_labels else {}
+        )
+        if cluster_labels:
+            missing = sorted(set(task_ids) - set(cluster_labels))
+            extra = sorted(set(cluster_labels) - set(task_ids))
+            if missing or extra:
+                raise aggregate.InvalidRunError(
+                    f"{environment}: task cluster labels do not match tasks "
+                    f"(missing={missing[:5]}, extra={extra[:5]})"
+                )
+        else:
+            cluster_labels = {task_id: f"task:{task_id}" for task_id in task_ids}
+        positions_by_cluster: dict[str, list[int]] = defaultdict(list)
+        for position, task_id in enumerate(task_ids):
+            positions_by_cluster[str(cluster_labels[task_id])].append(position)
+        cluster_order = sorted(positions_by_cluster)
+        hierarchical = any(
+            len(positions) > 1 for positions in positions_by_cluster.values()
+        )
         for _ in range(bootstrap_samples):
-            selected = generator.choices(task_positions, k=len(task_positions))
+            if hierarchical:
+                selected = []
+                for cluster in generator.choices(cluster_order, k=len(cluster_order)):
+                    positions = positions_by_cluster[cluster]
+                    selected.extend(generator.choices(positions, k=len(positions)))
+            else:
+                selected = generator.choices(task_positions, k=len(task_positions))
             for model in model_order:
                 values = values_by_model[model]
                 bootstrap_by_model[model].append(
@@ -257,6 +298,10 @@ def analyze_runs(
                     ci_low=percentile(bootstrapped, lower_probability),
                     ci_high=percentile(bootstrapped, upper_probability),
                     zero_reward_tasks=sum(value == 0.0 for value in per_task),
+                    cluster_count=len(cluster_order),
+                    resampling_unit=(
+                        "template then variant" if hierarchical else "task"
+                    ),
                 )
             )
 
@@ -313,8 +358,8 @@ def render_markdown(analysis: StudyAnalysis) -> str:
     lines = [
         "## Task-cluster bootstrap summary",
         "",
-        "| Environment | Model | Run ID | Tasks x rollouts | Reward mean | Rollout std | 95% task-cluster CI | Task-mean std | Zero-reward tasks | Recovered |",
-        "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| Environment | Model | Run ID | Tasks x rollouts | Resampling | Reward mean | Rollout std | 95% cluster CI | Task-mean std | Zero-reward tasks | Recovered |",
+        "| --- | --- | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for summary in analysis.summaries:
         lines.append(
@@ -325,6 +370,7 @@ def render_markdown(analysis: StudyAnalysis) -> str:
                     summary.model,
                     summary.run_id,
                     f"{summary.task_count} x {summary.rollouts_per_task}",
+                    f"{summary.resampling_unit} ({summary.cluster_count})",
                     f"{summary.reward_mean:.3f}",
                     f"{summary.rollout_std:.3f}",
                     f"[{summary.ci_low:.3f}, {summary.ci_high:.3f}]",
@@ -366,9 +412,11 @@ def render_markdown(analysis: StudyAnalysis) -> str:
             "",
             (
                 f"Method: {analysis.bootstrap_samples:,} deterministic percentile "
-                f"bootstrap resamples of tasks at the {analysis.confidence_level:.0%} "
-                "level. Each sampled task contributes its mean across repeated "
-                "rollouts; paired comparisons reuse the same sampled task indices. "
+                f"bootstrap resamples at the {analysis.confidence_level:.0%} "
+                "level. Elicit runs resample base templates, then variants within "
+                "each sampled template; other runs resample tasks. Each task "
+                "contributes its mean across repeated rollouts, and paired "
+                "comparisons reuse the same resample. "
                 f"Seed: {analysis.seed}."
             ),
         ]
@@ -392,7 +440,7 @@ def write_json(path: Path, analysis: StudyAnalysis) -> None:
     payload: Mapping[str, Any] = {
         "method": {
             "unit": "task mean across repeated rollouts",
-            "interval": "paired task-cluster percentile bootstrap",
+            "interval": "paired hierarchical cluster percentile bootstrap",
             "bootstrap_samples": analysis.bootstrap_samples,
             "confidence_level": analysis.confidence_level,
             "seed": analysis.seed,
@@ -405,19 +453,49 @@ def write_json(path: Path, analysis: StudyAnalysis) -> None:
     )
 
 
+def load_template_clusters(path: Path) -> dict[int, str]:
+    """Map JSONL row indices to declared base-template identifiers."""
+
+    labels: dict[int, str] = {}
+    for index, line in enumerate(path.read_text(encoding="utf-8").splitlines()):
+        if not line.strip():
+            continue
+        scenario = json.loads(line)
+        provenance = scenario.get("provenance", {})
+        template_id = provenance.get("template_id")
+        if not isinstance(template_id, str) or not template_id.strip():
+            raise aggregate.InvalidRunError(
+                f"{path}:{index + 1}: missing provenance.template_id"
+            )
+        labels[len(labels)] = template_id
+    if not labels:
+        raise aggregate.InvalidRunError(f"{path}: no scenarios")
+    return labels
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     try:
         result_paths = aggregate.discover_result_paths(args.root.resolve())
         runs = [aggregate.load_complete_run(path) for path in result_paths]
+        newest = aggregate.newest_runs(runs)
+        cluster_labels: dict[str, Mapping[int, str]] = {}
+        if args.elicit_eval_split is not None:
+            elicit_clusters = load_template_clusters(args.elicit_eval_split.resolve())
+            cluster_labels = {
+                run.environment: elicit_clusters
+                for run in newest
+                if "commonground-elicit" in run.environment
+            }
         analysis = analyze_runs(
-            aggregate.newest_runs(runs),
+            newest,
             bootstrap_samples=args.bootstrap_samples,
             seed=args.seed,
             expected_model_count=args.expected_model_count,
             expected_task_count=args.expected_task_count,
             expected_rollouts_per_task=args.expected_rollouts_per_task,
             require_no_recoveries=args.require_no_recoveries,
+            task_cluster_labels=cluster_labels,
         )
         if args.csv is not None:
             write_csv(args.csv.resolve(), analysis.summaries)

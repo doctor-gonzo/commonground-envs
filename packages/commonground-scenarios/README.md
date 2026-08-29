@@ -15,12 +15,13 @@ The default generator uses committed templates only. An operator may inject a
 prose-polishing callback, but no model client or network path is built into the
 package, and validation requires every planted anchor to survive polishing.
 
-Training and held-out template registries and generator-family labels are
+Training and held-out template registries and template/layout-profile labels are
 disjoint. The canonical release contains 100 training and 100 held-out rows.
 The generator assigns opaque document/faction IDs, varies visible layout and
-faction count/order, and records decision terms/value plus paired evidence for
-contradictions. Split generation checks prompt-only, answer-key, and structural
-signatures and blocks exact cross-split prompt/answer overlap. Generated
+faction count/order, and records decision terms, answer-conditioned value, and
+paired evidence for contradictions. Split generation distinguishes exact
+instance, canonical prompt, and policy-issue fingerprints; it also runs
+token-Jaccard and word-ngram TF-IDF cross-split neighbor audits. Generated
 scenarios are canonical JSON and regenerate byte-for-byte from the same
 template, seed, and explicit generation date.
 

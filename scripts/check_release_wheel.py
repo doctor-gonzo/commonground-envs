@@ -70,12 +70,12 @@ def _data_files(source_dir: Path, package_name: str) -> frozenset[str]:
 TARGETS = (
     WheelTarget(
         name="commonground-predict",
-        version="0.3.0",
+        version="0.4.0",
         source_dir=ROOT / "environments" / "commonground_predict",
         requirements=frozenset(
             {
-                "commonground-scenarios==0.2.0",
-                "commonground-score==0.2.0",
+                "commonground-scenarios==0.3.0",
+                "commonground-score==0.3.0",
                 "datasets<6.0.0,>=5.0.1",
                 "verifiers==0.3.0",
             }
@@ -89,12 +89,12 @@ TARGETS = (
     ),
     WheelTarget(
         name="commonground-elicit",
-        version="0.3.0",
+        version="0.4.0",
         source_dir=ROOT / "environments" / "commonground_elicit",
         requirements=frozenset(
             {
-                "commonground-scenarios==0.2.0",
-                "commonground-score==0.2.0",
+                "commonground-scenarios==0.3.0",
+                "commonground-score==0.3.0",
                 "datasets<6.0.0,>=5.0.1",
                 "verifiers==0.3.0",
             }
@@ -111,14 +111,14 @@ TARGETS = (
     ),
     WheelTarget(
         name="commonground-scenarios",
-        version="0.2.0",
+        version="0.3.0",
         source_dir=ROOT / "packages" / "commonground-scenarios",
         requirements=frozenset(),
         bundled_files=frozenset({"commonground_scenarios/schema/scenario.schema.json"}),
     ),
     WheelTarget(
         name="commonground-score",
-        version="0.2.0",
+        version="0.3.0",
         source_dir=ROOT / "packages" / "commonground-score",
         requirements=frozenset(),
         bundled_files=frozenset(),
@@ -374,10 +374,10 @@ import commonground_predict
 import commonground_scenarios
 import commonground_score
 
-assert version("commonground-predict") == "0.3.0"
-assert version("commonground-elicit") == "0.3.0"
-assert version("commonground-scenarios") == "0.2.0"
-assert version("commonground-score") == "0.2.0"
+assert version("commonground-predict") == "0.4.0"
+assert version("commonground-elicit") == "0.4.0"
+assert version("commonground-scenarios") == "0.3.0"
+assert version("commonground-score") == "0.3.0"
 
 assert len(commonground_predict.load_taskset().load()) == 100
 assert len(commonground_elicit.load_taskset().load()) == 100

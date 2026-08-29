@@ -40,6 +40,15 @@ VAGUE_MARKERS = (
     "urgent",
 )
 _SENTENCE_BOUNDARY = re.compile(r"(?<=[.!?])\s+")
+_LEAKED_TENDENCY_PATTERN = re.compile(
+    r"For decisions involving (?P<terms>[^.]+), "
+    r"(?P<tendency>leans toward yes|leans toward no|has no settled position)\."
+)
+_LEAKED_TENDENCY_TO_STANCE = {
+    "leans toward yes": "agree",
+    "leans toward no": "disagree",
+    "has no settled position": "pass",
+}
 
 
 def load_scenarios(path: Path) -> list[dict[str, Any]]:
@@ -192,7 +201,7 @@ def exact_issue_component_questions(
     factions: Sequence[Mapping[str, str]],
     *,
     question_count: int,
-    rng: random.Random | None,
+    rng: random.Random,
 ) -> list[dict[str, Any]]:
     """Use exact top-K issue targets while isolating faction-stance inference."""
 
@@ -211,34 +220,100 @@ def exact_issue_component_questions(
             "quote": str(plant["quote"]),
             "question": str(plant["question"]),
             "target_stances": {
-                str(faction["faction_id"]): (
-                    rng.choice(STANCES)
-                    if rng is not None
-                    else stance_from_visible_summary(faction["summary"], plant)
-                )
-                for faction in factions
+                str(faction["faction_id"]): rng.choice(STANCES) for faction in factions
             },
         }
         for plant in selected
     ]
 
 
-def stance_from_visible_summary(
-    summary: str,
-    plant: Mapping[str, Any],
-) -> str:
-    """Read one issue-specific yes/no tendency from a public faction summary."""
+def leaked_summary_codebook_questions(
+    documents: Sequence[Mapping[str, str]],
+    factions: Sequence[Mapping[str, str]],
+    *,
+    question_count: int,
+) -> list[dict[str, Any]]:
+    """Exploit the removed 0.3 issue-signature/stance summary clauses.
 
-    terms = ", ".join(str(term) for term in plant["decision_terms"])
-    marker = f"For decisions involving {terms}, "
-    _, separator, suffix = summary.partition(marker)
-    if not separator:
-        return "pass"
-    if suffix.startswith("leans toward yes"):
-        return "agree"
-    if suffix.startswith("leans toward no"):
-        return "disagree"
-    return "pass"
+    The baseline observes only prompt fields. It extracts repeated decision-term
+    signatures and exact stance labels, grounds each signature to the visible
+    sentence with greatest token overlap, and ranks candidates with the public
+    disagreement and keyword rules used by 0.3.0.
+    """
+
+    signatures: dict[tuple[str, ...], dict[str, str]] = {}
+    for faction in factions:
+        faction_id = str(faction["faction_id"])
+        for match in _LEAKED_TENDENCY_PATTERN.finditer(str(faction["summary"])):
+            terms = tuple(
+                term.strip().casefold()
+                for term in match.group("terms").split(",")
+                if term.strip()
+            )
+            signatures.setdefault(terms, {})[faction_id] = _LEAKED_TENDENCY_TO_STANCE[
+                match.group("tendency")
+            ]
+    faction_ids = {str(faction["faction_id"]) for faction in factions}
+    visible_spans = [
+        (str(document["doc_id"]), sentence)
+        for document in documents
+        for sentence in split_sentences(str(document["text"]))
+    ]
+    candidates: list[tuple[float, dict[str, Any]]] = []
+    for terms, stances in signatures.items():
+        if set(stances) != faction_ids:
+            continue
+        term_set = set(terms)
+        overlap, doc_id, quote = max(
+            (
+                len(term_set & set(re.findall(r"[^\W_]+", sentence.casefold()))),
+                candidate_doc_id,
+                sentence,
+            )
+            for candidate_doc_id, sentence in visible_spans
+        )
+        if overlap < 2:
+            continue
+        question = f"Should {' '.join(terms)} be clarified?"
+        impact = leaked_keyword_decision_value(question, quote)
+        candidates.append(
+            (
+                impact * panel_disagreement(stances),
+                {
+                    "doc_id": doc_id,
+                    "quote": quote,
+                    "question": question,
+                    "target_stances": stances,
+                },
+            )
+        )
+    candidates.sort(
+        key=lambda item: (
+            -item[0],
+            str(item[1]["doc_id"]),
+            str(item[1]["quote"]),
+        )
+    )
+    return [candidate for _, candidate in candidates[:question_count]]
+
+
+def leaked_keyword_decision_value(question: str, anchor: str) -> float:
+    """Reproduce the removed 0.3 keyword value rule using visible text only."""
+
+    text = f"{question} {anchor}".casefold()
+    if any(term in text for term in ("safety", "emergency", "urgent", "harm")):
+        return 1.0
+    if any(
+        term in text
+        for term in ("authority", "authorize", "approval", "prohibit", "require")
+    ):
+        return 0.85
+    if any(
+        term in text
+        for term in ("access", "unavailable", "unreachable", "offline", "cannot")
+    ):
+        return 0.7
+    return 0.55
 
 
 def sentence_question(sentence: str) -> str:
@@ -286,8 +361,8 @@ def compute_elicit_floors(path: Path = BUNDLED_EVAL_PATH) -> dict[str, float]:
         "find/legacy-0.2-codebook": 0.0,
         "elicit-ask/template-question": 0.0,
         "elicit-ask/randomly-targeted": 0.0,
+        "elicit-ask/legacy-0.3-summary-codebook": 0.0,
         "elicit-ask/exact-issue-random-stance": 0.0,
-        "elicit-ask/exact-issue-summary-stance": 0.0,
     }
     scenarios = load_scenarios(path)
     for scenario in scenarios:
@@ -396,6 +471,22 @@ def compute_elicit_floors(path: Path = BUNDLED_EVAL_PATH) -> dict[str, float]:
                 ElicitJsonParser("questions"),
             )
         )
+        totals["elicit-ask/legacy-0.3-summary-codebook"] += asyncio.run(
+            question_utility(
+                completion_for(
+                    {
+                        "questions": leaked_summary_codebook_questions(
+                            documents,
+                            factions,
+                            question_count=QUESTION_COUNT,
+                        )
+                    }
+                ),
+                answer,
+                info,
+                ElicitJsonParser("questions"),
+            )
+        )
         totals["elicit-ask/exact-issue-random-stance"] += asyncio.run(
             question_utility(
                 completion_for(
@@ -405,23 +496,6 @@ def compute_elicit_floors(path: Path = BUNDLED_EVAL_PATH) -> dict[str, float]:
                             factions,
                             question_count=QUESTION_COUNT,
                             rng=component_rng,
-                        )
-                    }
-                ),
-                answer,
-                info,
-                ElicitJsonParser("questions"),
-            )
-        )
-        totals["elicit-ask/exact-issue-summary-stance"] += asyncio.run(
-            question_utility(
-                completion_for(
-                    {
-                        "questions": exact_issue_component_questions(
-                            planted_questions,
-                            factions,
-                            question_count=QUESTION_COUNT,
-                            rng=None,
                         )
                     }
                 ),
@@ -473,15 +547,15 @@ def render_markdown(floors: Mapping[str, float]) -> str:
             "elicit-ask",
             "Randomly targeted questions",
         ),
+        "elicit-ask/legacy-0.3-summary-codebook": (
+            "Prompt-observable",
+            "elicit-ask",
+            "Removed 0.3 summary/stance codebook",
+        ),
         "elicit-ask/exact-issue-random-stance": (
             "Component oracle",
             "elicit-ask",
             "Exact top-K issues + random stances",
-        ),
-        "elicit-ask/exact-issue-summary-stance": (
-            "Component oracle",
-            "elicit-ask",
-            "Exact top-K issues + visible-summary stances",
         ),
     }
     lines = [

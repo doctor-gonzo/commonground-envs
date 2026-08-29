@@ -28,6 +28,7 @@ from commonground_predict.environment import (
     PredictionTask,
     apply_masked_vote_count,
     brier,
+    probability_reward,
     vote_accuracy,
 )
 from verifiers.types import State
@@ -151,9 +152,11 @@ def test_server_state_path_binds_answer_for_correct_and_incorrect() -> None:
     incorrect_state = score_row(env, row, incorrect)
 
     assert correct_state["reward"] == 1.0
-    assert correct_state["rewards"]["vote_accuracy"] == 1.0
+    assert correct_state["rewards"]["probability_reward"] == 1.0
+    assert correct_state["metrics"]["vote_accuracy"] == 1.0
     assert incorrect_state["reward"] == 0.0
-    assert incorrect_state["rewards"]["vote_accuracy"] == 0.0
+    assert incorrect_state["rewards"]["probability_reward"] == 0.0
+    assert incorrect_state["metrics"]["vote_accuracy"] == 0.0
     assert correct_state["task"]["answer"] == answer
     assert "held_out" not in correct_state["task"]["snapshot"]
 
@@ -210,7 +213,8 @@ def test_load_environment_builds_ce_demo_split_from_env(monkeypatch: Any) -> Non
     assert env.config.data_path is None
     state = score_row(env, row, held_out)
     assert state["reward"] == 1.0
-    assert state["rewards"]["vote_accuracy"] == 1.0
+    assert state["rewards"]["probability_reward"] == 1.0
+    assert state["metrics"]["vote_accuracy"] == 1.0
 
 
 def test_load_environment_rejects_unmasked_ce_demo_by_default() -> None:
@@ -414,9 +418,11 @@ def test_cell_keys_ignore_whitespace_for_point_and_brier_scores() -> None:
 
     accuracy = asyncio.run(vote_accuracy(completion, {"0,5": 1}, parser))
     brier_score = asyncio.run(brier(completion, {"0,5": 1}, parser))
+    reward = asyncio.run(probability_reward(completion, {"0,5": 1}, parser))
 
     assert accuracy == 1.0
     assert brier_score == 0.0
+    assert reward == 1.0
 
 
 def test_rubric_scores_perfect_completion_at_one() -> None:
@@ -427,7 +433,8 @@ def test_rubric_scores_perfect_completion_at_one() -> None:
     state = score_row(env, row, held_out)
 
     assert state["reward"] == 1.0
-    assert state["rewards"]["vote_accuracy"] == 1.0
+    assert state["rewards"]["probability_reward"] == 1.0
+    assert state["metrics"]["vote_accuracy"] == 1.0
     assert state["metrics"]["brier"] == 0.0
 
 
@@ -442,7 +449,9 @@ def test_rubric_scores_all_wrong_completion_at_zero() -> None:
     state = score_row(env, row, wrong_predictions)
 
     assert state["reward"] == 0.0
-    assert state["rewards"]["vote_accuracy"] == 0.0
+    assert state["rewards"]["probability_reward"] == 0.0
+    assert state["metrics"]["vote_accuracy"] == 0.0
+    assert state["metrics"]["brier"] == 1.0
 
 
 def test_hard_label_response_is_rejected_by_probability_contract() -> None:
@@ -465,7 +474,8 @@ def test_hard_label_response_is_rejected_by_probability_contract() -> None:
     asyncio.run(task.score(trace))
 
     assert trace.reward == 0.0
-    assert 0.0 <= trace.metrics["brier"] <= 1.0
+    assert trace.metrics["vote_accuracy"] == 0.0
+    assert trace.metrics["brier"] == 1.0
 
 
 def test_brier_scores_correct_probability_vector() -> None:
@@ -487,10 +497,47 @@ def test_brier_scores_uniform_probability_vector() -> None:
     assert isclose(score, 1 / 3, abs_tol=1e-12)
 
 
-def test_brier_invalid_probability_mapping_scores_as_uniform() -> None:
+def test_brier_invalid_probability_mapping_fails_the_response_contract() -> None:
     score = score_brier_prediction({"agree": 0.8, "disagree": -0.1, "pass": 0.3})
 
-    assert isclose(score, 1 / 3, abs_tol=1e-12)
+    assert score == 1.0
+
+
+def test_primary_reward_prefers_better_calibration_with_same_argmax() -> None:
+    answer = {"0,1": 1}
+    confident = {"0,1": {"agree": 0.8, "disagree": 0.1, "pass": 0.1}}
+    uncertain = {"0,1": {"agree": 0.4, "disagree": 0.3, "pass": 0.3}}
+
+    confident_reward = score_probability_predictions(confident, answer)
+    uncertain_reward = score_probability_predictions(uncertain, answer)
+
+    assert confident_reward == pytest.approx(0.97)
+    assert confident_reward > uncertain_reward
+
+
+@pytest.mark.parametrize(
+    "predictions",
+    [
+        {"0,1": {"agree": 1.0, "disagree": 0.0, "pass": 0.0}},
+        {
+            "0,1": {"agree": 1.0, "disagree": 0.0, "pass": 0.0},
+            "1,2": {"agree": 0.0, "disagree": 1.0, "pass": 0.0},
+            "9,9": {"agree": 0.0, "disagree": 0.0, "pass": 1.0},
+        },
+        {
+            "0,1": {"agree": 1.0, "disagree": 0.0, "pass": 0.0},
+            "0, 1": {"agree": 1.0, "disagree": 0.0, "pass": 0.0},
+            "1,2": {"agree": 0.0, "disagree": 1.0, "pass": 0.0},
+        },
+    ],
+    ids=("missing", "extra", "duplicate-normalized-key"),
+)
+def test_primary_reward_requires_exact_prediction_key_set(
+    predictions: dict[str, Any],
+) -> None:
+    answer = {"0,1": 1, "1,2": -1}
+
+    assert score_probability_predictions(predictions, answer) == 0.0
 
 
 def test_masked_vote_count_knob_changes_held_out_count() -> None:
@@ -537,7 +584,8 @@ def test_masked_vote_count_zero_masks_no_cells_and_scores() -> None:
     state = score_row(env, row, {})
 
     assert state["reward"] == 0.0
-    assert state["rewards"]["vote_accuracy"] == 0.0
+    assert state["rewards"]["probability_reward"] == 0.0
+    assert state["metrics"]["vote_accuracy"] == 0.0
     assert state["metrics"]["brier"] == 0.0
 
 
@@ -629,6 +677,18 @@ def score_brier_prediction(prediction: dict[Any, float]) -> float:
         }
     ]
     return asyncio.run(brier(completion, {"0,1": 1}, PredictionJsonParser()))
+
+
+def score_probability_predictions(
+    predictions: dict[str, Any], answer: dict[str, int]
+) -> float:
+    completion = [
+        {
+            "role": "assistant",
+            "content": json.dumps({"predictions": predictions}, sort_keys=True),
+        }
+    ]
+    return asyncio.run(probability_reward(completion, answer, PredictionJsonParser()))
 
 
 def probability_predictions(predictions: dict[str, Any]) -> dict[str, Any]:

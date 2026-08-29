@@ -6,6 +6,7 @@ from commonground_score import (
     brier_score,
     cluster_separation,
     comment_stats,
+    probability_reward,
     prop_test,
     rating_to_vote,
     two_prop_test,
@@ -117,3 +118,16 @@ def test_brier_score_nan_probability_mapping_scores_as_uniform() -> None:
         1 / 3,
         abs_tol=1e-12,
     )
+
+
+def test_probability_reward_is_calibration_sensitive() -> None:
+    held_out = {"0,1": 1}
+    confident = {"0,1": {"agree": 0.8, "disagree": 0.1, "pass": 0.1}}
+    uncertain = {"0,1": {"agree": 0.4, "disagree": 0.3, "pass": 0.3}}
+
+    assert isclose(probability_reward(confident, held_out), 0.97, abs_tol=1e-12)
+    assert probability_reward(confident, held_out) > probability_reward(
+        uncertain, held_out
+    )
+    assert probability_reward({"0,1": -1}, held_out) == 0.0
+    assert probability_reward({}, {}) == 0.0

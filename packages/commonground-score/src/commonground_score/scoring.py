@@ -143,6 +143,23 @@ def brier_score(
     return total / len(held_out)
 
 
+def probability_reward(
+    predictions: Mapping[str, Prediction],
+    held_out: Mapping[str, int],
+) -> float:
+    """Return a proper probability reward derived from normalized Brier loss.
+
+    A perfect forecast receives ``1`` and a confidently wrong forecast receives
+    ``0``. An empty target set receives ``0`` because there is no prediction
+    task to reward. Response-shape validation belongs to the calling
+    environment; this helper scores an already accepted prediction mapping.
+    """
+
+    if not held_out:
+        return 0.0
+    return 1.0 - brier_score(predictions, held_out)
+
+
 def _prediction_probs(prediction: Prediction | None) -> dict[str, float]:
     if isinstance(prediction, Mapping):
         return _mapping_prediction_probs(prediction)
