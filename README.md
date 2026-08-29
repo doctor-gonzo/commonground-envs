@@ -9,12 +9,12 @@ synthetic stakeholder data:
   contradictions, and gaps, or selection of the two most valuable
   clarification questions from three candidate issues.
 
-Version 0.4.0 is an unreleased, review-driven candidate. It removes a
-prompt-visible 0.3 Elicit stance codebook, makes calibrated probabilities the
-Predict objective, strengthens semantic split audits, and adds optional Find
-training shaping. Keep it private until the exact candidate passes the full
-model study. Public answer keys make every release unsuitable for
-contamination-resistant leaderboards.
+Version 0.4.1 is the current unreleased, review-driven candidate. The 0.4
+series removes a prompt-visible 0.3 Elicit stance codebook, makes calibrated
+probabilities the Predict objective, strengthens semantic split audits, and
+adds optional Find training shaping. Keep it private until the exact candidate
+passes the full model study. Public answer keys make every release unsuitable
+for contamination-resistant leaderboards.
 
 This is the reinforcement-learning environment family associated with
 [Context Engine](https://contextengine.sh), an open-source deliberation system
@@ -33,14 +33,14 @@ synthetic, operator-authored demo fixture.
 | --- | --- | --- |
 | `packages/commonground-score` | `commonground-score` 0.3.0 | Vote statistics and calibrated-reward helpers. |
 | `packages/commonground-scenarios` | `commonground-scenarios` 0.3.0 | Offline scenario generation, schema, and validation. |
-| `environments/commonground_predict` | `commonground-predict` 0.4.0 | Probabilistic masked-vote prediction. |
-| `environments/commonground_elicit` | `commonground-elicit` 0.4.0 | Structured finding diagnosis and top-K clarification. |
+| `environments/commonground_predict` | `commonground-predict` 0.4.1 | Probabilistic masked-vote prediction. |
+| `environments/commonground_elicit` | `commonground-elicit` 0.4.1 | Structured finding diagnosis and top-K clarification. |
 
 Both environments export native Verifiers v1 `Taskset`/`Harness` plugins and a
 real legacy `SingleTurnEnv` adapter for the current Prime Hosted Evaluation
 runner. The same rows and scoring functions back both interfaces.
 
-## What 0.4.0 changes
+## What the 0.4 series changes
 
 Predict now optimizes `1 - normalized Brier`; argmax accuracy and Brier remain
 diagnostics. The exact masked-cell key set is mandatory. Standard
@@ -57,7 +57,7 @@ simulated answer coverage and disagreement, not policy keywords. Find keeps
 strict F1 for evaluation and offers an explicit staged training reward.
 
 See the historical [0.3.0 evaluation report](docs/evaluation-report-0.3.0.md),
-the [0.4.0 evaluation plan](docs/evaluation-plan-0.4.0.md), and
+the [0.4-series evaluation plan](docs/evaluation-plan-0.4.0.md), and
 [methodology](docs/methodology.md) for exact definitions and limits.
 
 ## Setup and verification
@@ -141,5 +141,7 @@ cannot establish consent or legal authority.
 
 Repository code is [Apache-2.0](LICENSE). Predict's adapted synthetic Context
 Engine demo fixture remains MPL-2.0; its packaged `NOTICE` records the immutable
-source, transformation boundary, hashes, and license treatment. Follow the
+source, transformation boundary, hashes, and license treatment. Byte-identical
+legal files also live under each environment's `LICENSES/` directory because
+current Prime CLI source archives omit top-level legal files. Follow the
 [public release checklist](docs/public-release-checklist.md) before publishing.

@@ -40,13 +40,13 @@ def test_workspace_paths_are_replaced_with_exact_locked_pins() -> None:
     rendered = manifests.canonicalize_export(
         exported,
         {
-            "environments/commonground_predict": "commonground-predict==0.4.0",
+            "environments/commonground_predict": "commonground-predict==0.4.1",
             "packages/commonground-score": "commonground-score==0.3.0",
         },
     )
 
     assert rendered == (
-        "commonground-predict==0.4.0\n"
+        "commonground-predict==0.4.1\n"
         "commonground-score==0.3.0\n"
         "    # via commonground-predict\n"
         "verifiers==0.3.0\n"
@@ -87,8 +87,8 @@ def test_checked_in_manifests_match_the_exact_lock() -> None:
 @pytest.mark.parametrize(
     ("distribution", "import_package", "expected_version"),
     [
-        ("commonground-predict", "commonground_predict", "0.4.0"),
-        ("commonground-elicit", "commonground_elicit", "0.4.0"),
+        ("commonground-predict", "commonground_predict", "0.4.1"),
+        ("commonground-elicit", "commonground_elicit", "0.4.1"),
     ],
 )
 def test_manifest_records_release_scope_without_local_paths(

@@ -1,16 +1,16 @@
 # Common Ground resolved dependency manifest
 #
-# Distribution: commonground-elicit==0.4.0
+# Distribution: commonground-elicit==0.4.1
 # Python-Requires: >=3.12,<3.13
 # Lock-File: uv.lock
-# Resolution-SHA256: 96e41a036e265504b9c5a7dc6e9c9c8ed95d2720a69a39b36be79dbd635c6fa1
+# Resolution-SHA256: de87e19a6763d5c796af914fbe525f555374842942436b6a66ac5cc3f1fb5a34
 # uv-Version: 0.10.9
 # Generated-By: scripts/check_dependency_manifests.py
 #
 # Exact no-dev resolution for this release. Workspace members are
 # represented as immutable distribution pins; this file is provenance,
 # not a substitute for the platform-specific installation resolver.
-commonground-elicit==0.4.0
+commonground-elicit==0.4.1
 commonground-scenarios==0.3.0
     # via commonground-elicit
 commonground-score==0.3.0

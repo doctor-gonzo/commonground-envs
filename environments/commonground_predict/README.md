@@ -1,6 +1,6 @@
 # commonground-predict
 
-`commonground-predict` 0.4.0 is a deterministic Verifiers environment for
+`commonground-predict` 0.4.1 is a deterministic Verifiers environment for
 probabilistic masked-vote prediction over synthetic stakeholder panels. It has
 no judge model: reward is computed locally against eight masked cells per
 snapshot.
@@ -15,7 +15,7 @@ human-preference validity, or general collective-preference reasoning.
 This environment is associated with [Context Engine](https://contextengine.sh),
 which can structure stakeholder statements and votes into auditable preference
 maps. A planned governed export path could let consenting individuals and
-groups retain, license, or sell derived preference datasets. Version 0.4.0
+groups retain, license, or sell derived preference datasets. Version 0.4.1
 contains no live participant data and no live-data exporter.
 
 ## Data
@@ -39,7 +39,7 @@ remain synthetic assumptions rather than estimates of people.
 
 The CE demo fixture is also synthetic. Its immutable Context Engine source,
 transformation boundary, hashes, and MPL-2.0 treatment are recorded in
-`NOTICE`.
+`NOTICE` and its byte-identical Hub-source copy `LICENSES/NOTICE.txt`.
 
 ## Prompt and response contract
 

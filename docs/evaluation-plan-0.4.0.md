@@ -1,7 +1,11 @@
-# Common Ground 0.4.0 candidate evaluation plan
+# Common Ground 0.4-series candidate evaluation plan
 
 Status: unreleased. Do not make the Hub candidate public until every gate below
 passes against the same source commit and private Hub artifacts.
+
+The exact publication target is 0.4.1. It differs from the private 0.4.0
+candidate only by legal-file placement required by Prime's source-archive
+collector; task code, corpora, prompts, and scoring are unchanged.
 
 ## Changes that invalidate 0.3 scores
 
@@ -42,7 +46,7 @@ Analyze the retained runs with:
 
 ```bash
 uv run python scripts/analyze_release_study.py \
-  --root /path/to/release-0.4.0-study \
+  --root /path/to/release-0.4.1-study \
   --elicit-eval-split environments/commonground_elicit/commonground_elicit/data/eval_synthetic_heldout.jsonl \
   --bootstrap-samples 50000 \
   --seed 20260828 \

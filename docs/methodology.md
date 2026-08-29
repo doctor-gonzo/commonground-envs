@@ -13,7 +13,7 @@ copied. `vote_entropy` and `cluster_separation` are Common Ground metrics, not
 Polis implementations. Multiclass Brier is the conventional squared-error sum
 divided by two, bounded to `[0,1]`.
 
-## Predict 0.4.0 construct
+## Predict 0.4-series construct
 
 Predict contains 200 training and 100 evaluation snapshots. Training and
 evaluation have disjoint statement text, session IDs, seeds, and profile
@@ -39,7 +39,7 @@ map for every masked cell. The primary reward is `1 - normalized Brier`;
 argmax accuracy and Brier loss are diagnostics. Missing, extra,
 duplicate-normalized, and malformed keys fail the response contract.
 
-## Elicit 0.4.0 construct
+## Elicit 0.4-series construct
 
 Elicit contains 100 training and 100 evaluation scenarios. The splits use
 disjoint template/layout-profile labels while sharing one core generator. Each

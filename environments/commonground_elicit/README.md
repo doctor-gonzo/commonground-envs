@@ -1,13 +1,13 @@
 # commonground-elicit
 
-`commonground-elicit` 0.4.0 is a deterministic Verifiers environment for two
+`commonground-elicit` 0.4.1 is a deterministic Verifiers environment for two
 structured tasks over fictional stakeholder-policy scenarios:
 
 - `find`: localize and diagnose planted ambiguities, contradictions, and gaps.
 - `elicit-ask`: select the two highest-value clarification targets from three
   planted issues and predict faction stances on each yes/no question.
 
-Version 0.4.0 removes a shortcut discovered in the 0.3 corpus: public faction
+The 0.4 series removes a shortcut discovered in the 0.3 corpus: public faction
 summaries repeated each hidden issue signature and its exact yes/no/pass
 stance. A prompt-only parser scores 0.787 on historical 0.3 and 0.000 here.
 Summaries now provide indirect policy principles from which issue-specific
@@ -17,7 +17,7 @@ This environment is associated with [Context Engine](https://contextengine.sh),
 whose organizational workflow can surface unresolved decisions and collect
 stakeholder responses. A future governed exporter could allow consenting
 individuals and groups to retain, license, or sell derived preference data.
-Version 0.4.0 is entirely synthetic and includes no such exporter.
+Version 0.4.1 is entirely synthetic and includes no such exporter.
 
 ## Data and separation
 

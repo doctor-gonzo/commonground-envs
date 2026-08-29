@@ -15,7 +15,7 @@ PROJECTS = {
     "commonground-predict": (
         ROOT / "environments" / "commonground_predict",
         "commonground_predict",
-        "0.4.0",
+        "0.4.1",
         [
             "commonground-scenarios==0.3.0",
             "commonground-score==0.3.0",
@@ -26,7 +26,7 @@ PROJECTS = {
     "commonground-elicit": (
         ROOT / "environments" / "commonground_elicit",
         "commonground_elicit",
-        "0.4.0",
+        "0.4.1",
         [
             "commonground-scenarios==0.3.0",
             "commonground-score==0.3.0",
@@ -107,12 +107,72 @@ def test_predict_declares_complete_multi_license_boundary() -> None:
 
     assert metadata["license-files"] == [
         "LICENSE",
+        "LICENSES/Apache-2.0.txt",
         "LICENSES/MPL-2.0.txt",
+        "LICENSES/NOTICE.txt",
         "NOTICE",
     ]
     assert metadata["license"] == "Apache-2.0 AND MPL-2.0"
+    assert (project_dir / "LICENSES" / "Apache-2.0.txt").read_bytes() == (
+        project_dir / "LICENSE"
+    ).read_bytes()
     assert (project_dir / "LICENSES" / "MPL-2.0.txt").is_file()
+    assert (project_dir / "LICENSES" / "NOTICE.txt").read_bytes() == (
+        project_dir / "NOTICE"
+    ).read_bytes()
     assert (project_dir / "NOTICE").is_file()
+
+
+def _prime_hub_source_archive_members(project_dir: Path) -> set[str]:
+    """Model the source collector shipped by Prime CLI 0.6.28 and 0.6.29."""
+
+    members = {
+        path.relative_to(project_dir).as_posix()
+        for pattern in ("README.md", "pyproject.toml", "*.py")
+        for path in project_dir.glob(pattern)
+        if path.is_file() and not path.is_symlink() and not path.name.startswith(".")
+    }
+    excluded_directories = {"dist", "__pycache__", "build", "outputs"}
+    for path in project_dir.rglob("*"):
+        relative = path.relative_to(project_dir)
+        if len(relative.parts) < 2 or not path.is_file() or path.is_symlink():
+            continue
+        parent_parts = relative.parts[:-1]
+        if any(part.startswith(".") for part in relative.parts):
+            continue
+        if any(
+            part in excluded_directories or part.endswith(".egg-info")
+            for part in parent_parts
+        ):
+            continue
+        members.add(relative.as_posix())
+    return members
+
+
+@pytest.mark.parametrize(
+    ("environment_name", "required_legal_files"),
+    [
+        (
+            "commonground_predict",
+            {
+                "LICENSES/Apache-2.0.txt",
+                "LICENSES/MPL-2.0.txt",
+                "LICENSES/NOTICE.txt",
+            },
+        ),
+        ("commonground_elicit", {"LICENSES/Apache-2.0.txt"}),
+    ],
+)
+def test_prime_hub_source_archive_contains_legal_files(
+    environment_name: str, required_legal_files: set[str]
+) -> None:
+    project_dir = ROOT / "environments" / environment_name
+    archive_members = _prime_hub_source_archive_members(project_dir)
+
+    assert required_legal_files <= archive_members
+    assert (project_dir / "LICENSES" / "Apache-2.0.txt").read_bytes() == (
+        project_dir / "LICENSE"
+    ).read_bytes()
 
 
 def test_predict_notice_pins_demo_fixture_provenance_and_content() -> None:

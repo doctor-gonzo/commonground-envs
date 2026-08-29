@@ -70,7 +70,7 @@ def _data_files(source_dir: Path, package_name: str) -> frozenset[str]:
 TARGETS = (
     WheelTarget(
         name="commonground-predict",
-        version="0.4.0",
+        version="0.4.1",
         source_dir=ROOT / "environments" / "commonground_predict",
         requirements=frozenset(
             {
@@ -85,11 +85,19 @@ TARGETS = (
         )
         | frozenset({f"commonground_predict/{DEPENDENCY_MANIFEST_NAME}"}),
         license_expression="Apache-2.0 AND MPL-2.0",
-        legal_files=frozenset({"LICENSE", "LICENSES/MPL-2.0.txt", "NOTICE"}),
+        legal_files=frozenset(
+            {
+                "LICENSE",
+                "LICENSES/Apache-2.0.txt",
+                "LICENSES/MPL-2.0.txt",
+                "LICENSES/NOTICE.txt",
+                "NOTICE",
+            }
+        ),
     ),
     WheelTarget(
         name="commonground-elicit",
-        version="0.4.0",
+        version="0.4.1",
         source_dir=ROOT / "environments" / "commonground_elicit",
         requirements=frozenset(
             {
@@ -108,6 +116,7 @@ TARGETS = (
                 f"commonground_elicit/{DEPENDENCY_MANIFEST_NAME}",
             }
         ),
+        legal_files=frozenset({"LICENSE", "LICENSES/Apache-2.0.txt"}),
     ),
     WheelTarget(
         name="commonground-scenarios",
@@ -374,8 +383,8 @@ import commonground_predict
 import commonground_scenarios
 import commonground_score
 
-assert version("commonground-predict") == "0.4.0"
-assert version("commonground-elicit") == "0.4.0"
+assert version("commonground-predict") == "0.4.1"
+assert version("commonground-elicit") == "0.4.1"
 assert version("commonground-scenarios") == "0.3.0"
 assert version("commonground-score") == "0.3.0"
 

@@ -2,7 +2,15 @@
 
 All notable changes to this project are documented in this file.
 
-## 0.4.0 - Unreleased
+## 0.4.1 - Unreleased
+
+- Include byte-identical legal files under each environment's nested
+  `LICENSES/` directory so Prime CLI source archives retain Apache-2.0 text and
+  Predict's provenance notice. Add a regression model of the Prime 0.6.28 and
+  0.6.29 archive collector. Task code, corpora, and scoring are unchanged from
+  the private 0.4.0 candidate.
+
+## 0.4.0 - 2026-08-29 (private candidate)
 
 - Remove Elicit's public issue-signature and exact-stance clauses. Faction
   summaries now expose indirect policy principles, and the prompt-only 0.3

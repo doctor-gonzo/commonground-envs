@@ -1,0 +1,37 @@
+Common Ground Predict — Licensing and Provenance Notice
+
+Except for the file identified below, this distribution is licensed under the
+Apache License, Version 2.0, included as LICENSE.
+
+commonground_predict/data/eval_ce_demo.jsonl is an adapted data fixture derived
+from Context Engine's client/src/variables/demo/demo_polis_data.json at public
+revision 7650531e926181d1ed24b25da085b34f4200eb7b. The immutable source is
+available at:
+
+https://github.com/AgalmicSoftware/context-engine/blob/7650531e926181d1ed24b25da085b34f4200eb7b/client/src/variables/demo/demo_polis_data.json
+
+Source SHA-256:
+255f6cad34d482aa36abdcb0828365ab256cb811fed04cb036375cfcb5cd02f0
+
+Distributed fixture SHA-256:
+f459c6bb2524806e17648fae737a8aae18b58402a81de9b4d4920b23ee7eb909
+
+Initial Common Ground import commit:
+67267c93457252b6bcb730818933e8a94f1332c2
+
+Transformation identifier: commonground-ce-demo-v1
+
+The adaptation projects the source fixture's statements, participant votes,
+cluster assignments, and summary statistics into the Common Ground prediction
+snapshot schema and adds empty evaluation-mask fields plus synthetic provenance
+metadata. The immutable import commit and the source/distributed hashes above
+identify the complete transformation boundary. The distributed fixture remains
+licensed under the Mozilla Public License, Version 2.0. The complete MPL-2.0
+text is included as LICENSES/MPL-2.0.txt.
+
+This attribution does not imply endorsement by the Context Engine project or
+its contributors.
+
+The bundled file contains no source participant identifiers. It is a synthetic,
+open-answer fixture for reproducible local evaluation; it is not a private or
+contamination-resistant benchmark split.

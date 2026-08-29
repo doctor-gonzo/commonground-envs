@@ -78,8 +78,8 @@ Publish immutable shared packages first:
 
 1. commonground-score 0.3.0
 2. commonground-scenarios 0.3.0
-3. commonground-predict 0.4.0
-4. commonground-elicit 0.4.0
+3. commonground-predict 0.4.1
+4. commonground-elicit 0.4.1
 
 The environment packages exactly pin the shared versions. Do not reuse a
 published version number.
@@ -90,8 +90,10 @@ For every wheel, sdist, and Hub source archive:
 
 - verify package name, version, Python requirement, repository URL, tags, and
   exact dependency pins;
-- verify LICENSE is present; predict must also contain its MPL-2.0 text and
-  NOTICE;
+- verify legal text is present in every artifact; current Prime CLI source
+  archives omit root files other than README, pyproject, and Python modules, so
+  both environments must carry Apache-2.0 under nested `LICENSES/`, and Predict
+  must also carry its MPL-2.0 text and byte-identical provenance notice there;
 - verify the packaged dependency manifest matches the candidate `uv.lock`
   closure-scoped resolution SHA-256, Python scope, pinned uv version, and exact
   no-dev resolution;
@@ -116,7 +118,7 @@ Push the new versions privately first. On the exact private artifacts:
   differences for Elicit;
 - review the rendered README and license/provenance notice.
 
-For the 0.4.0 study, generate the attested analysis directly from the retained
+For the 0.4.1 study, generate the attested analysis directly from the retained
 native-v1 traces:
 
     uv run python scripts/analyze_release_study.py \
