@@ -1,13 +1,14 @@
 # Common Ground 0.3.0 evaluation report
 
-Status: release candidate; exact private Hub artifacts and full model study
-complete; public evaluation records pending.
+Status: public release complete. Exact Hub artifacts, anonymous installation,
+the full model study, and all 12 version-pinned public evaluation records have
+been verified.
 
 This report records the model-free and model-evaluation evidence for the
 breaking 0.3.0 redesign. It intentionally contains no 0.2.x model scores: both
 corpora and both response contracts changed, so those runs are not comparable.
 
-## Candidate scope
+## Release scope
 
 | Environment | Eval rows | Train rows | Primary reward | Important diagnostics |
 | --- | ---: | ---: | --- | --- |
@@ -102,6 +103,27 @@ These are reference-model results on published synthetic answers, not a
 contamination-resistant leaderboard and not evidence of human-preference
 validity.
 
+## Public evaluation records
+
+The retained exact-artifact traces were published as version-pinned Prime
+Intellect evaluation records after both 0.3.0 listings passed anonymous install
+and native/legacy task-loading verification.
+
+| Task | Model | Public evaluation |
+| --- | --- | --- |
+| Predict | Claude Sonnet 4.5 | [`p6ax4yasiy4chhryja5t4zud`](https://app.primeintellect.ai/dashboard/evaluations/p6ax4yasiy4chhryja5t4zud) |
+| Predict | Gemini 2.5 Flash | [`gzz89cwp1oxkj2fq9nipvdew`](https://app.primeintellect.ai/dashboard/evaluations/gzz89cwp1oxkj2fq9nipvdew) |
+| Predict | GPT-4.1 | [`id31ny27zqgp4v9md1sfzj8n`](https://app.primeintellect.ai/dashboard/evaluations/id31ny27zqgp4v9md1sfzj8n) |
+| Predict | Qwen3 30B A3B Instruct | [`glcbl4dzvxdtjnn0k4tayr35`](https://app.primeintellect.ai/dashboard/evaluations/glcbl4dzvxdtjnn0k4tayr35) |
+| Find | Claude Sonnet 4.5 | [`v5yyailapdapy2p8yco5sjvi`](https://app.primeintellect.ai/dashboard/evaluations/v5yyailapdapy2p8yco5sjvi) |
+| Find | Gemini 2.5 Flash | [`mlgiauw8hwuoyhokjirg68m7`](https://app.primeintellect.ai/dashboard/evaluations/mlgiauw8hwuoyhokjirg68m7) |
+| Find | GPT-4.1 | [`qvtqj5qjlajtxdy2cvqjmric`](https://app.primeintellect.ai/dashboard/evaluations/qvtqj5qjlajtxdy2cvqjmric) |
+| Find | Qwen3 30B A3B Instruct | [`y4g3gbcb32zjr2k444ica4kv`](https://app.primeintellect.ai/dashboard/evaluations/y4g3gbcb32zjr2k444ica4kv) |
+| Ask | Claude Sonnet 4.5 | [`hy1tvdwhzi7awwsiwlg1dgs6`](https://app.primeintellect.ai/dashboard/evaluations/hy1tvdwhzi7awwsiwlg1dgs6) |
+| Ask | Gemini 2.5 Flash | [`vfib3eaor5rv2gnb3kdt1kyf`](https://app.primeintellect.ai/dashboard/evaluations/vfib3eaor5rv2gnb3kdt1kyf) |
+| Ask | GPT-4.1 | [`ny6hqx6ayq8iyb743y1yof8f`](https://app.primeintellect.ai/dashboard/evaluations/ny6hqx6ayq8iyb743y1yof8f) |
+| Ask | Qwen3 30B A3B Instruct | [`rqxwgvluk42culx09085orqa`](https://app.primeintellect.ai/dashboard/evaluations/rqxwgvluk42culx09085orqa) |
+
 ## Integrity evidence
 
 - Predict train/eval text, session IDs, seeds, and generator families are
@@ -116,8 +138,8 @@ validity.
 
 ## Study protocol and remaining work
 
-The runs used native Verifiers v1 against owner-qualified, version-pinned
-private Hub tasksets. Each saved config records `temperature = 0.2`,
+The runs used native Verifiers v1 against owner-qualified, version-pinned Hub
+tasksets while the exact artifacts were still private. Each saved config records `temperature = 0.2`,
 `max_tokens = 2048`, `shuffle = false`, ten-way evaluation concurrency, the
 subprocess pure-chat runtime, no judge models, and zero configured retries.
 Models were served through the Prime Inference chat-completions endpoint. Full
@@ -127,8 +149,9 @@ The separate Prime Hosted Evaluation canary failed before environment pull
 because its managed image retained legacy `connect-python==0.9.0` alongside
 the required `connectrpc` distribution. The failure is an upstream runner-image
 conflict, not an environment import or scoring failure; native-v1 runs against
-the exact Hub versions completed cleanly. Public evaluation records remain a
-publication step rather than evidence used to compute these scores.
+the exact Hub versions completed cleanly. The 12 public records above were
+subsequently created from the retained traces and were not used to recompute or
+select the reported scores.
 
 Useful next comparators are matrix factorization/spectral clustering plus
 text-only, matrix-only, and shuffled-text ablations for Predict, and component
@@ -136,9 +159,7 @@ oracles plus stronger lexicon/stance-prior baselines for Elicit. Training-value
 claims additionally require at least three training seeds and transfer to a
 fresh private generator family.
 
-## Release attestation fields
-
-Fill these only after building and privately validating the exact artifacts:
+## Release attestation
 
 | Field | Value |
 | --- | --- |
@@ -147,6 +168,6 @@ Fill these only after building and privately validating the exact artifacts:
 | `commonground-scenarios` 0.2.0 wheel/sdist SHA-256 | `3c74c95d0c78e5b87d0e3eb57246cac6d461813bb17932493c981f7bf89a788a` / `9c890b889376f664c5d89f5a94b97375130bba1805db06b97c7c22999982e4f1` |
 | `commonground-predict` 0.3.0 wheel/Hub content SHA-256 | `3fb5404dc94e57e9ad1d8f2ac349c0036c1df78c4270eee43f20627dc7ea7724` / `ed75b162cec5030c4e4b55d029b0a347b71aeb33a5e8f566a6b12e973da5dc0a` |
 | `commonground-elicit` 0.3.0 wheel/Hub content SHA-256 | `6e6594f22539628b5352aa9f420b5f6b9962329ff8ec735723aa586dd8a0bc0e` / `f7d7f70d784245323492e587a96984d94a4456fc45c46f66ca5ddb1c7173c03f` |
-| Private Hub version IDs | Predict `tpu9zthui9zuz6ug94a9pcm9`; Elicit `su5kq9ptdd6nmyv2mveragbm` |
+| Hub version IDs (validated privately, now public) | Predict `tpu9zthui9zuz6ug94a9pcm9`; Elicit `su5kq9ptdd6nmyv2mveragbm` |
 | Native evaluation run IDs and configs | 12 run IDs in the model-study table; exact `config.toml` plus `traces.jsonl` retained |
-| Public evaluation IDs | pending publication |
+| Public evaluation IDs | 12 version-pinned records listed above |
