@@ -117,7 +117,8 @@ def test_markdown_states_task_level_method() -> None:
 
     rendered = analysis_module.render_markdown(study)
 
-    assert "Task-cluster bootstrap summary" in rendered
+    assert "Clustered bootstrap summary" in rendered
+    assert "Paired clustered model differences" in rendered
     assert "1,000 deterministic percentile bootstrap resamples" in rendered
     assert "repeated rollouts" in rendered
 

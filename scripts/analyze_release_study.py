@@ -356,7 +356,7 @@ def analyze_runs(
 
 def render_markdown(analysis: StudyAnalysis) -> str:
     lines = [
-        "## Task-cluster bootstrap summary",
+        "## Clustered bootstrap summary",
         "",
         "| Environment | Model | Run ID | Tasks x rollouts | Resampling | Reward mean | Rollout std | 95% cluster CI | Task-mean std | Zero-reward tasks | Recovered |",
         "| --- | --- | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
@@ -385,9 +385,9 @@ def render_markdown(analysis: StudyAnalysis) -> str:
     lines.extend(
         [
             "",
-            "## Paired task-level model differences",
+            "## Paired clustered model differences",
             "",
-            "| Environment | Model A | Model B | Mean A - B | 95% paired task-bootstrap CI | Interpretation |",
+            "| Environment | Model A | Model B | Mean A - B | 95% paired clustered bootstrap CI | Interpretation |",
             "| --- | --- | --- | ---: | ---: | --- |",
         ]
     )
