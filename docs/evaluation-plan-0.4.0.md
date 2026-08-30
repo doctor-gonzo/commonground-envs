@@ -1,7 +1,9 @@
 # Common Ground 0.4-series candidate evaluation plan
 
-Status: unreleased. Do not make the Hub candidate public until every gate below
-passes against the same source commit and private Hub artifacts.
+Status: private-artifact study complete. All gates below passed against source
+commit `8d3c4a4fbf55ce46cbabc9774b09f3283dca6e43` and the exact 0.4.1 Hub
+artifacts. Public visibility and public evaluation records remain pending; see
+the [0.4.1 evaluation report](evaluation-report-0.4.1.md).
 
 The exact publication target is 0.4.1. It differs from the private 0.4.0
 candidate only by legal-file placement required by Prime's source-archive

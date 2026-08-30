@@ -9,6 +9,11 @@ All notable changes to this project are documented in this file.
   Predict's provenance notice. Add a regression model of the Prime 0.6.28 and
   0.6.29 archive collector. Task code, corpora, and scoring are unchanged from
   the private 0.4.0 candidate.
+- Complete the exact-private-artifact study across four model families and
+  three task modes: 6,000 clean rollouts, zero recovered/error history, and
+  paired task or template-hierarchical bootstrap intervals. Document the
+  sparse Elicit rewards and model-free comparator boundary without claiming
+  demonstrated training value.
 
 ## 0.4.0 - 2026-08-29 (private candidate)
 

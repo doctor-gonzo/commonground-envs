@@ -9,12 +9,13 @@ synthetic stakeholder data:
   contradictions, and gaps, or selection of the two most valuable
   clarification questions from three candidate issues.
 
-Version 0.4.1 is the current unreleased, review-driven candidate. The 0.4
+Version 0.4.1 is the current review-driven candidate. The 0.4
 series removes a prompt-visible 0.3 Elicit stance codebook, makes calibrated
 probabilities the Predict objective, strengthens semantic split audits, and
-adds optional Find training shaping. Keep it private until the exact candidate
-passes the full model study. Public answer keys make every release unsuitable
-for contamination-resistant leaderboards.
+adds optional Find training shaping. Its exact private Hub artifacts passed a
+6,000-rollout, four-model study with no recovered or failed rollouts. Public
+answer keys make every release unsuitable for contamination-resistant
+leaderboards.
 
 This is the reinforcement-learning environment family associated with
 [Context Engine](https://contextengine.sh), an open-source deliberation system
@@ -56,8 +57,9 @@ token Jaccard, and word-ngram TF-IDF similarity. Ask value derives from
 simulated answer coverage and disagreement, not policy keywords. Find keeps
 strict F1 for evaluation and offers an explicit staged training reward.
 
-See the historical [0.3.0 evaluation report](docs/evaluation-report-0.3.0.md),
-the [0.4-series evaluation plan](docs/evaluation-plan-0.4.0.md), and
+See the [0.4.1 evaluation report](docs/evaluation-report-0.4.1.md), historical
+[0.3.0 evaluation report](docs/evaluation-report-0.3.0.md),
+[0.4-series evaluation plan](docs/evaluation-plan-0.4.0.md), and
 [methodology](docs/methodology.md) for exact definitions and limits.
 
 ## Setup and verification
@@ -104,12 +106,14 @@ uv run python scripts/aggregate_baselines.py
 uv run python scripts/aggregate_baselines.py --csv /path/to/baselines.csv
 ```
 
-The historical 0.3.0 release study completed all 6,000 planned rollouts across Claude
-Sonnet 4.5, Gemini 2.5 Flash, GPT-4.1, and Qwen3 30B A3B Instruct with no
-recovered rollouts. Predict rewards ranged from 0.572 to 0.730, Find from 0.120
-to 0.235, and Ask from 0.052 to 0.296. The exact clustered intervals,
-pairwise comparisons, configs, artifact hashes, and limitations are in the
-[0.3.0 evaluation report](docs/evaluation-report-0.3.0.md).
+The 0.4.1 private-artifact study completed all 6,000 planned rollouts across
+Claude Sonnet 4.5, Gemini 2.5 Flash, GPT-4.1, and Qwen3 30B A3B Instruct with
+no recovered rollouts. Predict rewards ranged from 0.706 to 0.809, strict Find
+F1 from 0.050 to 0.160, and Ask utility from 0.016 to 0.105. Predict separates
+all four models without saturating; Elicit is substantially sparser, and only
+GPT-4.1's Find mean exceeds the 0.140 vague-span heuristic. Exact clustered
+intervals, paired comparisons, artifact hashes, and limitations are in the
+[0.4.1 evaluation report](docs/evaluation-report-0.4.1.md).
 
 Reproduce the task-level Predict and template-hierarchical Elicit analysis with:
 
@@ -118,7 +122,7 @@ uv run python scripts/analyze_release_study.py \
   --root /path/to/study \
   --elicit-eval-split environments/commonground_elicit/commonground_elicit/data/eval_synthetic_heldout.jsonl \
   --bootstrap-samples 50000 \
-  --seed 20260828 \
+  --seed 20260829 \
   --expected-model-count 4 \
   --expected-task-count 100 \
   --expected-rollouts-per-task 5 \
