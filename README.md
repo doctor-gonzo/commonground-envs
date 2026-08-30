@@ -9,13 +9,13 @@ synthetic stakeholder data:
   contradictions, and gaps, or selection of the two most valuable
   clarification questions from three candidate issues.
 
-Version 0.4.1 is the current review-driven candidate. The 0.4
+Version 0.4.1 is the current review-driven release. The 0.4
 series removes a prompt-visible 0.3 Elicit stance codebook, makes calibrated
 probabilities the Predict objective, strengthens semantic split audits, and
-adds optional Find training shaping. Its exact private Hub artifacts passed a
-6,000-rollout, four-model study with no recovered or failed rollouts. Public
-answer keys make every release unsuitable for contamination-resistant
-leaderboards.
+adds optional Find training shaping. Its exact public Hub artifacts passed a
+6,000-rollout, four-model study with no recovered or failed rollouts, and all
+12 version-pinned evaluation records are public. Public answer keys make every
+release unsuitable for contamination-resistant leaderboards.
 
 This is the reinforcement-learning environment family associated with
 [Context Engine](https://contextengine.sh), an open-source deliberation system
@@ -40,6 +40,18 @@ synthetic, operator-authored demo fixture.
 Both environments export native Verifiers v1 `Taskset`/`Harness` plugins and a
 real legacy `SingleTurnEnv` adapter for the current Prime Hosted Evaluation
 runner. The same rows and scoring functions back both interfaces.
+
+## Prime Intellect Hub
+
+- [`charliethompson/commonground-predict@0.4.1`](https://app.primeintellect.ai/dashboard/environments/charliethompson/commonground-predict)
+- [`charliethompson/commonground-elicit@0.4.1`](https://app.primeintellect.ai/dashboard/environments/charliethompson/commonground-elicit)
+
+Install the exact reviewed versions with:
+
+```bash
+prime env install charliethompson/commonground-predict@0.4.1
+prime env install charliethompson/commonground-elicit@0.4.1
+```
 
 ## What the 0.4 series changes
 
@@ -106,7 +118,7 @@ uv run python scripts/aggregate_baselines.py
 uv run python scripts/aggregate_baselines.py --csv /path/to/baselines.csv
 ```
 
-The 0.4.1 private-artifact study completed all 6,000 planned rollouts across
+The 0.4.1 exact-artifact study completed all 6,000 planned rollouts across
 Claude Sonnet 4.5, Gemini 2.5 Flash, GPT-4.1, and Qwen3 30B A3B Instruct with
 no recovered rollouts. Predict rewards ranged from 0.706 to 0.809, strict Find
 F1 from 0.050 to 0.160, and Ask utility from 0.016 to 0.105. Predict separates
