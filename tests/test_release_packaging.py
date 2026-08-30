@@ -17,8 +17,8 @@ PROJECTS = {
         "commonground_predict",
         "0.5.0",
         [
-            "commonground-scenarios==0.4.0",
-            "commonground-score==0.4.0",
+            "commonground-scenarios==0.5.0",
+            "commonground-score==0.5.0",
             "datasets>=5.0.1,<6.0.0",
             "verifiers==0.3.0",
         ],
@@ -28,8 +28,8 @@ PROJECTS = {
         "commonground_elicit",
         "0.5.0",
         [
-            "commonground-scenarios==0.4.0",
-            "commonground-score==0.4.0",
+            "commonground-scenarios==0.5.0",
+            "commonground-score==0.5.0",
             "datasets>=5.0.1,<6.0.0",
             "verifiers==0.3.0",
         ],
@@ -37,13 +37,13 @@ PROJECTS = {
     "commonground-score": (
         ROOT / "packages" / "commonground-score",
         "commonground_score",
-        "0.4.0",
+        "0.5.0",
         [],
     ),
     "commonground-scenarios": (
         ROOT / "packages" / "commonground-scenarios",
         "commonground_scenarios",
-        "0.4.0",
+        "0.5.0",
         [],
     ),
 }

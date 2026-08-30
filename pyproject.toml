@@ -5,7 +5,7 @@ description = "Workspace for Common Ground deliberation evaluation environments.
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    "commonground-scenarios==0.4.0",
+    "commonground-scenarios==0.5.0",
 ]
 
 [dependency-groups]

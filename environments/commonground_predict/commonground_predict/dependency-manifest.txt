@@ -3,7 +3,7 @@
 # Distribution: commonground-predict==0.5.0
 # Python-Requires: >=3.12,<3.13
 # Lock-File: uv.lock
-# Resolution-SHA256: e319daad39966586ab9c0e34b9388f16178292a43a3a028e59cba7b45c5751d6
+# Resolution-SHA256: 853768dc377fe5e32b4e0f791861dd3fef7fb2257d97fbc15f1c38bbb9d6c7e2
 # uv-Version: 0.10.9
 # Generated-By: scripts/check_dependency_manifests.py
 #
@@ -11,9 +11,9 @@
 # represented as immutable distribution pins; this file is provenance,
 # not a substitute for the platform-specific installation resolver.
 commonground-predict==0.5.0
-commonground-scenarios==0.4.0
+commonground-scenarios==0.5.0
     # via commonground-predict
-commonground-score==0.4.0
+commonground-score==0.5.0
     # via commonground-predict
 aiofiles==25.1.0 \
     --hash=sha256:a8d728f0a29de45dc521f18f07297428d56992a742f0cd2701ba86e44d23d5b2 \

@@ -3,7 +3,7 @@
 # Distribution: commonground-elicit==0.5.0
 # Python-Requires: >=3.12,<3.13
 # Lock-File: uv.lock
-# Resolution-SHA256: ae866bddb24fb98d875e1e0ff4fa699386a92e78273ee8a1e7180a7984cafa81
+# Resolution-SHA256: e9559ad3540df8bcb589ddfd865d33a00c4fdb3387a051304d632a14045d6b83
 # uv-Version: 0.10.9
 # Generated-By: scripts/check_dependency_manifests.py
 #
@@ -11,9 +11,9 @@
 # represented as immutable distribution pins; this file is provenance,
 # not a substitute for the platform-specific installation resolver.
 commonground-elicit==0.5.0
-commonground-scenarios==0.4.0
+commonground-scenarios==0.5.0
     # via commonground-elicit
-commonground-score==0.4.0
+commonground-score==0.5.0
     # via commonground-elicit
 aiofiles==25.1.0 \
     --hash=sha256:a8d728f0a29de45dc521f18f07297428d56992a742f0cd2701ba86e44d23d5b2 \

@@ -7,8 +7,8 @@ record exists until every gate below passes against immutable artifacts.
 
 | Distribution | Candidate version | Role |
 | --- | --- | --- |
-| `commonground-score` | 0.4.0 | Probability scoring and Brier-skill helpers |
-| `commonground-scenarios` | 0.4.0 | Scenario schema 3, generation, and validation |
+| `commonground-score` | 0.5.0 | Probability scoring and Brier-skill helpers |
+| `commonground-scenarios` | 0.5.0 | Scenario schema 3, generation, and validation |
 | `commonground-predict` | 0.5.0 | Probabilistic masked-vote prediction |
 | `commonground-elicit` | 0.5.0 | Grounded finding and clarification selection |
 

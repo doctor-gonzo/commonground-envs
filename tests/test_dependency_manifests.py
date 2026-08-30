@@ -41,13 +41,13 @@ def test_workspace_paths_are_replaced_with_exact_locked_pins() -> None:
         exported,
         {
             "environments/commonground_predict": "commonground-predict==0.5.0",
-            "packages/commonground-score": "commonground-score==0.4.0",
+            "packages/commonground-score": "commonground-score==0.5.0",
         },
     )
 
     assert rendered == (
         "commonground-predict==0.5.0\n"
-        "commonground-score==0.4.0\n"
+        "commonground-score==0.5.0\n"
         "    # via commonground-predict\n"
         "verifiers==0.3.0\n"
     )
@@ -107,8 +107,8 @@ def test_manifest_records_release_scope_without_local_paths(
     assert "# Resolution-SHA256: " in content
     assert "# Lock-SHA256: " not in content
     assert "# uv-Version: 0.10.9" in content
-    assert "commonground-scenarios==0.4.0" in content
-    assert "commonground-score==0.4.0" in content
+    assert "commonground-scenarios==0.5.0" in content
+    assert "commonground-score==0.5.0" in content
     assert "datasets==5.0.1" in content
     assert "verifiers==0.3.0" in content
     assert "--hash=sha256:" in content

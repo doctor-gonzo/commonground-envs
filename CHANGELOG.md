@@ -24,7 +24,7 @@ All notable changes to this project are documented in this file.
   distance-weighted k-NN, and train-split text-only probability comparators for
   Predict. Report normalized Brier and Brier skill relative to uniform alongside
   probability reward and accuracy.
-- Bump both Hub environments to 0.5.0, both shared packages to 0.4.0, and the
+- Align both Hub environments and both shared packages at 0.5.0, and bump the
   scenario schema to `urn:commonground:schema:scenario:3`. A fresh immutable
   artifact study and new Elicit evaluation records are required before release.
 

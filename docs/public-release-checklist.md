@@ -81,8 +81,8 @@ resolved-version diff, and rerun `--check`. Do not hand-edit the manifests.
 
 Publish immutable shared packages first:
 
-1. commonground-score 0.4.0
-2. commonground-scenarios 0.4.0
+1. commonground-score 0.5.0
+2. commonground-scenarios 0.5.0
 3. commonground-predict 0.5.0
 4. commonground-elicit 0.5.0
 

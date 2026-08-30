@@ -38,8 +38,8 @@ synthetic, operator-authored demo fixture.
 
 | Path | Distribution | Purpose |
 | --- | --- | --- |
-| `packages/commonground-score` | `commonground-score` 0.4.0 candidate | Vote statistics, calibrated rewards, and Brier skill. |
-| `packages/commonground-scenarios` | `commonground-scenarios` 0.4.0 candidate | Offline scenario generation, schema, and validation. |
+| `packages/commonground-score` | `commonground-score` 0.5.0 candidate | Vote statistics, calibrated rewards, and Brier skill. |
+| `packages/commonground-scenarios` | `commonground-scenarios` 0.5.0 candidate | Offline scenario generation, schema, and validation. |
 | `environments/commonground_predict` | `commonground-predict` 0.5.0 candidate | Probabilistic masked-vote prediction. |
 | `environments/commonground_elicit` | `commonground-elicit` 0.5.0 candidate | Structured finding diagnosis and top-K clarification. |
 
