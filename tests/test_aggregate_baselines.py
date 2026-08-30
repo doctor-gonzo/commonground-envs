@@ -308,6 +308,28 @@ def test_native_successful_retry_error_history_remains_aggregatable(
     assert summary.recovered_rollout_count == 1
 
 
+def test_native_successful_model_call_retry_is_counted_as_recovered(
+    tmp_path: Path,
+) -> None:
+    traces_path = write_native_run(
+        tmp_path,
+        environment="commonground-predict",
+        run_id="successful-call-retry",
+        num_tasks=1,
+        num_rollouts=1,
+    )
+    rows = read_native_rows(traces_path)
+    rows[0]["traces"][0]["calls"] = [
+        {"error": {"type": "ProviderError", "message": "transient retry"}},
+        {"model": "fixture/native-oracle", "finish_reason": "stop"},
+    ]
+    write_native_rows(traces_path, rows)
+
+    [summary] = aggregate.load_summaries(tmp_path)
+    assert summary.run_id == "successful-call-retry"
+    assert summary.recovered_rollout_count == 1
+
+
 def test_native_qualified_hub_id_preserves_provenance(tmp_path: Path) -> None:
     environment = "public-org/commonground-elicit@0.2.0"
     write_native_run(

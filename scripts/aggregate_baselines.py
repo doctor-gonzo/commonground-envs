@@ -369,7 +369,22 @@ def load_native_run(result_path: Path) -> CompleteRun:
             raise InvalidRunError(
                 f"{result_path}:{line_number}: errors fields must be lists"
             )
-        recovered_rollout_count += bool(episode_errors or trace_errors)
+        call_recovery = False
+        if "calls" in trace:
+            calls = trace.get("calls")
+            if not isinstance(calls, list):
+                raise InvalidRunError(
+                    f"{result_path}:{line_number}: trace.calls must be a list"
+                )
+            for call in calls:
+                if not isinstance(call, Mapping):
+                    raise InvalidRunError(
+                        f"{result_path}:{line_number}: trace calls must be objects"
+                    )
+            call_recovery = len(calls) != 1 or any(
+                call.get("error") is not None for call in calls
+            )
+        recovered_rollout_count += bool(episode_errors or trace_errors or call_recovery)
         trace_id = require_nonempty_string(trace, "id", result_path, line_number)
         if trace_id in trace_ids:
             raise InvalidRunError(

@@ -74,7 +74,7 @@ error history.
 | Predict | Qwen3 30B A3B Instruct | `618628c9-dfd9-4b1a-95f2-e65e5e2ead1b` | 0.706 ± 0.114 | [0.684, 0.726] | accuracy 0.567; Brier 0.294 | 1 |
 | Find | GPT-4.1 | `703f5a57-88ad-436a-be29-db50b26449c4` | 0.160 ± 0.228 | [0.103, 0.224] | localization 0.667; type 0.515 | 45 |
 | Find | Gemini 2.5 Flash | `0575acd7-9826-417b-9d43-bd71c0548746` | 0.073 ± 0.134 | [0.045, 0.105] | localization 0.667; type 0.552 | 53 |
-| Find | Qwen3 30B A3B Instruct | `e1fca6ee-16f0-4a12-8bf2-2808d8dd1b64` | 0.062 ± 0.148 | [0.021, 0.111] | localization 0.477; type 0.500 | 74 |
+| Find | Qwen3 30B A3B Instruct | `c91c9698-8c55-4181-9b7f-abd893132221` | 0.071 ± 0.154 | [0.026, 0.123] | localization 0.479; type 0.531 | 70 |
 | Find | Claude Sonnet 4.5 | `6611d15f-a6ac-4806-a315-717ed1d18495` | 0.050 ± 0.128 | [0.024, 0.080] | localization 0.295; type 0.227 | 74 |
 | Ask | Claude Sonnet 4.5 | `dd7353ac-d4d5-4cf3-bff8-eadc6c9e7615` | 0.105 ± 0.147 | [0.072, 0.141] | — | 44 |
 | Ask | Gemini 2.5 Flash | `3bf07d6d-ec51-4711-9035-9112cbd444d1` | 0.058 ± 0.114 | [0.033, 0.088] | — | 55 |
@@ -96,7 +96,7 @@ Selected paired differences show the principal ranking structure:
 | Predict | Gemini − GPT-4.1 | +0.038 | [+0.020, +0.056] |
 | Predict | GPT-4.1 − Qwen | +0.027 | [+0.002, +0.053] |
 | Find | GPT-4.1 − Gemini | +0.087 | [+0.042, +0.136] |
-| Find | GPT-4.1 − Qwen | +0.099 | [+0.040, +0.161] |
+| Find | GPT-4.1 − Qwen | +0.090 | [+0.029, +0.156] |
 | Find | GPT-4.1 − Sonnet | +0.111 | [+0.060, +0.167] |
 | Ask | Sonnet − Gemini | +0.048 | [+0.004, +0.090] |
 | Ask | Gemini − Qwen | +0.026 | [+0.001, +0.055] |
@@ -146,9 +146,16 @@ complete run and one partial run. Every affected request returned HTTP 402.
 The failed trace tree was moved outside the analysis root and retained as
 operational evidence. The one complete, error-free GPT-4.1 Predict run was
 kept; the other eleven runs were restarted from scratch after funding. They
-were not resumed, and no run was selected or rejected based on its score. The
-final analysis root contains exactly 12 complete runs with zero recovered or
-error history.
+were not resumed, and no run was selected or rejected based on its score.
+
+Post-study upload validation then found one Qwen Find episode with a transient
+HTTP 502 call followed by a successful SDK retry. Terminal episode fields had
+not exposed that call-level history, so the aggregate recovery counter and its
+regression coverage were strengthened. The entire 500-rollout Qwen Find run
+was quarantined and rerun from the same saved configuration; no individual
+episode was resumed or substituted. The final analysis root contains exactly
+12 complete runs, and all 6,000 included traces contain exactly one successful
+model call with no error history.
 
 ## Study protocol and claim boundary
 
