@@ -10,7 +10,11 @@ import re
 from collections.abc import Callable, Mapping
 from typing import Any
 
-from commonground_scenarios.templates import DomainTemplate, get_template
+from commonground_scenarios.templates import (
+    VALUE_DIMENSIONS,
+    DomainTemplate,
+    get_template,
+)
 from commonground_scenarios.validation import (
     PASS_THRESHOLD,
     canonical_date,
@@ -18,7 +22,7 @@ from commonground_scenarios.validation import (
     validate_scenario,
 )
 
-DEFAULT_GENERATED_AT = "2026-08-15"
+DEFAULT_GENERATED_AT = "2026-08-30"
 SEMANTIC_SCOPES: tuple[str | None, ...] = (
     None,
     "for after-hours requests",
@@ -79,9 +83,9 @@ def generate_scenario(
     if semantic_scope is not None:
         _apply_semantic_scope(documents, planted_items, semantic_scope)
     generator_family = (
-        "heldout-template-layout-profile-v3"
+        "heldout-template-layout-profile-v4"
         if template.template_set == "heldout"
-        else "train-template-layout-profile-v3"
+        else "train-template-layout-profile-v4"
     )
     _randomize_visible_structure(
         rng,
@@ -97,22 +101,27 @@ def generate_scenario(
                 raise TypeError("prose_polisher must return text")
             document["text"] = polished
 
-    for planted in planted_items:
-        planted["decision_terms"] = _decision_terms(str(planted["canonical_question"]))
-        # Final value is computed from simulated faction answers after stance
-        # generation. No policy keyword table participates in issue ranking.
-        planted["decision_value"] = 1.0
-        planted["related_evidence"] = _related_evidence(documents, planted)
     factions = copy.deepcopy(list(template.factions))
-    _randomize_faction_structure(rng, factions, planted_items)
+    _randomize_faction_structure(rng, factions)
     for planted in planted_items:
-        dimension = planted["target_dimension"]
-        planted["target_stances"] = {
-            faction["faction_id"]: _stance_for(float(faction["priors"][dimension]))
+        planted["related_evidence"] = _authored_related_evidence(documents, planted)
+        planted.pop("related_plant_doc_id", None)
+        planted.pop("related_anchor_quote", None)
+        planted["alternative_stances"] = {
+            faction["faction_id"]: _stance_for(
+                _composed_preference(
+                    faction["values"],
+                    planted["value_weights"],
+                )
+            )
             for faction in factions
         }
+        planted["target_stances"] = orient_stances(
+            planted["alternative_stances"],
+            yes_choice=str(planted["canonical_yes_choice"]),
+        )
         planted["decision_value"] = _answer_conditioned_value(planted["target_stances"])
-    _add_visible_faction_principles(rng, factions, planted_items)
+    _add_visible_faction_values(rng, factions)
 
     scenario = {
         "scenario_id": scenario_id_for(template.template_id, seed),
@@ -126,7 +135,7 @@ def generate_scenario(
         "planted_items": planted_items,
         "distractors": distractors,
         "persona_panel": {
-            "vote_rule": "dimension-threshold-v1",
+            "vote_rule": "value-composition-v1",
             "pass_threshold": PASS_THRESHOLD,
             "faction_ids": [faction["faction_id"] for faction in factions],
         },
@@ -171,6 +180,39 @@ def _stance_for(prior: float) -> str:
     return "pass"
 
 
+def _composed_preference(
+    values: Mapping[str, float], weights: Mapping[str, float]
+) -> float:
+    """Compose reusable faction values with one issue's alternative trade-off."""
+
+    scale = sum(abs(float(weights[dimension])) for dimension in VALUE_DIMENSIONS)
+    if scale == 0:
+        raise ValueError("value_weights cannot all be zero")
+    return (
+        sum(
+            float(values[dimension]) * float(weights[dimension])
+            for dimension in VALUE_DIMENSIONS
+        )
+        / scale
+    )
+
+
+def orient_stances(
+    alternative_stances: Mapping[str, str], *, yes_choice: str
+) -> dict[str, str]:
+    """Orient alternative preferences to the yes side of a specific question."""
+
+    if yes_choice == "alternative":
+        return dict(alternative_stances)
+    if yes_choice != "anchor":
+        raise ValueError("yes_choice must be anchor or alternative")
+    inverse = {"agree": "disagree", "disagree": "agree", "pass": "pass"}
+    return {
+        faction_id: inverse[stance]
+        for faction_id, stance in alternative_stances.items()
+    }
+
+
 def _apply_semantic_scope(
     documents: list[dict[str, str]],
     planted_items: list[dict[str, Any]],
@@ -192,45 +234,6 @@ def _apply_semantic_scope(
             f"{alias.removesuffix('?')} {scope}?"
             for alias in plant["canonical_question_aliases"]
         ]
-
-
-_QUESTION_STOPWORDS = frozenset(
-    {
-        "after",
-        "allowed",
-        "before",
-        "could",
-        "decide",
-        "does",
-        "during",
-        "each",
-        "from",
-        "have",
-        "instead",
-        "into",
-        "must",
-        "should",
-        "than",
-        "that",
-        "their",
-        "them",
-        "this",
-        "under",
-        "what",
-        "when",
-        "which",
-        "with",
-        "without",
-        "would",
-    }
-)
-_SCOPE_TERMS = frozenset(
-    token
-    for scope in SEMANTIC_SCOPES
-    if scope is not None
-    for token in re.findall(r"[^\W_]+", scope.casefold())
-    if len(token) >= 4
-)
 
 
 def _randomize_visible_structure(
@@ -274,6 +277,8 @@ def _randomize_visible_structure(
         document["text"] = " ".join(sentences)
     for plant in planted_items:
         plant["doc_id"] = old_to_new[plant["doc_id"]]
+        if "related_plant_doc_id" in plant:
+            plant["related_plant_doc_id"] = old_to_new[plant["related_plant_doc_id"]]
         plant["plant_id"] = f"issue-{rng.randrange(16**8):08x}"
     for distractor in distractors:
         distractor["doc_id"] = old_to_new[distractor["doc_id"]]
@@ -284,32 +289,28 @@ def _randomize_visible_structure(
 def _randomize_faction_structure(
     rng: random.Random,
     factions: list[dict[str, Any]],
-    planted_items: list[dict[str, Any]],
 ) -> None:
-    """Use opaque faction IDs and varying order/count without changing summaries."""
+    """Use opaque faction IDs and varying count without issue-conditioned values."""
 
-    dimensions = [str(plant["target_dimension"]) for plant in planted_items]
     extra_factions = (
         (
             "Implementation council",
             "Balances operational continuity with reviewable safeguards.",
+            (0.2, 0.4, 0.8, 0.6, 0.5),
         ),
         (
             "Access delegates",
             "Prioritizes workable exceptions for people facing access barriers.",
+            (0.9, 0.6, 0.5, -0.1, 0.2),
         ),
     )
-    for name, summary in extra_factions[: rng.randrange(3)]:
-        priors = {}
-        for dimension in dimensions:
-            magnitude = rng.choice((0.15, 0.45, 0.75))
-            priors[dimension] = magnitude if rng.random() < 0.5 else -magnitude
+    for name, summary, vector in extra_factions[: rng.randrange(3)]:
         factions.append(
             {
                 "faction_id": "placeholder",
                 "name": name,
                 "summary": summary,
-                "priors": priors,
+                "values": dict(zip(VALUE_DIMENSIONS, vector, strict=True)),
             }
         )
     rng.shuffle(factions)
@@ -317,74 +318,90 @@ def _randomize_faction_structure(
         faction["faction_id"] = f"group-{rng.randrange(16**8):08x}"
 
 
-_PRINCIPLE_EXAMPLES: dict[tuple[str, str], tuple[str, ...]] = {
-    ("ambiguity", "agree"): (
-        "For open thresholds, usually favors case-specific judgment over one fixed cutoff.",
-        "When a standard is vague, tends to leave room for local discretion.",
+_VALUE_PRINCIPLES: dict[tuple[str, str], tuple[str, ...]] = {
+    ("access", "positive"): (
+        "Prioritizes broad access when procedures exclude affected people.",
+        "Values making services reachable through more than one channel.",
     ),
-    ("ambiguity", "disagree"): (
-        "For open thresholds, usually favors one fixed cutoff over case-specific judgment.",
-        "When a standard is vague, tends to prefer a centrally defined boundary.",
+    ("access", "negative"): (
+        "Accepts narrower access when expansion would weaken the stated process.",
+        "Treats broad access as secondary to maintaining bounded eligibility.",
     ),
-    ("ambiguity", "pass"): (
-        "For open thresholds, weighs local judgment and fixed cutoffs case by case.",
-        "Has no general preference between discretion and a fixed boundary.",
+    ("access", "balanced"): (
+        "Balances broader access against the limits of the stated process.",
+        "Has no fixed preference for expanding or narrowing access.",
     ),
-    ("contradiction", "agree"): (
-        "When written rules conflict, tends to give a practical exception more weight.",
-        "In authority conflicts, usually favors the instruction that preserves operations.",
+    ("adaptability", "positive"): (
+        "Values discretion to adapt a rule to the facts of a case.",
+        "Favors practical flexibility when circumstances differ.",
     ),
-    ("contradiction", "disagree"): (
-        "When written rules conflict, tends to give the default authority rule more weight.",
-        "In authority conflicts, usually resists exceptions to the stated control.",
+    ("adaptability", "negative"): (
+        "Values consistent application over case-specific flexibility.",
+        "Resists discretionary departures from a common process.",
     ),
-    ("contradiction", "pass"): (
-        "When written rules conflict, reviews which authority should control case by case.",
-        "Has no general preference between a default rule and an operational exception.",
+    ("adaptability", "balanced"): (
+        "Balances consistent rules with case-specific flexibility.",
+        "Has no fixed preference between discretion and uniform treatment.",
     ),
-    ("gap", "agree"): (
-        "When a standard channel fails, tends to favor a workable alternate path.",
-        "Usually supports a fallback for people unable to use the normal process.",
+    ("continuity", "positive"): (
+        "Prioritizes continuity when the normal workflow is interrupted.",
+        "Values keeping essential operations moving through disruption.",
     ),
-    ("gap", "disagree"): (
-        "When a standard channel fails, tends to retain the normal requirement.",
-        "Usually resists creating a fallback outside the established process.",
+    ("continuity", "negative"): (
+        "Accepts interruption rather than preserve service at any cost.",
+        "Treats continuity as secondary when the normal workflow cannot be followed.",
     ),
-    ("gap", "pass"): (
-        "When a standard channel fails, decides whether to allow a fallback case by case.",
-        "Has no general preference about alternatives to the normal process.",
+    ("continuity", "balanced"): (
+        "Balances operational continuity against reasons to pause.",
+        "Has no fixed preference for continuity over interruption.",
+    ),
+    ("oversight", "positive"): (
+        "Prioritizes explicit approval and reviewable decision authority.",
+        "Values controls that make exceptions auditable.",
+    ),
+    ("oversight", "negative"): (
+        "Accepts lighter approval controls when they obstruct timely action.",
+        "Treats formal oversight as secondary to direct resolution.",
+    ),
+    ("oversight", "balanced"): (
+        "Balances formal oversight with direct operating authority.",
+        "Has no fixed preference for more or less approval control.",
+    ),
+    ("safety", "positive"): (
+        "Prioritizes conservative safeguards when consequences are uncertain.",
+        "Values reducing safety exposure even when action becomes slower.",
+    ),
+    ("safety", "negative"): (
+        "Accepts bounded safety trade-offs to avoid unnecessary restriction.",
+        "Treats precaution as secondary when risks are limited and reviewable.",
+    ),
+    ("safety", "balanced"): (
+        "Balances precaution against the costs of unnecessary restriction.",
+        "Has no fixed preference for more or less precaution.",
     ),
 }
 
 
-def _add_visible_faction_principles(
+def _add_visible_faction_values(
     rng: random.Random,
     factions: list[dict[str, Any]],
-    planted_items: list[dict[str, Any]],
 ) -> None:
-    """Expose indirect policy principles without issue signatures or stance labels."""
+    """Render each reusable value once, independently of planted issues."""
 
     for faction in factions:
         clauses: list[str] = []
-        for plant in planted_items:
-            stance = str(plant["target_stances"][faction["faction_id"]])
-            clauses.append(
-                rng.choice(_PRINCIPLE_EXAMPLES[(str(plant["type"]), stance)])
+        for dimension in VALUE_DIMENSIONS:
+            value = float(faction["values"][dimension])
+            direction = (
+                "positive"
+                if value >= PASS_THRESHOLD
+                else "negative"
+                if value <= -PASS_THRESHOLD
+                else "balanced"
             )
+            clauses.append(rng.choice(_VALUE_PRINCIPLES[(dimension, direction)]))
         rng.shuffle(clauses)
         faction["summary"] = f"{faction['summary']} {' '.join(clauses)}"
-
-
-def _decision_terms(question: str) -> list[str]:
-    """Extract a deterministic multi-token latent decision signature."""
-
-    tokens = re.findall(r"[^\W_]+", question.casefold())
-    terms = [
-        token
-        for token in tokens
-        if len(token) >= 4 and token not in _QUESTION_STOPWORDS
-    ]
-    return list(dict.fromkeys(terms))[:8]
 
 
 def _answer_conditioned_value(target_stances: Mapping[str, str]) -> float:
@@ -403,33 +420,31 @@ def _answer_conditioned_value(target_stances: Mapping[str, str]) -> float:
     return max(0.25, answer_coverage)
 
 
-def _related_evidence(
+def _authored_related_evidence(
     documents: list[dict[str, str]],
     plant: dict[str, Any],
 ) -> dict[str, str] | None:
-    """Identify the second visible rule for a planted contradiction."""
+    """Resolve an explicitly authored second rule for a contradiction.
+
+    Contradiction relationships are semantic authoring data. Inferring them
+    from token overlap can silently select a nearby ambiguity or distractor,
+    so generation only remaps and verifies the authored document/quote pair.
+    """
 
     if plant["type"] != "contradiction":
+        if "related_plant_doc_id" in plant or "related_anchor_quote" in plant:
+            raise ValueError("only contradictions may author related evidence")
         return None
-    anchor_terms = set(_decision_terms(str(plant["anchor_quote"]))) - _SCOPE_TERMS
-    question_terms = (
-        set(_decision_terms(str(plant["canonical_question"]))) - _SCOPE_TERMS
+    related_doc_id = plant.get("related_plant_doc_id")
+    related_quote = plant.get("related_anchor_quote")
+    if not isinstance(related_doc_id, str) or not isinstance(related_quote, str):
+        raise ValueError("contradictions require authored related evidence")
+    if related_doc_id == plant["doc_id"]:
+        raise ValueError("contradiction evidence must use another document")
+    related_document = next(
+        (document for document in documents if document["doc_id"] == related_doc_id),
+        None,
     )
-    candidates: list[tuple[int, int, str, str]] = []
-    for document in documents:
-        if document["doc_id"] == plant["doc_id"]:
-            continue
-        for sentence in re.split(r"(?<=[.!?])\s+", document["text"]):
-            sentence_terms = set(_decision_terms(sentence))
-            candidates.append(
-                (
-                    len(anchor_terms & sentence_terms),
-                    len(question_terms & sentence_terms),
-                    document["doc_id"],
-                    sentence,
-                )
-            )
-    if not candidates:
-        return None
-    _, _, doc_id, quote = max(candidates, key=lambda item: (item[0], item[1], item[3]))
-    return {"doc_id": doc_id, "quote": quote}
+    if related_document is None or related_quote not in related_document["text"]:
+        raise ValueError("authored contradiction evidence is absent from documents")
+    return {"doc_id": related_doc_id, "quote": related_quote}

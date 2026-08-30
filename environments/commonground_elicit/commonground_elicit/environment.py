@@ -38,7 +38,6 @@ FINDING_TYPES = frozenset({"ambiguity", "contradiction", "gap"})
 QUOTE_OVERLAP_THRESHOLD = 0.8
 PLANT_COVERAGE_THRESHOLD = 0.9
 QUOTE_PRECISION_THRESHOLD = 0.8
-DECISION_TERM_RECALL_THRESHOLD = 0.5
 MAX_COMPLETION_CHARS = 32_768
 MAX_JSON_STARTS = 64
 MAX_JSON_DEPTH = 32
@@ -48,38 +47,6 @@ VALID_REWARD_MODES = frozenset({"strict", "shaped"})
 STANCE_TO_VOTE = {"agree": 1, "disagree": -1, "pass": 0}
 QUESTION_GROUNDING_WEIGHT = 0.5
 STANCE_ACCURACY_WEIGHT = 0.5
-QUESTION_GROUNDING_STOPWORDS = frozenset(
-    {
-        "a",
-        "an",
-        "and",
-        "are",
-        "be",
-        "by",
-        "do",
-        "does",
-        "for",
-        "from",
-        "have",
-        "in",
-        "is",
-        "it",
-        "of",
-        "on",
-        "or",
-        "should",
-        "the",
-        "this",
-        "to",
-        "under",
-        "what",
-        "when",
-        "which",
-        "who",
-        "with",
-        "without",
-    }
-)
 _TOKEN_PATTERN = re.compile(
     r"(?:!=|<=|>=|==)|[!~](?=\s*[^\W_])|-(?=\s*\d)|[^\W_]+|"
     r"[¬≠≤≥=<>±+\N{MINUS SIGN}%$€£¥∉∈∧\N{LOGICAL OR}]",
@@ -154,9 +121,20 @@ class ElicitTask(vf.Task[ElicitTaskData]):
 
     @vf.metric
     async def companion_metrics(self, trace: vf.Trace) -> Mapping[str, float]:
-        if self.data.info["task_label"] != "find":
-            return {}
         completion = [{"role": "assistant", "content": trace.last_reply}]
+        if self.data.info["task_label"] == "elicit-ask":
+            parser = ElicitJsonParser("questions")
+            return {
+                "question_format_valid": await question_format_validity(
+                    completion, self.data.answer, self.data.info, parser
+                ),
+                "question_grounding_recall": await question_grounding_recall(
+                    completion, self.data.answer, self.data.info, parser
+                ),
+                "question_stance_accuracy": await question_stance_accuracy(
+                    completion, self.data.answer, self.data.info, parser
+                ),
+            }
         question_score = await question_utility(
             completion,
             self.data.answer,
@@ -177,6 +155,16 @@ class ElicitTask(vf.Task[ElicitTaskData]):
             "question_utility": question_score,
             "finding_localization_recall": localization,
             "finding_type_accuracy": type_score,
+            "finding_diagnosis_recall": await finding_diagnosis_recall(
+                completion,
+                self.data.answer,
+                ElicitJsonParser("findings"),
+            ),
+            "finding_relation_recall": await finding_relation_recall(
+                completion,
+                self.data.answer,
+                ElicitJsonParser("findings"),
+            ),
         }
         if self.data.info.get("reward_mode") == "shaped":
             metrics["finding_f1"] = await finding_f1(
@@ -222,6 +210,15 @@ class _CompatibilityRubric:
                 completion, answer, info, ElicitJsonParser("questions")
             )
             metrics["question_utility"] = reward
+            metrics["question_format_valid"] = await question_format_validity(
+                completion, answer, info, ElicitJsonParser("questions")
+            )
+            metrics["question_grounding_recall"] = await question_grounding_recall(
+                completion, answer, info, ElicitJsonParser("questions")
+            )
+            metrics["question_stance_accuracy"] = await question_stance_accuracy(
+                completion, answer, info, ElicitJsonParser("questions")
+            )
         else:
             strict_reward = await finding_f1(
                 completion, answer, ElicitJsonParser("findings")
@@ -238,6 +235,12 @@ class _CompatibilityRubric:
                 completion, answer, ElicitJsonParser("findings")
             )
             metrics["finding_type_accuracy"] = await finding_type_accuracy(
+                completion, answer, ElicitJsonParser("findings")
+            )
+            metrics["finding_diagnosis_recall"] = await finding_diagnosis_recall(
+                completion, answer, ElicitJsonParser("findings")
+            )
+            metrics["finding_relation_recall"] = await finding_relation_recall(
                 completion, answer, ElicitJsonParser("findings")
             )
             metrics["question_utility"] = await question_utility(
@@ -428,7 +431,16 @@ def load_environment(
     )
     parser = ElicitJsonParser("questions" if task == "elicit-ask" else "findings")
     rubric = (
-        legacy_vf.Rubric(funcs=[question_utility], weights=[1.0], parser=parser)
+        legacy_vf.Rubric(
+            funcs=[
+                question_utility,
+                question_format_validity,
+                question_grounding_recall,
+                question_stance_accuracy,
+            ],
+            weights=[1.0, 0.0, 0.0, 0.0],
+            parser=parser,
+        )
         if task == "elicit-ask"
         else legacy_vf.Rubric(
             funcs=(
@@ -437,6 +449,8 @@ def load_environment(
                     finding_f1,
                     finding_localization_recall,
                     finding_type_accuracy,
+                    finding_diagnosis_recall,
+                    finding_relation_recall,
                     question_utility,
                 ]
                 if reward_mode == "shaped"
@@ -444,13 +458,15 @@ def load_environment(
                     finding_f1,
                     finding_localization_recall,
                     finding_type_accuracy,
+                    finding_diagnosis_recall,
+                    finding_relation_recall,
                     question_utility,
                 ]
             ),
             weights=(
-                [1.0, 0.0, 0.0, 0.0, 0.0]
+                [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
                 if reward_mode == "shaped"
-                else [1.0, 0.0, 0.0, 0.0]
+                else [1.0, 0.0, 0.0, 0.0, 0.0, 0.0]
             ),
             parser=parser,
         )
@@ -581,7 +597,6 @@ def scenario_to_row(
             "quote": plant["anchor_quote"],
             "type": plant["type"],
             "diagnosis": plant["canonical_question"],
-            "decision_terms": list(plant["decision_terms"]),
             "related_evidence": plant["related_evidence"],
             "related_document_text": (
                 next(
@@ -604,10 +619,22 @@ def scenario_to_row(
         {
             "doc_id": plant["doc_id"],
             "quote": plant["anchor_quote"],
+            "type": plant["type"],
             "question": plant["canonical_question"],
             "question_aliases": list(plant["canonical_question_aliases"]),
+            "yes_choice": plant["canonical_yes_choice"],
             "target_stances": dict(plant["target_stances"]),
-            "decision_terms": list(plant["decision_terms"]),
+            "alternative_stances": dict(plant["alternative_stances"]),
+            "related_evidence": plant["related_evidence"],
+            "related_document_text": (
+                next(
+                    document["text"]
+                    for document in documents
+                    if document["doc_id"] == plant["related_evidence"]["doc_id"]
+                )
+                if plant["related_evidence"] is not None
+                else None
+            ),
             "decision_value": float(plant["decision_value"]),
             "document_text": next(
                 document["text"]
@@ -795,12 +822,15 @@ def render_prompt(
             (
                 '{"findings":[{"doc_id":"<document id>","quote":"<minimal passage>","type":"ambiguity|contradiction|gap",'
                 '"diagnosis":"<yes/no question naming the unresolved decision>","related_evidence":null|{"doc_id":"<conflicting document id>","quote":"<conflicting passage>"}}],'
-                '"questions":[{"doc_id":"<document id>","quote":"<passage>","question":"<specific yes/no clarifying question>",'
+                '"questions":[{"doc_id":"<document id>","quote":"<passage>","type":"ambiguity|contradiction|gap",'
+                '"question":"<specific yes/no clarifying question>","yes_choice":"anchor|alternative",'
+                '"related_evidence":null|{"doc_id":"<conflicting document id>","quote":"<conflicting passage>"},'
                 '"target_stances":{"<faction id>":"agree|disagree|pass"}}]}'
             ),
             f"Return exactly {question_count} question objects. Select the issues most likely to reveal faction disagreement. The findings determine reward; questions are scored as a logged weight-zero companion metric.",
             "Phrase each question as yes/no: agree means that faction predicts yes, disagree means no, and pass means no position.",
-            "For every finding and question, identify the concrete unresolved threshold, exception, authority conflict, or alternative; sharing one noun with the quote is insufficient.",
+            "Set yes_choice to anchor when yes preserves or applies the primary quoted rule; set it to alternative when yes favors a clarification, fallback, or the second conflicting rule.",
+            "For every finding and question, identify the concrete unresolved threshold, exception, authority conflict, or alternative using the visible evidence.",
             "For contradictions, related_evidence must quote the second conflicting rule. For other finding types it must be null.",
         ]
     )
@@ -818,9 +848,10 @@ def render_ask_prompt(
         f"Select and raise exactly {question_count} clarifying questions grounded in these policy documents.",
         "Each question should expose a specific ambiguity, contradiction, or uncovered case that could split the listed stakeholder factions.",
         "Phrase every question as yes/no. Predict every faction's answer: agree means yes, disagree means no, and pass means no position.",
+        "Set yes_choice to anchor when yes preserves or applies the primary quoted rule; set it to alternative when yes favors a clarification, fallback, or the second conflicting rule. The stance labels are scored in that declared orientation.",
         "Choose from more candidate issues than the output budget. Prioritize questions whose answers would distinguish the factions' stated policy principles.",
-        "Copy the exact supporting passage into quote. The question must name the concrete unresolved threshold, exception, authority conflict, or decision alternative; sharing one noun is insufficient.",
-        "Generic questions about whether rules should exist are not useful.",
+        "Copy the exact supporting passage into quote and classify its issue type. For contradictions, also copy the second conflicting rule into related_evidence; otherwise related_evidence must be null.",
+        "Question wording must be a yes/no question, but is not compared with hidden canonical vocabulary. The structured document, evidence, type, relationship, and yes_choice fields determine semantic grounding.",
         "",
         "Stakeholder factions:",
     ]
@@ -841,7 +872,7 @@ def render_ask_prompt(
         [
             "",
             "Return STRICT JSON only, with this shape:",
-            '{"questions":[{"doc_id":"<document id>","quote":"<passage>","question":"<specific clarifying question>","target_stances":{"<faction id>":"agree|disagree|pass"}}]}',
+            '{"questions":[{"doc_id":"<document id>","quote":"<passage>","type":"ambiguity|contradiction|gap","question":"<specific clarifying question>","yes_choice":"anchor|alternative","related_evidence":null|{"doc_id":"<conflicting document id>","quote":"<conflicting passage>"},"target_stances":{"<faction id>":"agree|disagree|pass"}}]}',
         ]
     )
     return "\n".join(lines)
@@ -875,6 +906,105 @@ async def question_utility(
     )
 
 
+async def question_format_validity(
+    completion: list[dict[str, Any]],
+    answer: Mapping[str, Any] | str,
+    info: Mapping[str, Any] | str,
+    parser: ElicitJsonParser,
+) -> float:
+    """Metric: exact response schema and requested cardinality are valid."""
+
+    del answer
+    info_payload = _parse_mapping_payload(info)
+    parsed = parser.parse_answer(completion)
+    candidates = parse_candidate_questions(
+        parsed,
+        allow_findings=bool(info_payload.get("allow_combined_questions", False)),
+    )
+    question_count = int(info_payload.get("question_count", 0))
+    return float(candidates is not None and len(candidates) == question_count)
+
+
+async def question_grounding_recall(
+    completion: list[dict[str, Any]],
+    answer: Mapping[str, Any] | str,
+    info: Mapping[str, Any] | str,
+    parser: ElicitJsonParser,
+) -> float:
+    """Metric: selected questions match exact public structured evidence."""
+
+    components = _question_diagnostic_components(completion, answer, info, parser)
+    return components[0]
+
+
+async def question_stance_accuracy(
+    completion: list[dict[str, Any]],
+    answer: Mapping[str, Any] | str,
+    info: Mapping[str, Any] | str,
+    parser: ElicitJsonParser,
+) -> float:
+    """Metric: stance accuracy after optimal structured issue matching."""
+
+    components = _question_diagnostic_components(completion, answer, info, parser)
+    return components[1]
+
+
+def _question_diagnostic_components(
+    completion: list[dict[str, Any]],
+    answer: Mapping[str, Any] | str,
+    info: Mapping[str, Any] | str,
+    parser: ElicitJsonParser,
+) -> tuple[float, float]:
+    answer_payload = _parse_mapping_payload(answer)
+    info_payload = _parse_mapping_payload(info)
+    parsed = parser.parse_answer(completion)
+    candidates = parse_candidate_questions(
+        parsed,
+        allow_findings=bool(info_payload.get("allow_combined_questions", False)),
+    )
+    planted = answer_payload.get("questions", [])
+    question_count = int(info_payload.get("question_count", 0))
+    if (
+        candidates is None
+        or len(candidates) != question_count
+        or question_count <= 0
+        or not isinstance(planted, Sequence)
+        or isinstance(planted, str)
+    ):
+        return 0.0, 0.0
+    grounding_weights: list[list[float]] = []
+    stance_weights: list[list[float]] = []
+    for candidate in candidates:
+        candidate_grounding: list[float] = []
+        candidate_stances: list[float] = []
+        for plant in planted:
+            grounded = _candidate_plant_grounding(candidate, plant) is not None
+            candidate_grounding.append(float(grounded))
+            if not grounded:
+                candidate_stances.append(0.0)
+                continue
+            expected = _stances_for_yes_choice(
+                plant, str(candidate.get("yes_choice", ""))
+            )
+            submitted = candidate.get("target_stances", {})
+            candidate_stances.append(
+                sum(
+                    isinstance(submitted, Mapping)
+                    and submitted.get(faction_id) == stance
+                    for faction_id, stance in expected.items()
+                )
+                / len(expected)
+                if expected
+                else 0.0
+            )
+        grounding_weights.append(candidate_grounding)
+        stance_weights.append(candidate_stances)
+    return (
+        _maximum_weight_sum(grounding_weights) / question_count,
+        _maximum_weight_sum(stance_weights) / question_count,
+    )
+
+
 def parse_candidate_questions(
     parsed: Any, *, allow_findings: bool = False
 ) -> list[dict[str, Any]] | None:
@@ -896,7 +1026,15 @@ def _parse_questions_list(raw_questions: Any) -> list[dict[str, Any]] | None:
     if not isinstance(raw_questions, list):
         return None
     questions: list[dict[str, Any]] = []
-    expected_fields = {"doc_id", "quote", "question", "target_stances"}
+    expected_fields = {
+        "doc_id",
+        "quote",
+        "type",
+        "question",
+        "yes_choice",
+        "related_evidence",
+        "target_stances",
+    }
     for raw_question in raw_questions:
         if (
             not isinstance(raw_question, Mapping)
@@ -905,7 +1043,21 @@ def _parse_questions_list(raw_questions: Any) -> list[dict[str, Any]] | None:
             return None
         if not all(
             isinstance(raw_question[field], str) and raw_question[field].strip()
-            for field in ("doc_id", "quote", "question")
+            for field in ("doc_id", "quote", "type", "question", "yes_choice")
+        ):
+            return None
+        if raw_question["type"] not in FINDING_TYPES:
+            return None
+        if raw_question["yes_choice"] not in {"anchor", "alternative"}:
+            return None
+        related = raw_question["related_evidence"]
+        if related is not None and (
+            not isinstance(related, Mapping)
+            or set(related) != {"doc_id", "quote"}
+            or not all(
+                isinstance(related[field], str) and related[field].strip()
+                for field in ("doc_id", "quote")
+            )
         ):
             return None
         target_stances = raw_question["target_stances"]
@@ -920,7 +1072,12 @@ def _parse_questions_list(raw_questions: Any) -> list[dict[str, Any]] | None:
             {
                 "doc_id": raw_question["doc_id"],
                 "quote": raw_question["quote"],
+                "type": raw_question["type"],
                 "question": raw_question["question"],
+                "yes_choice": raw_question["yes_choice"],
+                "related_evidence": dict(related)
+                if isinstance(related, Mapping)
+                else None,
                 "target_stances": dict(target_stances),
             }
         )
@@ -974,7 +1131,10 @@ def _candidate_plant_question_utility(
     semantic_grounding = _candidate_plant_grounding(candidate, plant)
     if semantic_grounding is None:
         return 0.0
-    planted_stances = plant.get("target_stances", {})
+    planted_stances = _stances_for_yes_choice(
+        plant,
+        str(candidate.get("yes_choice", "")),
+    )
     candidate_stances = candidate.get("target_stances", {})
     if not isinstance(planted_stances, Mapping) or not planted_stances:
         return 0.0
@@ -1023,6 +1183,10 @@ def _candidate_plant_grounding(
 
     if candidate.get("doc_id") != plant.get("doc_id"):
         return None
+    if plant.get("type") is not None and candidate.get("type") != plant.get("type"):
+        return None
+    if not _related_evidence_matches(candidate, plant):
+        return None
     candidate_quote = str(candidate.get("quote", ""))
     planted_quote = str(plant.get("quote", ""))
     document_text = str(plant.get("document_text", ""))
@@ -1032,7 +1196,7 @@ def _candidate_plant_grounding(
     if not is_yes_no_question(candidate_question):
         return None
     semantic_score = question_decision_similarity(candidate_question, plant)
-    if semantic_score < DECISION_TERM_RECALL_THRESHOLD:
+    if semantic_score <= 0:
         return None
     return semantic_score
 
@@ -1041,66 +1205,50 @@ def question_decision_similarity(
     question: str,
     plant: Mapping[str, Any],
 ) -> float:
-    """Score whether a question names the planted latent decision, not one noun."""
+    """Validate question form without consulting hidden lexical targets.
 
-    decision_terms = plant.get("decision_terms", [])
-    if not isinstance(decision_terms, Sequence) or isinstance(decision_terms, str):
-        return 0.0
-    required = {str(term) for term in decision_terms}
-    if not required:
-        quote = str(plant.get("quote", ""))
-        return 1.0 if question_references_quote(question, quote) else 0.0
-    candidate_tokens = {
-        token
-        for token in normalized_tokens(question)
-        if len(token) > 2 and token not in QUESTION_GROUNDING_STOPWORDS
+    Semantic correctness is represented by the exact public-evidence, issue
+    type, relationship, and yes-side fields already checked by the caller.
+    The free-form question is deliberately not compared with hidden wording.
+    """
+
+    del plant
+    return float(is_yes_no_question(question))
+
+
+def _stances_for_yes_choice(
+    plant: Mapping[str, Any], yes_choice: str
+) -> Mapping[str, str]:
+    """Orient the composed preference vector to the candidate's declared yes side."""
+
+    alternative = plant.get("alternative_stances", {})
+    if not isinstance(alternative, Mapping) or not alternative:
+        canonical = plant.get("target_stances", {})
+        canonical_choice = str(plant.get("yes_choice", "alternative"))
+        if not isinstance(canonical, Mapping) or not canonical:
+            return {}
+        if yes_choice == canonical_choice:
+            return {
+                str(faction_id): str(stance) for faction_id, stance in canonical.items()
+            }
+        if yes_choice not in {"anchor", "alternative"}:
+            return {}
+        inverse = {"agree": "disagree", "disagree": "agree", "pass": "pass"}
+        return {
+            str(faction_id): inverse.get(str(stance), "")
+            for faction_id, stance in canonical.items()
+        }
+    if yes_choice == "alternative":
+        return {
+            str(faction_id): str(stance) for faction_id, stance in alternative.items()
+        }
+    if yes_choice != "anchor":
+        return {}
+    inverse = {"agree": "disagree", "disagree": "agree", "pass": "pass"}
+    return {
+        str(faction_id): inverse.get(str(stance), "")
+        for faction_id, stance in alternative.items()
     }
-    if len(required) < 2 or len(candidate_tokens & required) < 2:
-        return 0.0
-    recall = len(candidate_tokens & required) / len(required)
-    reference_questions = [
-        str(plant.get("question", plant.get("diagnosis", ""))),
-        *[str(alias) for alias in plant.get("question_aliases", [])],
-    ]
-    lexical_f1 = max(
-        (
-            _token_set_f1(
-                candidate_tokens,
-                {
-                    token
-                    for token in normalized_tokens(reference)
-                    if len(token) > 2 and token not in QUESTION_GROUNDING_STOPWORDS
-                },
-            )
-            for reference in reference_questions
-            if reference
-        ),
-        default=0.0,
-    )
-    return min(1.0, 0.6 * recall + 0.4 * lexical_f1)
-
-
-def _token_set_f1(left: set[str], right: set[str]) -> float:
-    if not left or not right:
-        return 0.0
-    overlap = len(left & right)
-    return 2 * overlap / (len(left) + len(right))
-
-
-def question_references_quote(question: str, quote: str) -> bool:
-    """Require at least one informative quote token in the generated question."""
-
-    question_tokens = {
-        token
-        for token in normalized_tokens(question)
-        if len(token) > 2 and token not in QUESTION_GROUNDING_STOPWORDS
-    }
-    quote_tokens = {
-        token
-        for token in normalized_tokens(quote)
-        if len(token) > 2 and token not in QUESTION_GROUNDING_STOPWORDS
-    }
-    return bool(question_tokens & quote_tokens)
 
 
 def panel_disagreement(target_stances: Mapping[str, str]) -> float:
@@ -1155,12 +1303,39 @@ async def finding_type_accuracy(
     return float(result.get("type_accuracy", 0.0))
 
 
+async def finding_diagnosis_recall(
+    completion: list[dict[str, Any]],
+    answer: Mapping[str, Any] | str,
+    parser: ElicitJsonParser,
+) -> float:
+    """Metric: recall after localization, type, and diagnosis form checks."""
+
+    result = _scored_findings(completion, answer, parser)
+    return float(result.get("diagnosis_recall", 0.0))
+
+
+async def finding_relation_recall(
+    completion: list[dict[str, Any]],
+    answer: Mapping[str, Any] | str,
+    parser: ElicitJsonParser,
+) -> float:
+    """Metric: recall after all checks, including contradiction relationships."""
+
+    result = _scored_findings(completion, answer, parser)
+    return float(result.get("relation_recall", 0.0))
+
+
 async def finding_training_reward(
     completion: list[dict[str, Any]],
     answer: Mapping[str, Any] | str,
     parser: ElicitJsonParser,
 ) -> float:
-    """Optional dense curriculum reward; strict F1 remains the eval default."""
+    """Optional precision-sensitive curriculum reward.
+
+    Each stage uses F1 rather than recall, so unmatched or hedged candidates
+    reduce reward at the first stage where they fail. Strict end-to-end F1
+    remains the default evaluation reward.
+    """
 
     result = _scored_findings(completion, answer, parser)
     return float(
@@ -1168,10 +1343,10 @@ async def finding_training_reward(
         * sum(
             float(result.get(component, 0.0))
             for component in (
-                "localization_recall",
-                "type_recall",
-                "diagnosis_recall",
-                "relation_recall",
+                "localization_f1",
+                "type_f1",
+                "diagnosis_f1",
+                "relation_f1",
             )
         )
     )
@@ -1280,7 +1455,6 @@ def parse_planted_items(
             "quote": str(item.get("quote", item.get("anchor_quote", ""))),
             "type": str(item["type"]),
             "diagnosis": str(item.get("diagnosis", item.get("canonical_question", ""))),
-            "decision_terms": list(item.get("decision_terms", [])),
             "related_evidence": item.get("related_evidence"),
             "related_document_text": item.get("related_document_text"),
             "document_text": str(
@@ -1374,6 +1548,7 @@ def match_findings(
         else typed_true_positive / localization_true_positive
     )
     planted_count = len(planted)
+    candidate_count = len(candidates)
     return {
         "true_positive": true_positive,
         "false_positive": false_positive,
@@ -1388,7 +1563,22 @@ def match_findings(
             0.0 if not planted_count else diagnosis_true_positive / planted_count
         ),
         "relation_recall": 0.0 if not planted_count else true_positive / planted_count,
+        "localization_f1": _stage_f1(
+            localization_true_positive, candidate_count, planted_count
+        ),
+        "type_f1": _stage_f1(typed_true_positive, candidate_count, planted_count),
+        "diagnosis_f1": _stage_f1(
+            diagnosis_true_positive, candidate_count, planted_count
+        ),
+        "relation_f1": _stage_f1(true_positive, candidate_count, planted_count),
     }
+
+
+def _stage_f1(true_positive: int, candidate_count: int, planted_count: int) -> float:
+    """Return a stage F1 that charges every unmatched candidate as a false positive."""
+
+    denominator = candidate_count + planted_count
+    return 0.0 if denominator == 0 else 2 * true_positive / denominator
 
 
 def _maximum_cardinality_matches(
@@ -1425,12 +1615,11 @@ def _finding_diagnosis_matches(
     candidate: Mapping[str, Any], plant: Mapping[str, Any]
 ) -> bool:
     diagnosis = str(candidate.get("diagnosis", ""))
-    if not plant.get("decision_terms"):
+    if not plant.get("diagnosis"):
         return True
     return (
         is_yes_no_question(diagnosis)
-        and question_decision_similarity(diagnosis, plant)
-        >= DECISION_TERM_RECALL_THRESHOLD
+        and question_decision_similarity(diagnosis, plant) > 0
     )
 
 

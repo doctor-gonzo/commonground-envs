@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:commonground:schema:scenario:2",
+  "$id": "urn:commonground:schema:scenario:3",
   "title": "Common Ground planted policy scenario",
   "type": "object",
   "additionalProperties": false,
@@ -57,7 +57,7 @@
           "additionalProperties": false,
           "required": ["vote_rule", "pass_threshold", "faction_ids"],
           "properties": {
-            "vote_rule": {"const": "dimension-threshold-v1"},
+            "vote_rule": {"const": "value-composition-v1"},
             "pass_threshold": {"const": 0.25},
             "faction_ids": {"type": "array", "minItems": 3, "maxItems": 5, "items": {"$ref": "#/$defs/identifier"}}
           }
@@ -108,15 +108,22 @@
     "faction": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["faction_id", "name", "summary", "priors"],
+      "required": ["faction_id", "name", "summary", "values"],
       "properties": {
         "faction_id": {"$ref": "#/$defs/identifier"},
         "name": {"type": "string", "minLength": 1},
         "summary": {"type": "string", "minLength": 1},
-        "priors": {
+        "values": {
           "type": "object",
-          "minProperties": 3,
-          "additionalProperties": {"type": "number", "minimum": -1, "maximum": 1}
+          "additionalProperties": false,
+          "required": ["access", "adaptability", "continuity", "oversight", "safety"],
+          "properties": {
+            "access": {"type": "number", "minimum": -1, "maximum": 1},
+            "adaptability": {"type": "number", "minimum": -1, "maximum": 1},
+            "continuity": {"type": "number", "minimum": -1, "maximum": 1},
+            "oversight": {"type": "number", "minimum": -1, "maximum": 1},
+            "safety": {"type": "number", "minimum": -1, "maximum": 1}
+          }
         }
       }
     },
@@ -134,7 +141,7 @@
     "plantedItem": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["plant_id", "doc_id", "anchor_quote", "type", "canonical_question", "canonical_question_aliases", "target_dimension", "target_stances", "decision_terms", "decision_value", "related_evidence"],
+      "required": ["plant_id", "doc_id", "anchor_quote", "type", "canonical_question", "canonical_question_aliases", "value_weights", "alternative_stances", "canonical_yes_choice", "target_stances", "decision_value", "related_evidence"],
       "properties": {
         "plant_id": {"$ref": "#/$defs/identifier"},
         "doc_id": {"$ref": "#/$defs/identifier"},
@@ -152,17 +159,28 @@
             "pattern": "^(Am|Are|Can|Could|Did|Do|Does|Had|Has|Have|Is|May|Might|Must|Shall|Should|Was|Were|Will|Would) [^\\s?]+(?: [^\\s?]+)*\\?(?![\\s\\S])"
           }
         },
-        "target_dimension": {"$ref": "#/$defs/identifier"},
-        "target_stances": {
+        "value_weights": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["access", "adaptability", "continuity", "oversight", "safety"],
+          "properties": {
+            "access": {"type": "number", "minimum": -1, "maximum": 1},
+            "adaptability": {"type": "number", "minimum": -1, "maximum": 1},
+            "continuity": {"type": "number", "minimum": -1, "maximum": 1},
+            "oversight": {"type": "number", "minimum": -1, "maximum": 1},
+            "safety": {"type": "number", "minimum": -1, "maximum": 1}
+          }
+        },
+        "alternative_stances": {
           "type": "object",
           "minProperties": 3,
           "additionalProperties": {"enum": ["agree", "disagree", "pass"]}
         },
-        "decision_terms": {
-          "type": "array",
-          "minItems": 2,
-          "uniqueItems": true,
-          "items": {"type": "string", "pattern": "^[^\\W_]+$"}
+        "canonical_yes_choice": {"enum": ["anchor", "alternative"]},
+        "target_stances": {
+          "type": "object",
+          "minProperties": 3,
+          "additionalProperties": {"enum": ["agree", "disagree", "pass"]}
         },
         "decision_value": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
         "related_evidence": {

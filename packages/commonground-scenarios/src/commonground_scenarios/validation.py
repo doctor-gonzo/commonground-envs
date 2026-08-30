@@ -16,6 +16,7 @@ from commonground_scenarios.snapshot_validation import (
     HumanSnapshotValidationError,
     validate_human_snapshot,
 )
+from commonground_scenarios.templates import VALUE_DIMENSIONS
 
 SCENARIO_FIELDS = {
     "scenario_id",
@@ -145,7 +146,7 @@ def _validate_factions(value: Any) -> dict[str, dict[str, Any]]:
     for index, raw_faction in enumerate(value):
         faction = _exact_object(
             raw_faction,
-            {"faction_id", "name", "summary", "priors"},
+            {"faction_id", "name", "summary", "values"},
             f"factions[{index}]",
         )
         faction_id = _identifier(faction["faction_id"], f"factions[{index}].faction_id")
@@ -153,23 +154,25 @@ def _validate_factions(value: Any) -> dict[str, dict[str, Any]]:
             raise ScenarioValidationError(f"duplicate faction_id: {faction_id}")
         _nonempty_text(faction["name"], f"factions[{index}].name")
         _nonempty_text(faction["summary"], f"factions[{index}].summary")
-        priors = faction["priors"]
-        if not isinstance(priors, Mapping) or len(priors) < 3:
+        values = faction["values"]
+        if not isinstance(values, Mapping) or set(values) != set(VALUE_DIMENSIONS):
             raise ScenarioValidationError(
-                f"factions[{index}].priors must define planted dimensions"
+                f"factions[{index}].values must define the general value dimensions"
             )
-        normalized_priors: dict[str, float] = {}
-        for dimension, prior in priors.items():
-            dimension_id = _identifier(dimension, f"factions[{index}].priors key")
-            if isinstance(prior, bool) or not isinstance(prior, (int, float)):
-                raise ScenarioValidationError(f"prior {dimension_id} must be numeric")
-            numeric_prior = float(prior)
-            if not isfinite(numeric_prior) or not -1 <= numeric_prior <= 1:
+        normalized_values: dict[str, float] = {}
+        for dimension in VALUE_DIMENSIONS:
+            value_score = values[dimension]
+            if isinstance(value_score, bool) or not isinstance(
+                value_score, (int, float)
+            ):
+                raise ScenarioValidationError(f"value {dimension} must be numeric")
+            numeric_value = float(value_score)
+            if not isfinite(numeric_value) or not -1 <= numeric_value <= 1:
                 raise ScenarioValidationError(
-                    f"prior {dimension_id} must be finite and within [-1, 1]"
+                    f"value {dimension} must be finite and within [-1, 1]"
                 )
-            normalized_priors[dimension_id] = numeric_prior
-        factions[faction_id] = {**faction, "priors": normalized_priors}
+            normalized_values[dimension] = numeric_value
+        factions[faction_id] = {**faction, "values": normalized_values}
     return factions
 
 
@@ -198,9 +201,9 @@ def _validate_panel(
     panel = _exact_object(
         value, {"vote_rule", "pass_threshold", "faction_ids"}, "persona_panel"
     )
-    if panel["vote_rule"] != "dimension-threshold-v1":
+    if panel["vote_rule"] != "value-composition-v1":
         raise ScenarioValidationError(
-            "persona_panel.vote_rule must be dimension-threshold-v1"
+            "persona_panel.vote_rule must be value-composition-v1"
         )
     threshold = panel["pass_threshold"]
     if isinstance(threshold, bool) or not isinstance(threshold, (int, float)):
@@ -229,6 +232,7 @@ def _validate_plants(
         )
     seen_ids: set[str] = set()
     seen_anchor_keys: set[tuple[str, str]] = set()
+    related_anchor_keys: list[tuple[str, tuple[str, str]]] = []
     seen_question_fingerprints: set[str] = set()
     seen_types: set[str] = set()
     for index, raw_plant in enumerate(value):
@@ -241,9 +245,10 @@ def _validate_plants(
                 "type",
                 "canonical_question",
                 "canonical_question_aliases",
-                "target_dimension",
+                "value_weights",
+                "alternative_stances",
+                "canonical_yes_choice",
                 "target_stances",
-                "decision_terms",
                 "decision_value",
                 "related_evidence",
             },
@@ -306,9 +311,39 @@ def _validate_plants(
                     f"duplicate canonical question or alias: {plant_id}"
                 )
             seen_question_fingerprints.add(alias_key)
-        dimension = _identifier(
-            plant["target_dimension"], f"planted_items[{index}].target_dimension"
+        weights = _validate_value_vector(
+            plant["value_weights"],
+            f"planted_items[{index}].value_weights",
         )
+        if not any(weights.values()):
+            raise ScenarioValidationError(
+                f"value_weights cannot all be zero: {plant_id}"
+            )
+        alternative_stances = plant["alternative_stances"]
+        if not isinstance(alternative_stances, Mapping) or set(
+            alternative_stances
+        ) != set(factions):
+            raise ScenarioValidationError(
+                f"alternative_stances must cover every faction: {plant_id}"
+            )
+        if any(stance not in STANCES for stance in alternative_stances.values()):
+            raise ScenarioValidationError(f"invalid alternative stance: {plant_id}")
+        expected_alternative = {
+            faction_id: _stance_for(
+                _composed_preference(faction["values"], weights),
+                PASS_THRESHOLD,
+            )
+            for faction_id, faction in factions.items()
+        }
+        if dict(alternative_stances) != expected_alternative:
+            raise ScenarioValidationError(
+                f"alternative_stances do not match value composition: {plant_id}"
+            )
+        yes_choice = plant["canonical_yes_choice"]
+        if yes_choice not in {"anchor", "alternative"}:
+            raise ScenarioValidationError(
+                f"canonical_yes_choice must be anchor or alternative: {plant_id}"
+            )
         stances = plant["target_stances"]
         if not isinstance(stances, Mapping) or set(stances) != set(factions):
             raise ScenarioValidationError(
@@ -316,34 +351,14 @@ def _validate_plants(
             )
         if any(stance not in STANCES for stance in stances.values()):
             raise ScenarioValidationError(f"invalid target stance: {plant_id}")
-        expected = {
-            faction_id: _stance_for(
-                faction["priors"].get(dimension), PASS_THRESHOLD, dimension
-            )
-            for faction_id, faction in factions.items()
-        }
+        expected = _orient_stances(expected_alternative, str(yes_choice))
         if dict(stances) != expected:
             raise ScenarioValidationError(
-                f"target_stances do not match faction priors: {plant_id}"
+                f"target_stances do not match question polarity: {plant_id}"
             )
         if not {"agree", "disagree"}.issubset(set(stances.values())):
             raise ScenarioValidationError(
                 f"plant must mark latently split factions: {plant_id}"
-            )
-        decision_terms = plant["decision_terms"]
-        if (
-            not isinstance(decision_terms, list)
-            or len(decision_terms) < 2
-            or len(set(decision_terms)) != len(decision_terms)
-            or not all(
-                isinstance(term, str)
-                and term == term.casefold()
-                and re.fullmatch(r"[^\W_]+", term)
-                for term in decision_terms
-            )
-        ):
-            raise ScenarioValidationError(
-                f"decision_terms must contain unique normalized terms: {plant_id}"
             )
         decision_value = plant["decision_value"]
         if (
@@ -381,6 +396,9 @@ def _validate_plants(
                 raise ScenarioValidationError(
                     f"related contradiction evidence is absent: {plant_id}"
                 )
+            related_anchor_keys.append(
+                (plant_id, (related_doc_id, _anchor_identity(related_quote)))
+            )
         elif related_evidence is not None:
             raise ScenarioValidationError(
                 f"only contradictions may define related evidence: {plant_id}"
@@ -389,6 +407,12 @@ def _validate_plants(
         raise ScenarioValidationError(
             "planted_items must include ambiguity, contradiction, and gap"
         )
+    for plant_id, related_anchor_key in related_anchor_keys:
+        if related_anchor_key in seen_anchor_keys:
+            raise ScenarioValidationError(
+                "contradiction related evidence cannot duplicate another planted "
+                f"anchor: {plant_id}"
+            )
 
 
 def is_yes_no_question(text: str) -> bool:
@@ -423,6 +447,14 @@ def _validate_distractors(
     planted_anchors = {
         _anchor_identity(plant["anchor_quote"]) for plant in planted_items
     }
+    related_anchors = {
+        (
+            plant["related_evidence"]["doc_id"],
+            _anchor_identity(plant["related_evidence"]["quote"]),
+        )
+        for plant in planted_items
+        if plant["type"] == "contradiction"
+    }
     for index, raw_distractor in enumerate(value):
         distractor = _exact_object(
             raw_distractor,
@@ -448,6 +480,10 @@ def _validate_distractors(
         if _anchor_identity(anchor) in planted_anchors:
             raise ScenarioValidationError(
                 "distractor cannot duplicate a planted anchor"
+            )
+        if (doc_id, _anchor_identity(anchor)) in related_anchors:
+            raise ScenarioValidationError(
+                "distractor cannot duplicate contradiction related evidence"
             )
         _nonempty_text(distractor["reason"], f"distractors[{index}].reason")
 
@@ -525,14 +561,53 @@ def canonical_date(value: Any) -> str:
     return text
 
 
-def _stance_for(prior: float | None, threshold: float, dimension: str) -> str:
-    if prior is None:
+def _validate_value_vector(value: Any, label: str) -> dict[str, float]:
+    if not isinstance(value, Mapping) or set(value) != set(VALUE_DIMENSIONS):
         raise ScenarioValidationError(
-            f"faction prior missing target dimension: {dimension}"
+            f"{label} must define the general value dimensions"
         )
-    if prior >= threshold:
+    normalized: dict[str, float] = {}
+    for dimension in VALUE_DIMENSIONS:
+        component = value[dimension]
+        if isinstance(component, bool) or not isinstance(component, (int, float)):
+            raise ScenarioValidationError(f"{label}.{dimension} must be numeric")
+        numeric = float(component)
+        if not isfinite(numeric) or not -1 <= numeric <= 1:
+            raise ScenarioValidationError(
+                f"{label}.{dimension} must be finite and within [-1, 1]"
+            )
+        normalized[dimension] = numeric
+    return normalized
+
+
+def _composed_preference(
+    values: Mapping[str, float], weights: Mapping[str, float]
+) -> float:
+    scale = sum(abs(weights[dimension]) for dimension in VALUE_DIMENSIONS)
+    if scale == 0:
+        raise ScenarioValidationError("value_weights cannot all be zero")
+    return (
+        sum(values[dimension] * weights[dimension] for dimension in VALUE_DIMENSIONS)
+        / scale
+    )
+
+
+def _orient_stances(
+    alternative_stances: Mapping[str, str], yes_choice: str
+) -> dict[str, str]:
+    if yes_choice == "alternative":
+        return dict(alternative_stances)
+    inverse = {"agree": "disagree", "disagree": "agree", "pass": "pass"}
+    return {
+        faction_id: inverse[stance]
+        for faction_id, stance in alternative_stances.items()
+    }
+
+
+def _stance_for(score: float, threshold: float) -> str:
+    if score >= threshold:
         return "agree"
-    if prior <= -threshold:
+    if score <= -threshold:
         return "disagree"
     return "pass"
 

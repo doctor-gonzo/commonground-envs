@@ -160,6 +160,32 @@ def probability_reward(
     return 1.0 - brier_score(predictions, held_out)
 
 
+def brier_skill_score(
+    predictions: Mapping[str, Prediction],
+    held_out: Mapping[str, int],
+    reference_predictions: Mapping[str, Prediction] | None = None,
+) -> float:
+    """Return Brier skill relative to an explicit or uniform reference.
+
+    ``1`` is perfect, ``0`` matches the reference, and negative values are
+    worse than the reference. When no reference is supplied, the documented
+    three-class uniform forecast is used. An empty target set or a perfect
+    reference has no meaningful improvement denominator and returns ``0``.
+    """
+
+    if not held_out:
+        return 0.0
+    reference = reference_predictions
+    if reference is None:
+        reference = {
+            cell_id: cast(Prediction, _uniform_probs()) for cell_id in held_out
+        }
+    reference_loss = brier_score(reference, held_out)
+    if reference_loss <= 0:
+        return 0.0
+    return 1.0 - brier_score(predictions, held_out) / reference_loss
+
+
 def _prediction_probs(prediction: Prediction | None) -> dict[str, float]:
     if isinstance(prediction, Mapping):
         return _mapping_prediction_probs(prediction)

@@ -32,8 +32,13 @@ METRIC_NAMES = (
     "brier",
     "finding_localization_recall",
     "finding_type_accuracy",
+    "finding_diagnosis_recall",
+    "finding_relation_recall",
     "finding_f1",
     "question_utility",
+    "question_format_valid",
+    "question_grounding_recall",
+    "question_stance_accuracy",
 )
 ELICIT_TASK_MODES = frozenset({"find", "elicit-ask"})
 
@@ -690,6 +695,14 @@ def uses_historical_predict_reward(environment: str) -> bool:
     return bool(separator and version.startswith(("0.1.", "0.2.", "0.3.")))
 
 
+def uses_structured_elicit_diagnostics(environment: str) -> bool:
+    """Return whether Elicit uses the expanded 0.5 diagnostic contract."""
+
+    taskset_id = environment.rsplit("+", 1)[-1]
+    _, separator, version = taskset_id.partition("@")
+    return not separator or not version.startswith(("0.1.", "0.2.", "0.3.", "0.4."))
+
+
 def is_elicit_environment(environment: str) -> bool:
     return environment_package_name(environment) == "commonground-elicit"
 
@@ -765,12 +778,26 @@ def expected_native_signals(
             return ("vote_accuracy",), ("brier",)
         return ("probability_reward",), ("brier", "vote_accuracy")
     if package_name == "commonground-elicit" and task_mode == "find":
+        if uses_structured_elicit_diagnostics(environment):
+            return ("finding_f1",), (
+                "finding_diagnosis_recall",
+                "finding_localization_recall",
+                "finding_relation_recall",
+                "finding_type_accuracy",
+                "question_utility",
+            )
         return ("finding_f1",), (
             "finding_localization_recall",
             "finding_type_accuracy",
             "question_utility",
         )
     if package_name == "commonground-elicit" and task_mode == "elicit-ask":
+        if uses_structured_elicit_diagnostics(environment):
+            return ("question_utility",), (
+                "question_format_valid",
+                "question_grounding_recall",
+                "question_stance_accuracy",
+            )
         return ("question_utility",), ()
     raise InvalidRunError(f"{path}: unsupported Common Ground reward profile")
 

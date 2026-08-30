@@ -2,7 +2,33 @@
 
 All notable changes to this project are documented in this file.
 
-## 0.4.1 - Unreleased
+## 0.5.0 - Unreleased
+
+- Replace heuristic contradiction-passage discovery with explicit authored
+  document/quote relationships for all 24 Elicit template families. Regenerate
+  both corpora and add corpus-wide validation that opposing evidence cannot be
+  another planted issue or distractor. This corrects the five affected
+  `regional-archives-access` evaluation rows in 0.4.1.
+- Replace the finite `(issue type, target stance) -> phrase` renderer with
+  issue-independent faction value descriptions. Compose issue stances from
+  general latent values and explicit alternatives, record question polarity,
+  and add polarity-reversal and summary-invariance regressions.
+- Make shaped Find training precision-sensitive by averaging stage F1 scores
+  instead of stage recalls. Unmatched and overlapping hedge candidates now
+  lower reward; concise exact answers strictly beat exact-plus-spam answers.
+- Replace Ask's hidden canonical-token gate with a structured target containing
+  evidence, type, yes-side polarity, contradiction relationship, and faction
+  stances. Add separate format, grounding, stance, diagnosis, and relationship
+  diagnostics so semantic failures are distinguishable from formatting errors.
+- Add uniform, empirical-prior, visible-frequency, smoothed neighbor-frequency,
+  distance-weighted k-NN, and train-split text-only probability comparators for
+  Predict. Report normalized Brier and Brier skill relative to uniform alongside
+  probability reward and accuracy.
+- Bump both Hub environments to 0.5.0, both shared packages to 0.4.0, and the
+  scenario schema to `urn:commonground:schema:scenario:3`. A fresh immutable
+  artifact study and new Elicit evaluation records are required before release.
+
+## 0.4.1 - 2026-08-30
 
 - Include byte-identical legal files under each environment's nested
   `LICENSES/` directory so Prime CLI source archives retain Apache-2.0 text and

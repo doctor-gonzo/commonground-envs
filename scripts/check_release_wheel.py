@@ -70,12 +70,12 @@ def _data_files(source_dir: Path, package_name: str) -> frozenset[str]:
 TARGETS = (
     WheelTarget(
         name="commonground-predict",
-        version="0.4.1",
+        version="0.5.0",
         source_dir=ROOT / "environments" / "commonground_predict",
         requirements=frozenset(
             {
-                "commonground-scenarios==0.3.0",
-                "commonground-score==0.3.0",
+                "commonground-scenarios==0.4.0",
+                "commonground-score==0.4.0",
                 "datasets<6.0.0,>=5.0.1",
                 "verifiers==0.3.0",
             }
@@ -97,12 +97,12 @@ TARGETS = (
     ),
     WheelTarget(
         name="commonground-elicit",
-        version="0.4.1",
+        version="0.5.0",
         source_dir=ROOT / "environments" / "commonground_elicit",
         requirements=frozenset(
             {
-                "commonground-scenarios==0.3.0",
-                "commonground-score==0.3.0",
+                "commonground-scenarios==0.4.0",
+                "commonground-score==0.4.0",
                 "datasets<6.0.0,>=5.0.1",
                 "verifiers==0.3.0",
             }
@@ -120,14 +120,14 @@ TARGETS = (
     ),
     WheelTarget(
         name="commonground-scenarios",
-        version="0.3.0",
+        version="0.4.0",
         source_dir=ROOT / "packages" / "commonground-scenarios",
         requirements=frozenset(),
         bundled_files=frozenset({"commonground_scenarios/schema/scenario.schema.json"}),
     ),
     WheelTarget(
         name="commonground-score",
-        version="0.3.0",
+        version="0.4.0",
         source_dir=ROOT / "packages" / "commonground-score",
         requirements=frozenset(),
         bundled_files=frozenset(),
@@ -383,10 +383,10 @@ import commonground_predict
 import commonground_scenarios
 import commonground_score
 
-assert version("commonground-predict") == "0.4.1"
-assert version("commonground-elicit") == "0.4.1"
-assert version("commonground-scenarios") == "0.3.0"
-assert version("commonground-score") == "0.3.0"
+assert version("commonground-predict") == "0.5.0"
+assert version("commonground-elicit") == "0.5.0"
+assert version("commonground-scenarios") == "0.4.0"
+assert version("commonground-score") == "0.4.0"
 
 assert len(commonground_predict.load_taskset().load()) == 100
 assert len(commonground_elicit.load_taskset().load()) == 100
@@ -451,7 +451,15 @@ def elicit_response(row):
     questions = [
         {
             key: question[key]
-            for key in ("doc_id", "quote", "question", "target_stances")
+            for key in (
+                "doc_id",
+                "quote",
+                "type",
+                "question",
+                "yes_choice",
+                "related_evidence",
+                "target_stances",
+            )
         }
         for question in answer.get("questions", [])[:info["question_count"]]
     ]
@@ -477,9 +485,9 @@ elicit_ask_row = dict(elicit_ask_legacy.get_eval_dataset()[0])
 assert score(
     elicit_find_legacy, elicit_find_row, elicit_response(elicit_find_row)
 ) == 1.0
-assert 0.0 < score(
+assert score(
     elicit_ask_legacy, elicit_ask_row, elicit_response(elicit_ask_row)
-) <= 1.0
+) == 1.0
 """
     subprocess.run(
         [str(venv_python), "-I", "-c", probe],

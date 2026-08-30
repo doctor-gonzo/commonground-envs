@@ -4,6 +4,7 @@ from math import isclose, log, nan
 
 from commonground_score import (
     brier_score,
+    brier_skill_score,
     cluster_separation,
     comment_stats,
     probability_reward,
@@ -131,3 +132,37 @@ def test_probability_reward_is_calibration_sensitive() -> None:
     )
     assert probability_reward({"0,1": -1}, held_out) == 0.0
     assert probability_reward({}, {}) == 0.0
+
+
+def test_brier_skill_score_uses_uniform_reference_by_default() -> None:
+    held_out = {"0,1": 1, "1,2": -1}
+    uniform = {
+        cell_id: {"agree": 1 / 3, "disagree": 1 / 3, "pass": 1 / 3}
+        for cell_id in held_out
+    }
+    informative = {
+        "0,1": {"agree": 0.8, "disagree": 0.1, "pass": 0.1},
+        "1,2": {"agree": 0.1, "disagree": 0.8, "pass": 0.1},
+    }
+
+    assert isclose(brier_skill_score(uniform, held_out), 0.0, abs_tol=1e-12)
+    assert isclose(brier_skill_score(informative, held_out), 0.91, abs_tol=1e-12)
+    assert isclose(
+        brier_skill_score({"0,1": -1, "1,2": 1}, held_out),
+        -2.0,
+        abs_tol=1e-12,
+    )
+
+
+def test_brier_skill_score_accepts_explicit_reference_and_handles_edges() -> None:
+    held_out = {"0,1": 1}
+    prediction = {"0,1": {"agree": 0.8, "disagree": 0.1, "pass": 0.1}}
+    reference = {"0,1": {"agree": 0.6, "disagree": 0.2, "pass": 0.2}}
+
+    assert isclose(
+        brier_skill_score(prediction, held_out, reference),
+        0.75,
+        abs_tol=1e-12,
+    )
+    assert brier_skill_score(prediction, {}, reference) == 0.0
+    assert brier_skill_score(prediction, held_out, {"0,1": 1}) == 0.0

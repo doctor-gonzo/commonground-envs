@@ -1,40 +1,52 @@
 # commonground-elicit
 
-`commonground-elicit` 0.4.1 is a deterministic Verifiers environment for two
-structured tasks over fictional stakeholder-policy scenarios:
+`commonground-elicit` 0.5.0 is an unreleased deterministic Verifiers candidate
+for two structured tasks over fictional stakeholder-policy scenarios:
 
 - `find`: localize and diagnose planted ambiguities, contradictions, and gaps.
 - `elicit-ask`: select the two highest-value clarification targets from three
   planted issues and predict faction stances on each yes/no question.
 
-The 0.4 series removes a shortcut discovered in the 0.3 corpus: public faction
-summaries repeated each hidden issue signature and its exact yes/no/pass
-stance. A prompt-only parser scores 0.787 on historical 0.3 and 0.000 here.
-Summaries now provide indirect policy principles from which issue-specific
-stances must be inferred.
+The current public 0.4.1 artifact remains available for reproducibility but is
+superseded for benchmark use. Five `regional-archives-access` rows selected the
+wrong second contradiction passage, and public faction summaries used a finite
+phrase table keyed by issue type and exact target stance. Version 0.5 replaces
+both mechanisms and requires a fresh Elicit study before promotion.
 
 This environment is associated with [Context Engine](https://contextengine.sh),
 whose organizational workflow can surface unresolved decisions and collect
 stakeholder responses. A future governed exporter could allow consenting
 individuals and groups to retain, license, or sell derived preference data.
-Version 0.4.1 is entirely synthetic and includes no such exporter.
+Version 0.5 is entirely synthetic and includes no such exporter.
 
 ## Data and separation
 
 | Split | Rows | Templates × variants | Template/layout profile |
 | --- | ---: | --- | --- |
-| `train` | 100 | 4 × 25 | `train-template-layout-profile-v3` |
-| `eval` | 100 | 20 × 5 | `heldout-template-layout-profile-v3` |
+| `train` | 100 | 4 × 25 | `train-template-layout-profile-v4` |
+| `eval` | 100 | 20 × 5 | `heldout-template-layout-profile-v4` |
 
-Every row contains three planted issue types and three to five factions.
+Every row contains one ambiguity, contradiction, and gap plus three to five
+factions. Each faction has a general value vector spanning access,
+adaptability, continuity, oversight, and safety. Its public summary renders
+those values once without consulting any planted issue or target stance. Each
+issue separately defines a value trade-off and whether “yes” selects the
+primary rule or an alternative. The hidden stance vector is recomputed from
+that composition, so reversing question polarity also reverses agree/disagree.
+
+Every contradiction template authors a stable opposing document and exact
+quote. Generation remaps opaque IDs but never infers the relationship from
+lexical overlap. Validation rejects a related passage that is absent, in the
+same document, another planted anchor, or a distractor. Corpus-wide tests cover
+all 24 template families, including the corrected regional-archives phone-
+photograph rule.
+
 Generation separately audits exact instances, canonical visible propositions,
 and policy-issue semantics after removing opaque identity/layout fields. It
-blocks cross-split overlap for all three relevant hashes. The maximum observed
-cross-split token Jaccard is 0.207 (limit 0.85); the maximum word unigram/bigram
-TF-IDF cosine is 0.755 (limit 0.90). These are useful deterministic neighbor
-audits, not an embedding-based proof of conceptual independence. Both splits
-still share one core generator; the labels above intentionally claim only
-template/layout separation.
+blocks cross-split overlap for all relevant hashes and enforces bounded token-
+Jaccard and word unigram/bigram TF-IDF neighbors. These deterministic checks
+are not an embedding proof of conceptual independence. Both profiles still
+share one core synthetic generator.
 
 ## Find contract
 
@@ -46,7 +58,7 @@ Return one diagnosis per suspected issue:
     "doc_id": "doc-a1b2c3d4",
     "quote": "The copied primary passage.",
     "type": "contradiction",
-    "diagnosis": "Should the emergency exception override prior approval?",
+    "diagnosis": "Should the practical exception override the primary rule?",
     "related_evidence": {
       "doc_id": "doc-e5f6a7b8",
       "quote": "The copied conflicting rule."
@@ -55,71 +67,80 @@ Return one diagnosis per suspected issue:
 }
 ```
 
-`diagnosis` must be a yes/no question that identifies at least half of the
-hidden decision terms. A contradiction must cite a contiguous related passage
-from a different document; ambiguity and gap findings require
-`related_evidence: null`. A gap's diagnosis must state the missing decision,
-not merely label a passage vague. Duplicate normalized spans make the response
-invalid, so repeating one anchor under all three types cannot hedge.
+`diagnosis` must be a well-formed yes/no question. It is not compared with a
+hidden canonical vocabulary: exact public evidence, issue type, and
+relationship carry deterministic semantic grounding. Contradictions require a
+contiguous second passage from another document; ambiguity and gap findings
+require `related_evidence: null`. Duplicate normalized spans invalidate the
+response, so repeating one anchor under all types cannot hedge.
 
 End-to-end matching requires the correct document and type, at least 90%
-contiguous anchor coverage, at least 80% evidence-token precision, and the
-structured diagnosis/relationship fields. The environment reports:
-
-- `finding_f1` as the primary reward;
-- `finding_localization_recall` as an evidence-location diagnostic;
-- `finding_type_accuracy` as a type-classification diagnostic;
-- `question_utility` as a companion issue/question signal.
+contiguous anchor coverage, at least 80% evidence-token precision, valid
+diagnosis form, and the correct relationship. The environment reports strict
+`finding_f1` plus localization, type, diagnosis, and relationship diagnostics.
+`question_utility` remains a weight-zero companion signal.
 
 ## Ask contract
 
-The default row has three candidate issues and requires exactly two questions,
-so selection is real but modest. Each response item copies the source
-document/quote, asks a yes/no question expressing at least two latent decision
-terms, and predicts `agree`, `disagree`, or `pass` for every visible faction.
+The default row has three candidate issues and requires exactly two questions.
+Each item must identify the issue structurally and declare what “yes” means:
 
 ```json
 {
   "questions": [{
     "doc_id": "doc-a1b2c3d4",
     "quote": "The copied issue passage.",
-    "question": "Should an emergency exception override prior approval?",
-    "target_stances": {"group-1a2b3c": "agree", "group-4d5e6f": "disagree"}
+    "type": "contradiction",
+    "question": "Should the practical exception override the primary rule?",
+    "yes_choice": "alternative",
+    "related_evidence": {
+      "doc_id": "doc-e5f6a7b8",
+      "quote": "The copied conflicting rule."
+    },
+    "target_stances": {
+      "group-1a2b3c": "agree",
+      "group-4d5e6f": "disagree"
+    }
   }]
 }
 ```
 
-Utility combines exact visible grounding, semantic decision identification,
-faction-stance accuracy, panel disagreement, and the share of factions whose
-simulated answer is actionable rather than pass. There is no policy-keyword
-value table. Global assignment prevents duplicate claims. The raw numerator is
-divided by the sum of the best two attainable issue utilities for that row, so
-an exact top-two response scores 1.0 under every polarization setting. Replacing
-a selected issue with a lower-value issue scores strictly less.
+Question prose must have yes/no form but is not compared with hidden authored
+tokens or aliases. Exact visible grounding, type, `yes_choice`, relationship,
+and complete faction stances determine semantic credit. If a model reverses
+the question orientation and inverts agree/disagree consistently, it receives
+the same stance credit. Separate metrics report question format validity,
+grounding recall, and stance accuracy.
 
-This deterministic metric does not judge elegance, conversational usefulness,
-or real-world information gain. Three candidates versus K=2 is a first
-selection benchmark, not the suggested harder 8–12-candidate design.
+Utility combines structured issue grounding, stance accuracy, panel
+disagreement, and the share of factions whose composed position is non-pass.
+There is no policy-keyword value table. Global assignment prevents duplicate
+claims, and normalization by the best attainable two-item sum makes the exact
+top-two response score 1.0. This is clarification-target selection—not a
+measurement of real-world information gain. Three candidates versus K=2
+remains a deliberately small ranking problem.
 
 ## Model-free comparators
 
-Exact results on the bundled 100-row evaluation split:
+Exact results on the bundled 100-row 0.5 candidate evaluation split:
 
 | Comparator class | Task | Comparator | mean reward |
 | --- | --- | --- | ---: |
-| Prompt-observable | find | Random visible spans | 0.030 |
-| Prompt-observable | find | Flag vague-sounding spans | 0.140 |
+| Prompt-observable | find | Random visible spans | 0.080 |
+| Prompt-observable | find | Flag vague-sounding spans | 0.195 |
 | Prompt-observable | find | Legacy 0.2 document-ID/position codebook | 0.000 |
-| Prompt-observable | elicit-ask | Template clarity questions | 0.000 |
-| Prompt-observable | elicit-ask | Randomly targeted questions | 0.000 |
+| Prompt-observable | elicit-ask | Template clarity questions | 0.078 |
+| Prompt-observable | elicit-ask | Randomly targeted questions | 0.069 |
 | Prompt-observable | elicit-ask | Removed 0.3 summary/stance codebook | 0.000 |
-| Component oracle | elicit-ask | Exact top-K issues + random stances | 0.659 |
+| Component oracle | elicit-ask | Exact issues + removed 0.4 principle-table parser | 0.000 |
+| Source-aware prompt-only | elicit-ask | Public template detector + removed 0.4 principle-table parser | 0.000 |
+| Component oracle | elicit-ask | Exact top-K issues + random stances | 0.670 |
+| Component oracle | elicit-ask | Exact top-K issues + exact stances (ceiling) | 1.000 |
 
-The zero Ask rows are weak floors that rarely clear the structured grounding
-gate; they do not establish model competence. The removed-codebook regression
-is the exact parser that scores 0.787 on the historical public 0.3 corpus. The
-remaining component oracle reads hidden top-K issues and is not a
-prompt-observable floor. Stronger prompt-only issue detectors remain useful.
+The historical 0.4 decoder is tested against a frozen old-format fixture, where
+both the exact-issue component and public-template prompt detector reach 1.0,
+and against the 0.5 corpus, where both reach 0.0. Component oracles read hidden
+issue selection and are not prompt-observable floors.
 
 ## Usage
 
@@ -139,8 +160,9 @@ training but not contamination-resistant comparison; use a fresh private
 generator family for consequential evaluation.
 
 Find additionally accepts `reward_mode="shaped"` for training. It averages
-four monotonic stages—localization, type, diagnosis, and relation evidence—on
-`[0,1]` while logging strict F1. The default is `reward_mode="strict"`, and all
-reported evaluation claims must use that default. The shaped objective is a
-curriculum mechanism, not evidence of learning value until multi-seed training
-and fresh-family transfer are demonstrated.
+localization, type, diagnosis, and relation F1 scores on `[0,1]`, charging every
+unmatched candidate at every stage. Adding a false positive or overlapping
+hedge strictly lowers reward relative to a concise exact answer. The default is
+`reward_mode="strict"`; reported evaluations must use it. Neither objective has
+demonstrated learning value until multi-seed training and fresh-family transfer
+are run.

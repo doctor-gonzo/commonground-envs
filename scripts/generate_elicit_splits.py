@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT_DIR = (
     ROOT / "environments" / "commonground_elicit" / "commonground_elicit" / "data"
 )
-GENERATED_AT = "2026-08-15"
+GENERATED_AT = "2026-08-30"
 TRAIN_SEED_BASE = 8100
 EVAL_SEED_BASE = 8200
 TRAIN_SCENARIOS_PER_TEMPLATE = 25

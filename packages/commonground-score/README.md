@@ -14,6 +14,7 @@ Pure-Python scoring utilities for Common Ground deliberation evaluations.
 - `rating_to_vote(value)`
 - `vote_accuracy(predictions, held_out)`
 - `brier_score(predictions, held_out)`
+- `brier_skill_score(predictions, held_out, reference_predictions=None)`
 - `probability_reward(predictions, held_out)`
 
 `vote_entropy` normalizes agree/disagree/pass entropy to `[0, 1]`.
@@ -25,12 +26,15 @@ by `commonground-elicit`; missing votes are excluded from both calculations.
 probability mappings keyed by `agree`, `disagree`, and `pass` or their numeric
 equivalents. Valid non-negative finite mappings are normalized before scoring.
 Invalid or non-normalizable mappings score as the uniform distribution
-(`1/3`, `1/3`, `1/3`) to represent no information. Version 0.2 divides the
+(`1/3`, `1/3`, `1/3`) to represent no information. Version 0.4 divides the
 three-class squared-error sum by two, so the returned score is bounded to
 `[0,1]`; callers requiring the unnormalized convention must multiply by two.
 `probability_reward` returns `1 - brier_score` for a non-empty target set. The
 environment remains responsible for enforcing its exact response schema before
-calling this scorer.
+calling this scorer. `brier_skill_score` returns relative improvement over an
+explicit reference forecast; when omitted, it uses the three-class uniform
+forecast. A score of zero equals the reference, one is perfect, and negative
+values are worse than the reference.
 
 `rating_to_vote(value)` implements the canonical 0-10 rating conversion used for
 dataset parity:

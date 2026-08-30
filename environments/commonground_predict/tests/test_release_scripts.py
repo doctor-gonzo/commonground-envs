@@ -32,6 +32,7 @@ DATA_DIR = Path(__file__).resolve().parents[1] / "commonground_predict" / "data"
 SYNTHETIC_SPLIT = DATA_DIR / "eval_synthetic.jsonl"
 TRAIN_SPLIT = DATA_DIR / "train_synthetic.jsonl"
 PYPROJECT = Path(__file__).resolve().parents[1] / "pyproject.toml"
+README = Path(__file__).resolve().parents[1] / "README.md"
 
 
 def load_module(module_name: str, path: Path) -> Any:
@@ -163,25 +164,106 @@ def test_compute_floors_reproduces_rethemed_synthetic_values() -> None:
     floors = compute_floors(SYNTHETIC_SPLIT, masked_vote_count=8, seed="42")
 
     assert floors == {
-        "always-agree": 0.59,
-        "visible-majority": 0.58125,
-        "nearest-participant": 0.81875,
-        "five-neighbor": 0.89125,
-        "best-constant-oracle": 0.63125,
-        "cluster-pattern-oracle": 0.91625,
+        "uniform-probability": {
+            "vote_accuracy": 0.59,
+            "probability_reward": 0.6666666666666659,
+            "brier": 0.3333333333333329,
+            "brier_skill_vs_uniform": 0.0,
+        },
+        "global-visible-prior": {
+            "vote_accuracy": 0.59,
+            "probability_reward": 0.7168234975843193,
+            "brier": 0.28317650241568093,
+            "brier_skill_vs_uniform": 0.15047049275295743,
+        },
+        "train-global-prior": {
+            "vote_accuracy": 0.16625,
+            "probability_reward": 0.6693716353600249,
+            "brier": 0.33062836463997497,
+            "brier_skill_vs_uniform": 0.00811490608007531,
+        },
+        "train-text-naive-bayes": {
+            "vote_accuracy": 0.24375,
+            "probability_reward": 0.4012391358812117,
+            "brier": 0.598760864118788,
+            "brier_skill_vs_uniform": -0.7962825923563643,
+        },
+        "always-agree": {
+            "vote_accuracy": 0.59,
+            "probability_reward": 0.59,
+            "brier": 0.41,
+            "brier_skill_vs_uniform": -0.22999999999999993,
+        },
+        "visible-majority": {
+            "vote_accuracy": 0.58125,
+            "probability_reward": 0.58125,
+            "brier": 0.41875,
+            "brier_skill_vs_uniform": -0.2562499999999999,
+        },
+        "statement-visible-frequency": {
+            "vote_accuracy": 0.58125,
+            "probability_reward": 0.7597568238869272,
+            "brier": 0.2402431761130726,
+            "brier_skill_vs_uniform": 0.27927047166078267,
+        },
+        "nearest-participant": {
+            "vote_accuracy": 0.81875,
+            "probability_reward": 0.81875,
+            "brier": 0.18125,
+            "brier_skill_vs_uniform": 0.45625,
+        },
+        "five-neighbor": {
+            "vote_accuracy": 0.89125,
+            "probability_reward": 0.89125,
+            "brier": 0.10875,
+            "brier_skill_vs_uniform": 0.67375,
+        },
+        "five-neighbor-frequency": {
+            "vote_accuracy": 0.89125,
+            "probability_reward": 0.8888000000000001,
+            "brier": 0.11119999999999995,
+            "brier_skill_vs_uniform": 0.6663999999999999,
+        },
+        "distance-weighted-five-neighbor": {
+            "vote_accuracy": 0.9,
+            "probability_reward": 0.8810775996847495,
+            "brier": 0.11892240031525013,
+            "brier_skill_vs_uniform": 0.6432327990542497,
+        },
+        "best-constant-oracle": {
+            "vote_accuracy": 0.63125,
+            "probability_reward": 0.63125,
+            "brier": 0.36875,
+            "brier_skill_vs_uniform": -0.10624999999999991,
+        },
+        "cluster-pattern-oracle": {
+            "vote_accuracy": 0.91625,
+            "probability_reward": 0.91625,
+            "brier": 0.08375,
+            "brier_skill_vs_uniform": 0.74875,
+        },
     }
-    assert render_markdown(floors) == "\n".join(
+    rendered = render_markdown(floors)
+    assert rendered == "\n".join(
         [
-            "| Comparator class | Comparator | vote_accuracy |",
-            "| --- | --- | ---: |",
-            "| Prompt-observable | Always agree | 0.590 |",
-            "| Prompt-observable | Per-statement visible majority | 0.581 |",
-            "| Prompt-observable | Nearest participant (1-NN) | 0.819 |",
-            "| Prompt-observable | Five-neighbor vote | 0.891 |",
-            "| Held-out-label diagnostic | Per-snapshot best constant | 0.631 |",
-            "| Generator diagnostic | Latent cluster-pattern replay | 0.916 |",
+            "| Comparator class | Comparator | probability reward | vote_accuracy | normalized Brier | Brier skill vs uniform |",
+            "| --- | --- | ---: | ---: | ---: | ---: |",
+            "| No-input | Uniform probability | 0.667 | 0.590 | 0.333 | 0.000 |",
+            "| Evaluation-corpus visible (transductive) | Global visible class prior | 0.717 | 0.590 | 0.283 | 0.150 |",
+            "| Train-split no-text | Global empirical class prior | 0.669 | 0.166 | 0.331 | 0.008 |",
+            "| Train-split text-only | Bag-of-words vote probabilities | 0.401 | 0.244 | 0.599 | -0.796 |",
+            "| No-input | Always agree | 0.590 | 0.590 | 0.410 | -0.230 |",
+            "| Prompt-observable matrix-only | Per-statement visible majority | 0.581 | 0.581 | 0.419 | -0.256 |",
+            "| Prompt-observable matrix-only | Per-statement visible class frequencies | 0.760 | 0.581 | 0.240 | 0.279 |",
+            "| Prompt-observable matrix-only | Nearest participant (1-NN) | 0.819 | 0.819 | 0.181 | 0.456 |",
+            "| Prompt-observable matrix-only | Five-neighbor vote | 0.891 | 0.891 | 0.109 | 0.674 |",
+            "| Prompt-observable matrix-only | Five-neighbor vote frequencies | 0.889 | 0.891 | 0.111 | 0.666 |",
+            "| Prompt-observable matrix-only | Distance-weighted 5-NN with smoothing | 0.881 | 0.900 | 0.119 | 0.643 |",
+            "| Held-out-label diagnostic | Per-snapshot best constant | 0.631 | 0.631 | 0.369 | -0.106 |",
+            "| Generator diagnostic | Latent cluster-pattern replay | 0.916 | 0.916 | 0.084 | 0.749 |",
         ]
     )
+    assert rendered in README.read_text(encoding="utf-8")
 
 
 def test_train_and_eval_use_disjoint_generator_families() -> None:

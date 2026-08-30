@@ -18,7 +18,7 @@ from commonground_elicit.environment import (
     panel_disagreement,
     question_utility,
 )
-from commonground_scenarios import validate_scenario
+from commonground_scenarios import HELDOUT_TEMPLATES, TRAIN_TEMPLATES, validate_scenario
 
 QUESTION_COUNT = 2
 FINDING_BUDGET = 3
@@ -48,6 +48,44 @@ _LEAKED_TENDENCY_TO_STANCE = {
     "leans toward yes": "agree",
     "leans toward no": "disagree",
     "has no settled position": "pass",
+}
+_REMOVED_0_4_PRINCIPLES: dict[tuple[str, str], tuple[str, ...]] = {
+    ("ambiguity", "agree"): (
+        "For open thresholds, usually favors case-specific judgment over one fixed cutoff.",
+        "When a standard is vague, tends to leave room for local discretion.",
+    ),
+    ("ambiguity", "disagree"): (
+        "For open thresholds, usually favors one fixed cutoff over case-specific judgment.",
+        "When a standard is vague, tends to prefer a centrally defined boundary.",
+    ),
+    ("ambiguity", "pass"): (
+        "For open thresholds, weighs local judgment and fixed cutoffs case by case.",
+        "Has no general preference between discretion and a fixed boundary.",
+    ),
+    ("contradiction", "agree"): (
+        "When written rules conflict, tends to give a practical exception more weight.",
+        "In authority conflicts, usually favors the instruction that preserves operations.",
+    ),
+    ("contradiction", "disagree"): (
+        "When written rules conflict, tends to give the default authority rule more weight.",
+        "In authority conflicts, usually resists exceptions to the stated control.",
+    ),
+    ("contradiction", "pass"): (
+        "When written rules conflict, reviews which authority should control case by case.",
+        "Has no general preference between a default rule and an operational exception.",
+    ),
+    ("gap", "agree"): (
+        "When a standard channel fails, tends to favor a workable alternate path.",
+        "Usually supports a fallback for people unable to use the normal process.",
+    ),
+    ("gap", "disagree"): (
+        "When a standard channel fails, tends to retain the normal requirement.",
+        "Usually resists creating a fallback outside the established process.",
+    ),
+    ("gap", "pass"): (
+        "When a standard channel fails, decides whether to allow a fallback case by case.",
+        "Has no general preference about alternatives to the normal process.",
+    ),
 }
 
 
@@ -150,7 +188,10 @@ def template_questions(
         {
             "doc_id": str(document["doc_id"]),
             "quote": split_sentences(str(document["text"]))[0],
+            "type": "ambiguity",
             "question": f"Is the policy in document {document['doc_id']} clear?",
+            "yes_choice": "alternative",
+            "related_evidence": None,
             "target_stances": {
                 str(faction["faction_id"]): STANCES[
                     (question_index + faction_index) % len(STANCES)
@@ -183,10 +224,13 @@ def randomly_targeted_questions(
             {
                 "doc_id": doc_id,
                 "quote": quote,
+                "type": "ambiguity",
                 "question": (
                     f"Should the rule quoted from document {doc_id} be clarified "
                     f"for case {question_index + 1}?"
                 ),
+                "yes_choice": "alternative",
+                "related_evidence": None,
                 "target_stances": {
                     str(faction["faction_id"]): rng.choice(STANCES)
                     for faction in factions
@@ -218,12 +262,204 @@ def exact_issue_component_questions(
         {
             "doc_id": str(plant["doc_id"]),
             "quote": str(plant["quote"]),
+            "type": str(plant["type"]),
             "question": str(plant["question"]),
+            "yes_choice": str(plant["yes_choice"]),
+            "related_evidence": plant["related_evidence"],
             "target_stances": {
                 str(faction["faction_id"]): rng.choice(STANCES) for faction in factions
             },
         }
         for plant in selected
+    ]
+
+
+def exact_issue_exact_stance_questions(
+    planted: Sequence[Mapping[str, Any]],
+    *,
+    question_count: int,
+) -> list[dict[str, Any]]:
+    """Expose the attainable ceiling when issue selection and stances are exact."""
+
+    selected = sorted(
+        planted,
+        key=lambda plant: (
+            -float(plant["decision_value"])
+            * panel_disagreement(plant["target_stances"]),
+            str(plant["doc_id"]),
+            str(plant["quote"]),
+        ),
+    )[:question_count]
+    return [
+        {
+            "doc_id": str(plant["doc_id"]),
+            "quote": str(plant["quote"]),
+            "type": str(plant["type"]),
+            "question": str(plant["question"]),
+            "yes_choice": str(plant["yes_choice"]),
+            "related_evidence": plant["related_evidence"],
+            "target_stances": dict(plant["target_stances"]),
+        }
+        for plant in selected
+    ]
+
+
+def removed_0_4_principle_codebook_questions(
+    planted: Sequence[Mapping[str, Any]],
+    factions: Sequence[Mapping[str, str]],
+    *,
+    question_count: int,
+) -> list[dict[str, Any]]:
+    """Try the removed 0.4 ``(issue type, stance) -> phrase`` decoder.
+
+    Exact issue locations are supplied as a component oracle so this baseline
+    isolates whether public faction prose still reveals each issue-specific
+    stance. It scores perfectly on a 0.4-style fixture and zero on the current
+    general-value renderer.
+    """
+
+    decoded = _decode_removed_0_4_principles(factions)
+    if decoded is None:
+        return []
+
+    faction_ids = {str(faction["faction_id"]) for faction in factions}
+    selected = sorted(
+        planted,
+        key=lambda plant: (
+            -float(plant["decision_value"])
+            * panel_disagreement(plant["target_stances"]),
+            str(plant["doc_id"]),
+            str(plant["quote"]),
+        ),
+    )[:question_count]
+    return [
+        {
+            "doc_id": str(plant["doc_id"]),
+            "quote": str(plant["quote"]),
+            "type": str(plant["type"]),
+            "question": str(plant["question"]),
+            "yes_choice": str(plant["yes_choice"]),
+            "related_evidence": plant["related_evidence"],
+            "target_stances": {
+                faction_id: decoded[faction_id][str(plant["type"])]
+                for faction_id in sorted(faction_ids)
+            },
+        }
+        for plant in selected
+    ]
+
+
+def _decode_removed_0_4_principles(
+    factions: Sequence[Mapping[str, str]],
+) -> dict[str, dict[str, str]] | None:
+    """Decode the removed finite phrase table from prompt-visible summaries."""
+
+    decoded: dict[str, dict[str, str]] = {}
+    for faction in factions:
+        faction_id = str(faction["faction_id"])
+        summary = str(faction["summary"])
+        by_type: dict[str, str] = {}
+        for (issue_type, stance), phrases in _REMOVED_0_4_PRINCIPLES.items():
+            matches = [phrase for phrase in phrases if phrase in summary]
+            if not matches:
+                continue
+            if issue_type in by_type or len(matches) != 1:
+                return None
+            by_type[issue_type] = stance
+        if by_type:
+            decoded[faction_id] = by_type
+
+    faction_ids = {str(faction["faction_id"]) for faction in factions}
+    if set(decoded) != faction_ids:
+        return None
+    if any(set(by_type) != set(FINDING_TYPES) for by_type in decoded.values()):
+        return None
+    return decoded
+
+
+def source_template_0_4_codebook_questions(
+    documents: Sequence[Mapping[str, str]],
+    factions: Sequence[Mapping[str, str]],
+    *,
+    question_count: int,
+) -> list[dict[str, Any]]:
+    """Combine public template anchors with the removed 0.4 phrase decoder.
+
+    This source-aware adversary reads only prompt fields at runtime, but knows
+    the public template registry. Exact anchors recover issue locations and
+    authored relationships; the removed summary phrases recover all stances.
+    """
+
+    decoded = _decode_removed_0_4_principles(factions)
+    if decoded is None:
+        return []
+    faction_ids = tuple(sorted(decoded))
+    detected: list[dict[str, Any]] = []
+    for template in (*TRAIN_TEMPLATES, *HELDOUT_TEMPLATES):
+        for authored in template.planted_items:
+            primary_matches = [
+                str(document["doc_id"])
+                for document in documents
+                if str(authored["anchor_quote"]) in str(document["text"])
+            ]
+            if len(primary_matches) != 1:
+                continue
+            related_evidence: dict[str, str] | None = None
+            if authored["type"] == "contradiction":
+                related_matches = [
+                    str(document["doc_id"])
+                    for document in documents
+                    if str(authored["related_anchor_quote"]) in str(document["text"])
+                ]
+                if len(related_matches) != 1:
+                    continue
+                related_evidence = {
+                    "doc_id": related_matches[0],
+                    "quote": str(authored["related_anchor_quote"]),
+                }
+            target_stances = {
+                faction_id: decoded[faction_id][str(authored["type"])]
+                for faction_id in faction_ids
+            }
+            decision_value = max(
+                0.25,
+                sum(stance != "pass" for stance in target_stances.values())
+                / len(target_stances),
+            )
+            detected.append(
+                {
+                    "doc_id": primary_matches[0],
+                    "quote": str(authored["anchor_quote"]),
+                    "type": str(authored["type"]),
+                    "question": sentence_question(str(authored["anchor_quote"])),
+                    "yes_choice": str(authored["canonical_yes_choice"]),
+                    "related_evidence": related_evidence,
+                    "target_stances": target_stances,
+                    "decision_value": decision_value,
+                }
+            )
+
+    if len(detected) != len(FINDING_TYPES):
+        return []
+    detected.sort(
+        key=lambda plant: (
+            -float(plant["decision_value"])
+            * panel_disagreement(plant["target_stances"]),
+            str(plant["doc_id"]),
+            str(plant["quote"]),
+        )
+    )
+    return [
+        {
+            "doc_id": str(plant["doc_id"]),
+            "quote": str(plant["quote"]),
+            "type": str(plant["type"]),
+            "question": str(plant["question"]),
+            "yes_choice": str(plant["yes_choice"]),
+            "related_evidence": plant["related_evidence"],
+            "target_stances": dict(plant["target_stances"]),
+        }
+        for plant in detected[:question_count]
     ]
 
 
@@ -282,7 +518,10 @@ def leaked_summary_codebook_questions(
                 {
                     "doc_id": doc_id,
                     "quote": quote,
+                    "type": "ambiguity",
                     "question": question,
+                    "yes_choice": "alternative",
+                    "related_evidence": None,
                     "target_stances": stances,
                 },
             )
@@ -362,7 +601,10 @@ def compute_elicit_floors(path: Path = BUNDLED_EVAL_PATH) -> dict[str, float]:
         "elicit-ask/template-question": 0.0,
         "elicit-ask/randomly-targeted": 0.0,
         "elicit-ask/legacy-0.3-summary-codebook": 0.0,
+        "elicit-ask/legacy-0.4-principle-codebook": 0.0,
+        "elicit-ask/source-template-0.4-principle-codebook": 0.0,
         "elicit-ask/exact-issue-random-stance": 0.0,
+        "elicit-ask/exact-issue-exact-stance": 0.0,
     }
     scenarios = load_scenarios(path)
     for scenario in scenarios:
@@ -378,7 +620,6 @@ def compute_elicit_floors(path: Path = BUNDLED_EVAL_PATH) -> dict[str, float]:
                 "quote": str(plant["anchor_quote"]),
                 "type": str(plant["type"]),
                 "diagnosis": str(plant["canonical_question"]),
-                "decision_terms": list(plant["decision_terms"]),
                 "related_evidence": plant["related_evidence"],
             }
             for plant in scenario["planted_items"]
@@ -390,10 +631,18 @@ def compute_elicit_floors(path: Path = BUNDLED_EVAL_PATH) -> dict[str, float]:
             {
                 "doc_id": str(plant["doc_id"]),
                 "quote": str(plant["anchor_quote"]),
+                "type": str(plant["type"]),
                 "question": str(plant["canonical_question"]),
                 "question_aliases": list(plant["canonical_question_aliases"]),
+                "yes_choice": str(plant["canonical_yes_choice"]),
                 "target_stances": dict(plant["target_stances"]),
-                "decision_terms": list(plant["decision_terms"]),
+                "alternative_stances": dict(plant["alternative_stances"]),
+                "related_evidence": plant["related_evidence"],
+                "related_document_text": (
+                    documents_by_id[str(plant["related_evidence"]["doc_id"])]
+                    if plant["related_evidence"] is not None
+                    else None
+                ),
                 "decision_value": float(plant["decision_value"]),
                 "document_text": documents_by_id[str(plant["doc_id"])],
             }
@@ -487,6 +736,38 @@ def compute_elicit_floors(path: Path = BUNDLED_EVAL_PATH) -> dict[str, float]:
                 ElicitJsonParser("questions"),
             )
         )
+        totals["elicit-ask/legacy-0.4-principle-codebook"] += asyncio.run(
+            question_utility(
+                completion_for(
+                    {
+                        "questions": removed_0_4_principle_codebook_questions(
+                            planted_questions,
+                            factions,
+                            question_count=QUESTION_COUNT,
+                        )
+                    }
+                ),
+                answer,
+                info,
+                ElicitJsonParser("questions"),
+            )
+        )
+        totals["elicit-ask/source-template-0.4-principle-codebook"] += asyncio.run(
+            question_utility(
+                completion_for(
+                    {
+                        "questions": source_template_0_4_codebook_questions(
+                            documents,
+                            factions,
+                            question_count=QUESTION_COUNT,
+                        )
+                    }
+                ),
+                answer,
+                info,
+                ElicitJsonParser("questions"),
+            )
+        )
         totals["elicit-ask/exact-issue-random-stance"] += asyncio.run(
             question_utility(
                 completion_for(
@@ -496,6 +777,21 @@ def compute_elicit_floors(path: Path = BUNDLED_EVAL_PATH) -> dict[str, float]:
                             factions,
                             question_count=QUESTION_COUNT,
                             rng=component_rng,
+                        )
+                    }
+                ),
+                answer,
+                info,
+                ElicitJsonParser("questions"),
+            )
+        )
+        totals["elicit-ask/exact-issue-exact-stance"] += asyncio.run(
+            question_utility(
+                completion_for(
+                    {
+                        "questions": exact_issue_exact_stance_questions(
+                            planted_questions,
+                            question_count=QUESTION_COUNT,
                         )
                     }
                 ),
@@ -552,10 +848,25 @@ def render_markdown(floors: Mapping[str, float]) -> str:
             "elicit-ask",
             "Removed 0.3 summary/stance codebook",
         ),
+        "elicit-ask/legacy-0.4-principle-codebook": (
+            "Component oracle",
+            "elicit-ask",
+            "Exact issues + removed 0.4 principle-table parser",
+        ),
+        "elicit-ask/source-template-0.4-principle-codebook": (
+            "Source-aware prompt-only",
+            "elicit-ask",
+            "Public template detector + removed 0.4 principle-table parser",
+        ),
         "elicit-ask/exact-issue-random-stance": (
             "Component oracle",
             "elicit-ask",
             "Exact top-K issues + random stances",
+        ),
+        "elicit-ask/exact-issue-exact-stance": (
+            "Component oracle",
+            "elicit-ask",
+            "Exact top-K issues + exact stances (ceiling)",
         ),
     }
     lines = [

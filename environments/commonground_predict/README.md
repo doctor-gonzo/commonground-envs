@@ -1,9 +1,11 @@
 # commonground-predict
 
-`commonground-predict` 0.4.1 is a deterministic Verifiers environment for
-probabilistic masked-vote prediction over synthetic stakeholder panels. It has
-no judge model: reward is computed locally against eight masked cells per
-snapshot.
+`commonground-predict` 0.5.0 is an unreleased deterministic Verifiers candidate
+for probabilistic masked-vote prediction over synthetic stakeholder panels. It
+has no judge model: reward is computed locally against eight masked cells per
+snapshot. The public 0.4.1 artifact remains valid preliminary evidence; 0.5
+adds probability-native interpretation and release reporting rather than an
+emergency Predict correctness repair.
 
 The task is best understood as **semantic-conditioned matrix completion**.
 Statement text now causally selects a policy dimension, and latent cluster
@@ -15,7 +17,7 @@ human-preference validity, or general collective-preference reasoning.
 This environment is associated with [Context Engine](https://contextengine.sh),
 which can structure stakeholder statements and votes into auditable preference
 maps. A planned governed export path could let consenting individuals and
-groups retain, license, or sell derived preference datasets. Version 0.4.1
+groups retain, license, or sell derived preference datasets. Version 0.5
 contains no live participant data and no live-data exporter.
 
 ## Data
@@ -70,24 +72,37 @@ zero reward; its diagnostic Brier loss is 1.0 for non-empty tasks.
 - `vote_accuracy`, metric only: exact argmax accuracy over masked cells.
 - `brier`, metric only: conventional three-class squared error divided by two,
   bounded to `[0,1]`.
+- Brier skill, comparator report only: improvement over the uniform-probability
+  reference, where 0 equals uniform, 1 is perfect, and negative is worse.
 
 Exact model-free results on the bundled 100-row evaluation split:
 
-| Comparator class | Comparator | one-hot probability reward / vote_accuracy |
-| --- | --- | ---: |
-| Prompt-observable | Always agree | 0.590 |
-| Prompt-observable | Per-statement visible majority | 0.581 |
-| Prompt-observable | Nearest participant (1-NN) | 0.819 |
-| Prompt-observable | Five-neighbor vote | 0.891 |
-| Held-out-label diagnostic | Per-snapshot best constant | 0.631 |
-| Generator diagnostic | Latent cluster-pattern replay | 0.916 |
+| Comparator class | Comparator | probability reward | vote_accuracy | normalized Brier | Brier skill vs uniform |
+| --- | --- | ---: | ---: | ---: | ---: |
+| No-input | Uniform probability | 0.667 | 0.590 | 0.333 | 0.000 |
+| Evaluation-corpus visible (transductive) | Global visible class prior | 0.717 | 0.590 | 0.283 | 0.150 |
+| Train-split no-text | Global empirical class prior | 0.669 | 0.166 | 0.331 | 0.008 |
+| Train-split text-only | Bag-of-words vote probabilities | 0.401 | 0.244 | 0.599 | -0.796 |
+| No-input | Always agree | 0.590 | 0.590 | 0.410 | -0.230 |
+| Prompt-observable matrix-only | Per-statement visible majority | 0.581 | 0.581 | 0.419 | -0.256 |
+| Prompt-observable matrix-only | Per-statement visible class frequencies | 0.760 | 0.581 | 0.240 | 0.279 |
+| Prompt-observable matrix-only | Nearest participant (1-NN) | 0.819 | 0.819 | 0.181 | 0.456 |
+| Prompt-observable matrix-only | Five-neighbor vote | 0.891 | 0.891 | 0.109 | 0.674 |
+| Prompt-observable matrix-only | Five-neighbor vote frequencies | 0.889 | 0.891 | 0.111 | 0.666 |
+| Prompt-observable matrix-only | Distance-weighted 5-NN with smoothing | 0.881 | 0.900 | 0.119 | 0.643 |
+| Held-out-label diagnostic | Per-snapshot best constant | 0.631 | 0.631 | 0.369 | -0.106 |
+| Generator diagnostic | Latent cluster-pattern replay | 0.916 | 0.916 | 0.084 | 0.749 |
 
-The deterministic comparators emit one-hot forecasts, for which probability
-reward equals vote accuracy. The last two rows are not floors: one reads held-out labels and one replays
-hidden generator state. The narrow gap between 5-NN and latent replay is a
-central limitation and should accompany any model result. Matrix-factorization,
-item-item, spectral, text-only, matrix-only, and shuffled-text ablations remain
-recommended additions.
+Uniform already earns `2/3` probability reward under normalized three-class
+Brier, so raw reward must be interpreted against that reference. The
+evaluation-corpus prior is explicitly transductive; the clean train-split prior
+adds almost no skill, and the train-split text-only model performs poorly across
+the held-out generator profile. Strong per-snapshot matrix neighbors show that
+visible collaborative structure dominates the current corpus. The last two
+rows are diagnostics, not floors: one reads held-out labels and one replays
+hidden generator state. Calibrated matrix factorization, item-item/spectral
+models, and shuffled-text ablations remain recommended before claiming a
+distinct language contribution.
 
 ## Usage
 

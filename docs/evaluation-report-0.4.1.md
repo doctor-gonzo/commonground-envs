@@ -3,6 +3,15 @@
 Status: exact public Hub artifacts, anonymous installation, the full model
 study, and all 12 version-pinned public evaluation records are complete.
 
+> **Historical evidence notice (2026-08-30):** Predict 0.4.1 remains a valid
+> preliminary artifact. Elicit 0.4.1 is superseded for current benchmark use.
+> Five `regional-archives-access` rows selected an unrelated second passage for
+> the planted contradiction, and faction summaries used a finite phrase table
+> keyed by issue type and target stance. The Elicit Find/Ask scores below remain
+> immutable reproducibility records for that artifact; they are not evidence
+> for the corrected 0.5 corpus. Elicit 0.5 must be regenerated and rerun before
+> new comparative claims are made.
+
 This report records model-free and model-evaluation evidence for the breaking
 0.4 redesign. Version 0.4.1 differs from the private 0.4.0 candidate only in
 Hub-source legal-file placement; task code, corpora, prompts, and scoring are

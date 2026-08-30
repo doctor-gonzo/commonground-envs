@@ -20,6 +20,55 @@ class DomainTemplate:
     distractors: tuple[dict[str, str], ...]
 
 
+VALUE_DIMENSIONS = (
+    "access",
+    "adaptability",
+    "continuity",
+    "oversight",
+    "safety",
+)
+
+
+def _vector(
+    access: float,
+    adaptability: float,
+    continuity: float,
+    oversight: float,
+    safety: float,
+) -> dict[str, float]:
+    """Author one complete general-value or issue-trade-off vector."""
+
+    return dict(
+        zip(
+            VALUE_DIMENSIONS,
+            (access, adaptability, continuity, oversight, safety),
+            strict=True,
+        )
+    )
+
+
+def _preference_score(values: dict[str, float], weights: dict[str, float]) -> float:
+    scale = sum(abs(weight) for weight in weights.values())
+    if scale == 0:
+        raise ValueError("issue value weights cannot all be zero")
+    return sum(values[key] * weights[key] for key in VALUE_DIMENSIONS) / scale
+
+
+def _select_split_vector(
+    factions: tuple[dict[str, float], ...],
+    candidates: tuple[dict[str, float], ...],
+    offset: int,
+) -> dict[str, float]:
+    """Select a transparent trade-off that genuinely splits general values."""
+
+    for index in range(len(candidates)):
+        candidate = candidates[(offset + index) % len(candidates)]
+        scores = [_preference_score(values, candidate) for values in factions]
+        if max(scores) >= 0.25 and min(scores) <= -0.25:
+            return candidate
+    raise ValueError("authored value trade-offs do not split the faction panel")
+
+
 TRAIN_TEMPLATES = (
     DomainTemplate(
         template_id="customer-support-handbook",
@@ -35,31 +84,19 @@ TRAIN_TEMPLATES = (
                 "faction_id": "support",
                 "name": "Customer support",
                 "summary": "Wants latitude to resolve customer harm quickly.",
-                "priors": {
-                    "credit-latitude": 0.9,
-                    "refund-window": 0.8,
-                    "escalation-gap": 0.7,
-                },
+                "values": _vector(0.6, 0.9, 0.8, -0.5, 0.1),
             },
             {
                 "faction_id": "finance",
                 "name": "Finance controls",
                 "summary": "Wants predictable approvals and bounded concessions.",
-                "priors": {
-                    "credit-latitude": -0.8,
-                    "refund-window": -0.9,
-                    "escalation-gap": 0.0,
-                },
+                "values": _vector(-0.2, -0.8, 0.1, 0.9, 0.3),
             },
             {
                 "faction_id": "risk",
                 "name": "Risk review",
                 "summary": "Wants reviewable exceptions and explicit escalation ownership.",
-                "priors": {
-                    "credit-latitude": 0.0,
-                    "refund-window": -0.6,
-                    "escalation-gap": -0.9,
-                },
+                "values": _vector(0.1, -0.4, 0.2, 0.8, 0.9),
             },
         ),
         documents=(
@@ -90,7 +127,8 @@ TRAIN_TEMPLATES = (
                 "type": "ambiguity",
                 "canonical_question": "Should support agents decide the credit amount and evidence that qualify as small and materially inconvenient?",
                 "canonical_question_aliases": [],
-                "target_dimension": "credit-latitude",
+                "value_weights": _vector(0.2, 0.8, 0.2, -0.5, 0.0),
+                "canonical_yes_choice": "alternative",
             },
             {
                 "plant_id": "refund-window-conflict",
@@ -99,7 +137,10 @@ TRAIN_TEMPLATES = (
                 "type": "contradiction",
                 "canonical_question": "Should the billing-cycle window control instead of the support macro's weekly-review deadline?",
                 "canonical_question_aliases": [],
-                "target_dimension": "refund-window",
+                "value_weights": _vector(-0.5, -0.4, 0.1, 0.8, 0.1),
+                "canonical_yes_choice": "anchor",
+                "related_plant_doc_id": "support-macro",
+                "related_anchor_quote": "Tell customers that refund requests must be received before the second weekly review.",
             },
             {
                 "plant_id": "owner-unavailable-gap",
@@ -108,7 +149,8 @@ TRAIN_TEMPLATES = (
                 "type": "gap",
                 "canonical_question": "Should support agents authorize recovery when the account owner cannot be reached?",
                 "canonical_question_aliases": [],
-                "target_dimension": "escalation-gap",
+                "value_weights": _vector(0.7, 0.4, 0.6, -0.5, -0.1),
+                "canonical_yes_choice": "alternative",
             },
         ),
         distractors=(
@@ -138,31 +180,19 @@ TRAIN_TEMPLATES = (
                 "faction_id": "instructors",
                 "name": "Instructors",
                 "summary": "Want discretion over feedback and revision pacing.",
-                "priors": {
-                    "feedback-depth": 0.9,
-                    "revision-limit": -0.7,
-                    "access-gap": 0.6,
-                },
+                "values": _vector(0.3, 0.8, 0.5, -0.3, 0.1),
             },
             {
                 "faction_id": "learner-success",
                 "name": "Learner success",
                 "summary": "Wants generous revision and accessibility support.",
-                "priors": {
-                    "feedback-depth": 0.6,
-                    "revision-limit": 0.9,
-                    "access-gap": 0.9,
-                },
+                "values": _vector(0.9, 0.6, 0.7, -0.1, 0.3),
             },
             {
                 "faction_id": "quality",
                 "name": "Quality assurance",
                 "summary": "Wants consistent workload and documented accommodations.",
-                "priors": {
-                    "feedback-depth": -0.8,
-                    "revision-limit": -0.8,
-                    "access-gap": -0.7,
-                },
+                "values": _vector(-0.2, -0.7, 0.1, 0.9, 0.7),
             },
         ),
         documents=(
@@ -193,7 +223,8 @@ TRAIN_TEMPLATES = (
                 "type": "ambiguity",
                 "canonical_question": "Should instructors decide what evidence makes feedback substantive enough to satisfy the standard?",
                 "canonical_question_aliases": [],
-                "target_dimension": "feedback-depth",
+                "value_weights": _vector(0.1, 0.8, 0.1, -0.6, 0.0),
+                "canonical_yes_choice": "alternative",
             },
             {
                 "plant_id": "revision-conflict",
@@ -202,7 +233,10 @@ TRAIN_TEMPLATES = (
                 "type": "contradiction",
                 "canonical_question": "Should learners be allowed to revise after grading until the rubric is met?",
                 "canonical_question_aliases": [],
-                "target_dimension": "revision-limit",
+                "value_weights": _vector(0.5, 0.5, 0.1, -0.6, -0.1),
+                "canonical_yes_choice": "alternative",
+                "related_plant_doc_id": "coach-playbook",
+                "related_anchor_quote": "Invite learners to resubmit until the rubric is met.",
             },
             {
                 "plant_id": "live-access-gap",
@@ -211,7 +245,8 @@ TRAIN_TEMPLATES = (
                 "type": "gap",
                 "canonical_question": "Should learner success grant an accommodation after a live session has already started?",
                 "canonical_question_aliases": [],
-                "target_dimension": "access-gap",
+                "value_weights": _vector(0.8, 0.3, 0.2, -0.4, 0.1),
+                "canonical_yes_choice": "alternative",
             },
         ),
         distractors=(
@@ -241,31 +276,19 @@ TRAIN_TEMPLATES = (
                 "faction_id": "caseworkers",
                 "name": "Case workers",
                 "summary": "Want flexible triage and direct resolution.",
-                "priors": {
-                    "urgent-triage": 0.9,
-                    "appeal-route": 0.8,
-                    "offline-gap": 0.7,
-                },
+                "values": _vector(0.4, 0.9, 0.7, -0.4, 0.1),
             },
             {
                 "faction_id": "auditors",
                 "name": "Program auditors",
                 "summary": "Want uniform queues and complete records.",
-                "priors": {
-                    "urgent-triage": -0.8,
-                    "appeal-route": -0.9,
-                    "offline-gap": -0.7,
-                },
+                "values": _vector(-0.3, -0.8, 0.2, 0.9, 0.5),
             },
             {
                 "faction_id": "residents",
                 "name": "Resident advocates",
                 "summary": "Want accessible channels and rapid review.",
-                "priors": {
-                    "urgent-triage": 0.7,
-                    "appeal-route": 0.9,
-                    "offline-gap": 0.9,
-                },
+                "values": _vector(0.9, 0.6, 0.5, 0.1, 0.3),
             },
         ),
         documents=(
@@ -296,7 +319,8 @@ TRAIN_TEMPLATES = (
                 "type": "ambiguity",
                 "canonical_question": "Should case workers decide which conditions make a request urgent enough to move ahead?",
                 "canonical_question_aliases": [],
-                "target_dimension": "urgent-triage",
+                "value_weights": _vector(0.1, 0.8, 0.2, -0.6, 0.0),
+                "canonical_yes_choice": "alternative",
             },
             {
                 "plant_id": "appeal-channel-conflict",
@@ -305,7 +329,10 @@ TRAIN_TEMPLATES = (
                 "type": "contradiction",
                 "canonical_question": "Should a counter form be equally official as a digital portal appeal?",
                 "canonical_question_aliases": [],
-                "target_dimension": "appeal-route",
+                "value_weights": _vector(0.7, 0.4, 0.3, -0.4, 0.0),
+                "canonical_yes_choice": "alternative",
+                "related_plant_doc_id": "counter-script",
+                "related_anchor_quote": "Provide a paper appeal form at the counter and treat it as the official submission.",
             },
             {
                 "plant_id": "no-address-gap",
@@ -314,7 +341,8 @@ TRAIN_TEMPLATES = (
                 "type": "gap",
                 "canonical_question": "Should staff use a non-digital notice channel when a resident has no verified address?",
                 "canonical_question_aliases": [],
-                "target_dimension": "offline-gap",
+                "value_weights": _vector(0.8, 0.3, 0.4, -0.3, 0.0),
+                "canonical_yes_choice": "alternative",
             },
         ),
         distractors=(
@@ -344,31 +372,19 @@ TRAIN_TEMPLATES = (
                 "faction_id": "people-ops",
                 "name": "People operations",
                 "summary": "Want accessible benefits and flexible administration.",
-                "priors": {
-                    "notice-window": 0.8,
-                    "stipend-approval": 0.7,
-                    "contractor-gap": 0.9,
-                },
+                "values": _vector(0.8, 0.7, 0.5, -0.2, 0.2),
             },
             {
                 "faction_id": "managers",
                 "name": "Team managers",
                 "summary": "Want local discretion and fast decisions.",
-                "priors": {
-                    "notice-window": 0.9,
-                    "stipend-approval": 0.8,
-                    "contractor-gap": 0.0,
-                },
+                "values": _vector(0.3, 0.9, 0.8, -0.3, 0.1),
             },
             {
                 "faction_id": "payroll",
                 "name": "Payroll controls",
                 "summary": "Want advance approval and clear eligibility boundaries.",
-                "priors": {
-                    "notice-window": -0.8,
-                    "stipend-approval": -0.9,
-                    "contractor-gap": -0.8,
-                },
+                "values": _vector(-0.4, -0.8, 0.1, 0.9, 0.5),
             },
         ),
         documents=(
@@ -399,7 +415,8 @@ TRAIN_TEMPLATES = (
                 "type": "ambiguity",
                 "canonical_question": "Should teams set the reasonable notice period separately for each kind of planned leave?",
                 "canonical_question_aliases": [],
-                "target_dimension": "notice-window",
+                "value_weights": _vector(0.2, 0.8, 0.1, -0.5, 0.0),
+                "canonical_yes_choice": "alternative",
             },
             {
                 "plant_id": "stipend-approval-conflict",
@@ -408,7 +425,10 @@ TRAIN_TEMPLATES = (
                 "type": "contradiction",
                 "canonical_question": "Should a manager be allowed to approve a learning purchase after receiving the receipt?",
                 "canonical_question_aliases": [],
-                "target_dimension": "stipend-approval",
+                "value_weights": _vector(0.5, 0.5, 0.2, -0.7, -0.1),
+                "canonical_yes_choice": "alternative",
+                "related_plant_doc_id": "manager-checklist",
+                "related_anchor_quote": "Managers may approve a learning purchase after the employee submits the receipt.",
             },
             {
                 "plant_id": "contractor-benefit-gap",
@@ -417,7 +437,8 @@ TRAIN_TEMPLATES = (
                 "type": "gap",
                 "canonical_question": "Should contractors be eligible for learning benefits?",
                 "canonical_question_aliases": [],
-                "target_dimension": "contractor-gap",
+                "value_weights": _vector(0.8, 0.3, 0.2, -0.4, 0.0),
+                "canonical_yes_choice": "alternative",
             },
         ),
         distractors=(
@@ -451,31 +472,19 @@ HELDOUT_TEMPLATES: tuple[DomainTemplate, ...] = (
                 "faction_id": "dispatch",
                 "name": "Dispatchers",
                 "summary": "Want routing discretion and fast exception handling.",
-                "priors": {
-                    "weather-threshold": 0.9,
-                    "handoff-authority": 0.8,
-                    "silent-driver-gap": 0.7,
-                },
+                "values": _vector(0.2, 0.8, 0.9, -0.5, 0.3),
             },
             {
                 "faction_id": "safety",
                 "name": "Safety officers",
                 "summary": "Want conservative stops and explicit handoff authority.",
-                "priors": {
-                    "weather-threshold": -0.9,
-                    "handoff-authority": -0.8,
-                    "silent-driver-gap": -0.9,
-                },
+                "values": _vector(-0.2, -0.6, 0.1, 0.9, 0.9),
             },
             {
                 "faction_id": "customers",
                 "name": "Customer coordinators",
                 "summary": "Want continuity and timely delivery updates.",
-                "priors": {
-                    "weather-threshold": 0.6,
-                    "handoff-authority": 0.9,
-                    "silent-driver-gap": 0.8,
-                },
+                "values": _vector(0.8, 0.4, 0.9, 0.1, 0.3),
             },
         ),
         documents=(
@@ -508,7 +517,8 @@ HELDOUT_TEMPLATES: tuple[DomainTemplate, ...] = (
                 "canonical_question_aliases": [
                     "Should dispatchers choose which observable conditions warrant pausing a route?"
                 ],
-                "target_dimension": "weather-threshold",
+                "value_weights": _vector(0.0, 0.6, 0.1, -0.5, 0.3),
+                "canonical_yes_choice": "alternative",
             },
             {
                 "plant_id": "handoff-authority-conflict",
@@ -517,7 +527,10 @@ HELDOUT_TEMPLATES: tuple[DomainTemplate, ...] = (
                 "type": "contradiction",
                 "canonical_question": "Should the duty coordinator transfer a load after hours without the assigned dispatcher?",
                 "canonical_question_aliases": [],
-                "target_dimension": "handoff-authority",
+                "value_weights": _vector(0.0, -0.3, -0.5, 0.8, 0.2),
+                "canonical_yes_choice": "anchor",
+                "related_plant_doc_id": "handoff-appendix",
+                "related_anchor_quote": "Only the assigned dispatcher may transfer a load.",
             },
             {
                 "plant_id": "unreachable-driver-gap",
@@ -526,7 +539,8 @@ HELDOUT_TEMPLATES: tuple[DomainTemplate, ...] = (
                 "type": "gap",
                 "canonical_question": "Should the duty coordinator reassign a route when the assigned driver cannot be reached?",
                 "canonical_question_aliases": [],
-                "target_dimension": "silent-driver-gap",
+                "value_weights": _vector(0.2, 0.5, 0.7, -0.5, -0.2),
+                "canonical_yes_choice": "alternative",
             },
         ),
         distractors=(
@@ -556,31 +570,19 @@ HELDOUT_TEMPLATES: tuple[DomainTemplate, ...] = (
                 "faction_id": "creators",
                 "name": "Creators",
                 "summary": "Want flexible remedies and control over listings.",
-                "priors": {
-                    "timely-response": 0.9,
-                    "removal-authority": -0.8,
-                    "appeal-gap": 0.9,
-                },
+                "values": _vector(0.7, 0.8, 0.5, -0.5, 0.1),
             },
             {
                 "faction_id": "trust",
                 "name": "Trust and safety",
                 "summary": "Want rapid enforcement and reviewable appeals.",
-                "priors": {
-                    "timely-response": -0.8,
-                    "removal-authority": 0.9,
-                    "appeal-gap": 0.8,
-                },
+                "values": _vector(0.2, -0.2, 0.7, 0.9, 0.8),
             },
             {
                 "faction_id": "buyers",
                 "name": "Buyer advocates",
                 "summary": "Want clear deadlines and stable remedies.",
-                "priors": {
-                    "timely-response": -0.7,
-                    "removal-authority": 0.7,
-                    "appeal-gap": -0.8,
-                },
+                "values": _vector(0.8, -0.3, 0.4, 0.6, 0.4),
             },
         ),
         documents=(
@@ -611,7 +613,8 @@ HELDOUT_TEMPLATES: tuple[DomainTemplate, ...] = (
                 "type": "ambiguity",
                 "canonical_question": "Should creators decide what response window counts as timely for each dispute class?",
                 "canonical_question_aliases": [],
-                "target_dimension": "timely-response",
+                "value_weights": _vector(0.0, 0.7, 0.2, -0.5, 0.0),
+                "canonical_yes_choice": "alternative",
             },
             {
                 "plant_id": "listing-removal-conflict",
@@ -620,7 +623,10 @@ HELDOUT_TEMPLATES: tuple[DomainTemplate, ...] = (
                 "type": "contradiction",
                 "canonical_question": "Should immediate trust removal override the creator's keep-active rule during review?",
                 "canonical_question_aliases": [],
-                "target_dimension": "removal-authority",
+                "value_weights": _vector(0.3, 0.5, 0.2, -0.6, -0.5),
+                "canonical_yes_choice": "anchor",
+                "related_plant_doc_id": "creator-playbook",
+                "related_anchor_quote": "A creator keeps a listing active while a dispute is under review.",
             },
             {
                 "plant_id": "dashboard-access-gap",
@@ -629,7 +635,8 @@ HELDOUT_TEMPLATES: tuple[DomainTemplate, ...] = (
                 "type": "gap",
                 "canonical_question": "Should a suspended creator be allowed to appeal without dashboard access?",
                 "canonical_question_aliases": [],
-                "target_dimension": "appeal-gap",
+                "value_weights": _vector(0.8, 0.3, 0.2, -0.8, -0.3),
+                "canonical_yes_choice": "alternative",
             },
         ),
         distractors=(
@@ -664,26 +671,55 @@ def _additional_heldout_template(
         gap_anchor,
         gap_question,
     ) = spec
-    dimensions = {
-        "ambiguity": f"{template_id}-threshold",
-        "contradiction": f"{template_id}-authority",
-        "gap": f"{template_id}-exception",
-    }
-    # Vary each role's issue-specific stance across held-out domains.  This
-    # prevents faction name from serving as a universal answer codebook while
-    # preserving a mix of agree, disagree, and pass targets.
-    base_stances = {
-        "ambiguity": (0.9, -0.9, 0.0),
-        "contradiction": (-0.9, 0.9, 0.7),
-        "gap": (0.7, 0.0, -0.9),
-    }
-    role_priors: list[dict[str, float]] = [{}, {}, {}]
-    for kind_index, kind in enumerate(("ambiguity", "contradiction", "gap")):
-        values = base_stances[kind]
-        rotation = (pattern_code + kind_index) % len(values)
-        rotated = values[rotation:] + values[:rotation]
-        for role_index, value in enumerate(rotated):
-            role_priors[role_index][dimensions[kind]] = value
+    operator_profiles = (
+        _vector(0.3, 0.9, 0.8, -0.6, 0.2),
+        _vector(0.5, 0.6, 0.9, -0.3, 0.7),
+        _vector(0.0, 0.7, 0.6, -0.3, 0.8),
+    )
+    assurance_profiles = (
+        _vector(-0.3, -0.7, 0.1, 0.9, 0.8),
+        _vector(0.2, -0.4, 0.5, 0.8, 0.5),
+        _vector(-0.1, -0.9, 0.6, 0.7, 0.9),
+    )
+    community_profiles = (
+        _vector(0.9, 0.6, 0.7, -0.1, 0.2),
+        _vector(0.8, -0.2, 0.3, 0.5, 0.8),
+        _vector(0.7, 0.3, 0.9, 0.2, 0.5),
+    )
+    role_values = (
+        operator_profiles[pattern_code % 3],
+        assurance_profiles[(pattern_code + 1) % 3],
+        community_profiles[(pattern_code + 2) % 3],
+    )
+    ambiguity_weights = _select_split_vector(
+        role_values,
+        (
+            _vector(0.1, 0.8, 0.1, -0.6, 0.1),
+            _vector(0.2, 0.5, 0.1, -0.5, 0.5),
+            _vector(0.3, 0.7, 0.2, -0.5, -0.2),
+        ),
+        pattern_code,
+    )
+    contradiction_weights = _select_split_vector(
+        role_values,
+        (
+            _vector(0.4, 0.4, 0.6, -0.5, -0.2),
+            _vector(0.2, 0.2, 0.4, -0.4, 0.7),
+            _vector(0.6, 0.3, 0.2, -0.5, 0.1),
+            _vector(-0.3, -0.3, -0.4, 0.7, 0.4),
+        ),
+        pattern_code + 1,
+    )
+    gap_weights = _select_split_vector(
+        role_values,
+        (
+            _vector(0.8, 0.3, 0.4, -0.5, -0.1),
+            _vector(0.4, 0.2, 0.5, -0.3, 0.6),
+            _vector(0.7, 0.5, 0.3, -0.4, 0.1),
+            _vector(-0.2, -0.3, -0.2, 0.7, 0.6),
+        ),
+        pattern_code + 2,
+    )
     fillers = (
         "The document owner records each revision.",
         "Approved copies carry a control code.",
@@ -755,19 +791,19 @@ def _additional_heldout_template(
                 "faction_id": "operators",
                 "name": "Front-line operators",
                 "summary": "Want practical discretion and continuity of service.",
-                "priors": role_priors[0],
+                "values": role_values[0],
             },
             {
                 "faction_id": "assurance",
                 "name": "Assurance reviewers",
                 "summary": "Want conservative thresholds and explicit authority.",
-                "priors": role_priors[1],
+                "values": role_values[1],
             },
             {
                 "faction_id": "community",
                 "name": "Affected community",
                 "summary": "Wants accessible exceptions and timely resolution.",
-                "priors": role_priors[2],
+                "values": role_values[2],
             },
         ),
         documents=tuple(documents),
@@ -779,7 +815,8 @@ def _additional_heldout_template(
                 "type": "ambiguity",
                 "canonical_question": ambiguity_question,
                 "canonical_question_aliases": [],
-                "target_dimension": dimensions["ambiguity"],
+                "value_weights": ambiguity_weights,
+                "canonical_yes_choice": "alternative",
             },
             {
                 "plant_id": "authority-conflict",
@@ -788,7 +825,15 @@ def _additional_heldout_template(
                 "type": "contradiction",
                 "canonical_question": contradiction_question,
                 "canonical_question_aliases": [],
-                "target_dimension": dimensions["contradiction"],
+                "value_weights": contradiction_weights,
+                "canonical_yes_choice": (
+                    "anchor"
+                    if template_id
+                    in {"food-bank-distribution", "regional-archives-access"}
+                    else "alternative"
+                ),
+                "related_plant_doc_id": "exception-card",
+                "related_anchor_quote": conflicting_rule,
             },
             {
                 "plant_id": "uncovered-exception",
@@ -797,7 +842,8 @@ def _additional_heldout_template(
                 "type": "gap",
                 "canonical_question": gap_question,
                 "canonical_question_aliases": [],
-                "target_dimension": dimensions["gap"],
+                "value_weights": gap_weights,
+                "canonical_yes_choice": "alternative",
             },
         ),
         distractors=(

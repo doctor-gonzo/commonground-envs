@@ -9,13 +9,19 @@ synthetic stakeholder data:
   contradictions, and gaps, or selection of the two most valuable
   clarification questions from three candidate issues.
 
-Version 0.4.1 is the current review-driven release. The 0.4
-series removes a prompt-visible 0.3 Elicit stance codebook, makes calibrated
-probabilities the Predict objective, strengthens semantic split audits, and
-adds optional Find training shaping. Its exact public Hub artifacts passed a
-6,000-rollout, four-model study with no recovered or failed rollouts, and all
-12 version-pinned evaluation records are public. Public answer keys make every
-release unsuitable for contamination-resistant leaderboards.
+This repository contains the unreleased 0.5.0 corrective candidate. The current
+public Hub artifacts remain 0.4.1. Predict 0.4.1 is retained as solid but
+preliminary; Elicit 0.4.1 is retained only as an immutable historical artifact
+because five evaluation rows used an incorrect contradiction relationship and
+its public faction prose encoded stances through a finite phrase table.
+
+Version 0.5 authors every contradiction relationship explicitly, derives
+stances compositionally from general faction values and question polarity,
+makes shaped Find reward precision-sensitive, and replaces hidden Ask
+vocabulary matching with structured grounding. It also adds probability-native
+Predict comparators and Brier skill. No 0.5 model claim is current until the
+new private-artifact study and anonymous installation gates pass. Public answer
+keys make every release unsuitable for contamination-resistant leaderboards.
 
 This is the reinforcement-learning environment family associated with
 [Context Engine](https://contextengine.sh), an open-source deliberation system
@@ -32,10 +38,10 @@ synthetic, operator-authored demo fixture.
 
 | Path | Distribution | Purpose |
 | --- | --- | --- |
-| `packages/commonground-score` | `commonground-score` 0.3.0 | Vote statistics and calibrated-reward helpers. |
-| `packages/commonground-scenarios` | `commonground-scenarios` 0.3.0 | Offline scenario generation, schema, and validation. |
-| `environments/commonground_predict` | `commonground-predict` 0.4.1 | Probabilistic masked-vote prediction. |
-| `environments/commonground_elicit` | `commonground-elicit` 0.4.1 | Structured finding diagnosis and top-K clarification. |
+| `packages/commonground-score` | `commonground-score` 0.4.0 candidate | Vote statistics, calibrated rewards, and Brier skill. |
+| `packages/commonground-scenarios` | `commonground-scenarios` 0.4.0 candidate | Offline scenario generation, schema, and validation. |
+| `environments/commonground_predict` | `commonground-predict` 0.5.0 candidate | Probabilistic masked-vote prediction. |
+| `environments/commonground_elicit` | `commonground-elicit` 0.5.0 candidate | Structured finding diagnosis and top-K clarification. |
 
 Both environments export native Verifiers v1 `Taskset`/`Harness` plugins and a
 real legacy `SingleTurnEnv` adapter for the current Prime Hosted Evaluation
@@ -53,23 +59,27 @@ prime env install charliethompson/commonground-predict@0.4.1
 prime env install charliethompson/commonground-elicit@0.4.1
 ```
 
-## What the 0.4 series changes
+## What the 0.5 candidate changes
 
 Predict now optimizes `1 - normalized Brier`; argmax accuracy and Brier remain
-diagnostics. The exact masked-cell key set is mandatory. Standard
-collaborative-filtering comparators remain strong—one-hot 5-NN scores 0.891—so
-the environment is semantic-conditioned matrix completion, not evidence of
-general collective-preference reasoning.
+diagnostics, and the exact masked-cell key set is mandatory. Version 0.5 adds
+uniform, empirical-prior, statement-frequency, probabilistic-neighbor, and
+text-only comparators plus Brier skill relative to uniform. Standard matrix
+comparators remain strong, so the supported construct is semantic-conditioned
+matrix completion—not general collective-preference reasoning.
 
-Elicit faction summaries now state indirect policy principles instead of exact
-issue terms and yes/no/pass answers. A parser exploiting the old 0.3 clauses
-scores 0.787 on the historical corpus and 0.000 on 0.4. Split audits separately
-track instance identity, canonical visible meaning, policy-issue meaning,
-token Jaccard, and word-ngram TF-IDF similarity. Ask value derives from
-simulated answer coverage and disagreement, not policy keywords. Find keeps
-strict F1 for evaluation and offers an explicit staged training reward.
+Elicit public faction prose now describes general values once, independently
+of current issue types and answer labels. Stances are recomputed from those
+values, explicit issue alternatives, and yes-side polarity. Contradiction keys
+use authored document/quote relationships rather than lexical inference. Ask
+scores structured evidence, issue type, polarity, relationship, and stance
+fields without hidden canonical-token overlap. Find keeps strict F1 for
+evaluation; its staged training mode uses F1 at every stage so false positives
+and hedges reduce reward. Separate diagnostics expose formatting, grounding,
+stance, diagnosis, and relationship failures.
 
-See the [0.4.1 evaluation report](docs/evaluation-report-0.4.1.md), historical
+See the [0.5.0 evaluation plan](docs/evaluation-plan-0.5.0.md), historical
+[0.4.1 evaluation report](docs/evaluation-report-0.4.1.md), historical
 [0.3.0 evaluation report](docs/evaluation-report-0.3.0.md),
 [0.4-series evaluation plan](docs/evaluation-plan-0.4.0.md), and
 [methodology](docs/methodology.md) for exact definitions and limits.
@@ -118,14 +128,15 @@ uv run python scripts/aggregate_baselines.py
 uv run python scripts/aggregate_baselines.py --csv /path/to/baselines.csv
 ```
 
-The 0.4.1 exact-artifact study completed all 6,000 planned rollouts across
+The historical 0.4.1 exact-artifact study completed all 6,000 planned rollouts across
 Claude Sonnet 4.5, Gemini 2.5 Flash, GPT-4.1, and Qwen3 30B A3B Instruct with
 no recovered rollouts. Predict rewards ranged from 0.706 to 0.809, strict Find
 F1 from 0.050 to 0.160, and Ask utility from 0.016 to 0.105. Predict separates
-all four models without saturating; Elicit is substantially sparser, and only
-GPT-4.1's Find mean exceeds the 0.140 vague-span heuristic. Exact clustered
-intervals, paired comparisons, artifact hashes, and limitations are in the
-[0.4.1 evaluation report](docs/evaluation-report-0.4.1.md).
+all four models without saturating. The Elicit results are not transferable to
+0.5: they were scored against the superseded corpus and phrase renderer. Exact
+historical intervals, artifact hashes, and the correction notice are in the
+[0.4.1 evaluation report](docs/evaluation-report-0.4.1.md). Fresh 0.5 Elicit
+Find and Ask runs are release-blocking.
 
 Reproduce the task-level Predict and template-hierarchical Elicit analysis with:
 
@@ -143,8 +154,9 @@ uv run python scripts/analyze_release_study.py \
 
 Repeated rollouts estimate sampling variation, not independent task coverage.
 Elicit intervals resample base templates and then variants; Predict intervals
-resample tasks. Version 0.3 model scores are historical and must not be used as
-0.4 evidence because both corpora/objectives changed.
+resample tasks. Versions 0.3 and 0.4 Elicit scores are historical and must not
+be used as 0.5 evidence because the corpus, visible rationale construct, and
+scoring contract changed.
 
 ## Provenance, scope, and license
 

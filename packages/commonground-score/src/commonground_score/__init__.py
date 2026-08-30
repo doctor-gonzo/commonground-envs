@@ -4,6 +4,7 @@ from importlib.metadata import PackageNotFoundError, version
 
 from commonground_score.scoring import (
     brier_score,
+    brier_skill_score,
     cluster_separation,
     comment_stats,
     probability_reward,
@@ -21,6 +22,7 @@ except PackageNotFoundError:  # pragma: no cover - source tree without installat
 
 __all__ = [
     "brier_score",
+    "brier_skill_score",
     "cluster_separation",
     "comment_stats",
     "probability_reward",

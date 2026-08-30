@@ -107,6 +107,16 @@ def write_native_run(
                 metrics["finding_localization_recall"] = score
                 metrics["finding_type_accuracy"] = score
                 metrics["question_utility"] = score / 2
+                if aggregate.uses_structured_elicit_diagnostics(environment):
+                    metrics["finding_diagnosis_recall"] = score
+                    metrics["finding_relation_recall"] = score
+            elif (
+                task_mode == "elicit-ask"
+                and aggregate.uses_structured_elicit_diagnostics(environment)
+            ):
+                metrics["question_format_valid"] = score
+                metrics["question_grounding_recall"] = score
+                metrics["question_stance_accuracy"] = score
             task_info = {"task_label": task_mode} if task_mode is not None else {}
             trace_id = f"trace-{task_index}-{rollout_index}"
             trace = {
@@ -431,10 +441,10 @@ def test_aggregate_complete_runs_in_deterministic_order() -> None:
 
     assert aggregate.render_markdown(summaries) == "\n".join(
         [
-            "| Model | Environment | Run ID | Rollouts | Recovered rollouts | Reward (mean ± std) | vote_accuracy (mean ± std) | brier (mean ± std) | finding_localization_recall (mean ± std) | finding_type_accuracy (mean ± std) | finding_f1 (mean ± std) | question_utility (mean ± std) |",
-            "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
-            "| fixture/offline-oracle | commonground-elicit:find | d4c3b2a1 | 6 | 0 | 0.667 ± 0.471 | — | — | — | — | 0.667 ± 0.471 | 0.415 ± 0.294 |",
-            "| fixture/offline-oracle | commonground-predict | a1b2c3d4 | 6 | 0 | 0.667 ± 0.471 | 0.667 ± 0.471 | 0.333 ± 0.471 | — | — | — | — |",
+            "| Model | Environment | Run ID | Rollouts | Recovered rollouts | Reward (mean ± std) | vote_accuracy (mean ± std) | brier (mean ± std) | finding_localization_recall (mean ± std) | finding_type_accuracy (mean ± std) | finding_diagnosis_recall (mean ± std) | finding_relation_recall (mean ± std) | finding_f1 (mean ± std) | question_utility (mean ± std) | question_format_valid (mean ± std) | question_grounding_recall (mean ± std) | question_stance_accuracy (mean ± std) |",
+            "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+            "| fixture/offline-oracle | commonground-elicit:find | d4c3b2a1 | 6 | 0 | 0.667 ± 0.471 | — | — | — | — | — | — | 0.667 ± 0.471 | 0.415 ± 0.294 | — | — | — |",
+            "| fixture/offline-oracle | commonground-predict | a1b2c3d4 | 6 | 0 | 0.667 ± 0.471 | 0.667 ± 0.471 | 0.333 ± 0.471 | — | — | — | — | — | — | — | — | — |",
         ]
     )
 

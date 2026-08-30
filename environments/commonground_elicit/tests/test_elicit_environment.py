@@ -43,7 +43,15 @@ from verifiers.v1.utils.loaders import (
 )
 
 CANONICAL_TASK_COLUMNS = ("prompt", "answer", "info", "example_id")
-QUESTION_RESPONSE_FIELDS = ("doc_id", "quote", "question", "target_stances")
+QUESTION_RESPONSE_FIELDS = (
+    "doc_id",
+    "quote",
+    "type",
+    "question",
+    "yes_choice",
+    "related_evidence",
+    "target_stances",
+)
 FINDING_RESPONSE_FIELDS = (
     "doc_id",
     "quote",
@@ -137,10 +145,35 @@ def test_optional_shaped_find_reward_preserves_strict_f1_as_metric() -> None:
     exact_shaped_state = score_row(shaped_env, row, exact)
 
     assert strict_state["reward"] == 0.0
-    assert shaped_state["reward"] == pytest.approx(1 / 12)
+    assert shaped_state["reward"] == pytest.approx(1 / 8)
     assert shaped_state["metrics"]["finding_f1"] == 0.0
     assert exact_shaped_state["reward"] == 1.0
     assert shaped_env.env_args["reward_mode"] == "shaped"
+
+
+def test_shaped_reward_strictly_penalizes_false_positive_spam() -> None:
+    env = load_environment(reward_mode="shaped")
+    row = dict(env.get_eval_dataset()[0])
+    exact = correct_response_from_row(row)
+    spammed = {
+        "findings": [
+            *exact["findings"],
+            {
+                "doc_id": exact["findings"][0]["doc_id"],
+                "quote": "A distinct unsupported passage",
+                "type": "ambiguity",
+                "diagnosis": "Should this unsupported passage create another rule?",
+                "related_evidence": None,
+            },
+        ]
+    }
+
+    exact_state = score_row(env, row, exact)
+    spammed_state = score_row(env, row, spammed)
+
+    assert exact_state["reward"] == 1.0
+    assert spammed_state["reward"] < exact_state["reward"]
+    assert spammed_state["metrics"]["finding_f1"] < 1.0
 
 
 def test_unknown_reward_mode_is_rejected() -> None:
@@ -320,6 +353,8 @@ def test_rubric_scores_exact_answer_at_one() -> None:
 
     assert state["reward"] == 1.0
     assert state["metrics"]["finding_f1"] == 1.0
+    assert state["metrics"]["finding_diagnosis_recall"] == 1.0
+    assert state["metrics"]["finding_relation_recall"] == 1.0
     assert state["metrics"]["question_utility"] > 0.0
 
 
@@ -372,7 +407,7 @@ def test_ask_task_builds_same_env_id_with_task_specific_prompt() -> None:
     assert "Select and raise exactly 2 clarifying questions" in prompt
     assert "agree means yes" in prompt
     assert "copy the exact supporting passage" in prompt.casefold()
-    assert "sharing one noun is insufficient" in prompt.casefold()
+    assert "not compared with hidden canonical vocabulary" in prompt.casefold()
     assert "Stakeholder factions:" in prompt
     for plant in planted:
         assert plant["question"] not in prompt
@@ -391,6 +426,33 @@ def test_ask_task_exact_planted_response_is_positive_and_deterministic() -> None
     assert 0 < first["reward"] <= 1
     assert first["reward"] == second["reward"]
     assert first["metrics"]["question_utility"] == first["reward"]
+    assert first["metrics"]["question_format_valid"] == 1.0
+    assert first["metrics"]["question_grounding_recall"] == 1.0
+    assert first["metrics"]["question_stance_accuracy"] == 1.0
+
+
+def test_ask_diagnostics_separate_format_grounding_and_stance_failures() -> None:
+    env = load_environment(task="elicit-ask", question_count=1)
+    row = dict(env.get_eval_dataset()[0])
+    exact = correct_response_from_row(row)
+    wrong_grounding = json.loads(json.dumps(exact))
+    wrong_grounding["questions"][0]["doc_id"] = "not-a-document"
+    wrong_stance = json.loads(json.dumps(exact))
+    faction_id = next(iter(wrong_stance["questions"][0]["target_stances"]))
+    original_stance = wrong_stance["questions"][0]["target_stances"][faction_id]
+    wrong_stance["questions"][0]["target_stances"][faction_id] = (
+        "disagree" if original_stance == "agree" else "agree"
+    )
+
+    malformed = score_row(env, row, {"questions": "invalid"})
+    ungrounded = score_row(env, row, wrong_grounding)
+    stance_error = score_row(env, row, wrong_stance)
+
+    assert malformed["metrics"]["question_format_valid"] == 0.0
+    assert ungrounded["metrics"]["question_format_valid"] == 1.0
+    assert ungrounded["metrics"]["question_grounding_recall"] == 0.0
+    assert stance_error["metrics"]["question_grounding_recall"] == 1.0
+    assert 0.0 <= stance_error["metrics"]["question_stance_accuracy"] < 1.0
 
 
 def test_ask_task_env_args_round_trip_preserves_task_and_rows() -> None:
@@ -441,16 +503,11 @@ def test_panel_polarization_changes_selection_weights_without_changing_exact_max
     assert half_score == pytest.approx(full_score) == 1.0
 
 
-def test_planted_specific_question_strictly_beats_generic_divisiveness() -> None:
+def test_free_question_wording_does_not_override_structured_grounding() -> None:
     env = load_environment(task="elicit-ask", question_count=1)
     row = dict(env.get_eval_dataset()[0])
     plant = planted_questions_from_row(row)[0]
-    targeted = {
-        "doc_id": plant["doc_id"],
-        "quote": plant["quote"],
-        "question": plant["question"],
-        "target_stances": plant["target_stances"],
-    }
+    targeted = candidate_for_plant(plant)
     generic = {
         **targeted,
         "question": "Should we have rules at all?",
@@ -477,8 +534,7 @@ def test_planted_specific_question_strictly_beats_generic_divisiveness() -> None
         question_count=1,
     )
 
-    assert targeted_score >= paraphrase_score > generic_score
-    assert generic_score == 0.0
+    assert targeted_score == paraphrase_score == generic_score == 1.0
 
 
 def test_precise_distractor_quote_cannot_receive_planted_question_credit() -> None:
@@ -578,11 +634,9 @@ def test_find_task_caps_companion_k_to_visible_plants() -> None:
     [
         "route",
         "Dispatchers decide which observable conditions require a route pause.",
-        "Should we have rules at all?",
-        "Should this policy apply?",
     ],
 )
-def test_question_must_be_yes_no_and_reference_grounding(
+def test_question_must_be_yes_no(
     question: str,
 ) -> None:
     env = load_environment(task="elicit-ask", question_count=1)
@@ -599,10 +653,35 @@ def test_question_must_be_yes_no_and_reference_grounding(
     )
 
 
-def test_multi_term_unlisted_grounded_paraphrase_receives_credit() -> None:
+@pytest.mark.parametrize(
+    "question",
+    [
+        "Should we have rules at all?",
+        "Should this policy apply?",
+        "May a synonym-rich reformulation govern this case?",
+    ],
+)
+def test_structured_grounding_does_not_depend_on_question_vocabulary(
+    question: str,
+) -> None:
     env = load_environment(task="elicit-ask", question_count=1)
     plant = planted_questions_from_row(dict(env.get_eval_dataset()[0]))[0]
-    question = f"Should {' '.join(plant['decision_terms'])} be resolved?"
+
+    assert (
+        question_utility_score(
+            [candidate_for_plant(plant, question=question)],
+            [plant],
+            panel_polarization=1.0,
+            question_count=1,
+        )
+        == 1.0
+    )
+
+
+def test_unlisted_question_grounded_in_visible_evidence_receives_credit() -> None:
+    env = load_environment(task="elicit-ask", question_count=1)
+    plant = planted_questions_from_row(dict(env.get_eval_dataset()[0]))[0]
+    question = f"Should {' '.join(plant['quote'].split()[:4])} be clarified?"
     assert question not in {plant["question"], *plant["question_aliases"]}
 
     score = question_utility_score(
@@ -615,7 +694,7 @@ def test_multi_term_unlisted_grounded_paraphrase_receives_credit() -> None:
     assert score > 0.0
 
 
-def test_hidden_decision_wording_contributes_to_question_score() -> None:
+def test_hidden_canonical_wording_does_not_change_question_score() -> None:
     env = load_environment(task="elicit-ask", question_count=1)
     plant = planted_questions_from_row(dict(env.get_eval_dataset()[0]))[0]
     candidate = candidate_for_plant(
@@ -635,16 +714,23 @@ def test_hidden_decision_wording_contributes_to_question_score() -> None:
         [candidate], [rewritten_oracle], panel_polarization=1.0, question_count=1
     )
 
-    assert original == 1.0
-    assert 0.0 < rewritten < original
+    assert original == rewritten == 1.0
 
 
 def test_baseline_style_paraphrase_regression_is_scorable() -> None:
     plant = {
         "doc_id": "listing-rules",
         "quote": "Trust reviewers may remove a misleading listing immediately.",
+        "type": "ambiguity",
         "question": "Should immediate trust removal override review?",
         "question_aliases": [],
+        "yes_choice": "alternative",
+        "related_evidence": None,
+        "alternative_stances": {
+            "buyers": "agree",
+            "creators": "disagree",
+            "trust": "agree",
+        },
         "target_stances": {
             "buyers": "agree",
             "creators": "disagree",
@@ -718,6 +804,45 @@ def test_stance_accuracy_adds_monotonic_partial_credit() -> None:
     )
 
     assert exact_score > partial_score > grounding_only_score > 0.0
+
+
+def test_declared_question_polarity_reverses_expected_stance_labels() -> None:
+    env = load_environment(task="elicit-ask", question_count=1)
+    plant = planted_questions_from_row(dict(env.get_eval_dataset()[0]))[0]
+    inverse = {"agree": "disagree", "disagree": "agree", "pass": "pass"}
+    flipped_choice = "anchor" if plant["yes_choice"] == "alternative" else "alternative"
+    flipped_stances = {
+        faction_id: inverse[stance]
+        for faction_id, stance in plant["target_stances"].items()
+    }
+
+    canonical_score = question_utility_score(
+        [candidate_for_plant(plant)],
+        [plant],
+        panel_polarization=1.0,
+        question_count=1,
+    )
+    counterfactual_score = question_utility_score(
+        [
+            candidate_for_plant(
+                plant,
+                yes_choice=flipped_choice,
+                target_stances=flipped_stances,
+            )
+        ],
+        [plant],
+        panel_polarization=1.0,
+        question_count=1,
+    )
+    mislabeled_score = question_utility_score(
+        [candidate_for_plant(plant, yes_choice=flipped_choice)],
+        [plant],
+        panel_polarization=1.0,
+        question_count=1,
+    )
+
+    assert canonical_score == counterfactual_score == 1.0
+    assert mislabeled_score < canonical_score
 
 
 @pytest.mark.parametrize(
@@ -831,34 +956,24 @@ def test_distinct_grounded_questions_use_global_one_to_one_assignment() -> None:
     assert score > 0.0
 
 
-def test_question_needs_multiple_latent_decision_terms() -> None:
+def test_question_vocabulary_is_not_a_hidden_semantic_gate() -> None:
     env = load_environment(task="elicit-ask", question_count=1)
     plant = planted_questions_from_row(dict(env.get_eval_dataset()[0]))[0]
     no_token = candidate_for_plant(plant, question="Should this policy apply?")
     one_noun = candidate_for_plant(plant, question="Should this route apply?")
     grounded = candidate_for_plant(plant)
 
-    assert (
+    scores = [
         question_utility_score(
-            [no_token], [plant], panel_polarization=1.0, question_count=1
+            [candidate], [plant], panel_polarization=1.0, question_count=1
         )
-        == 0.0
-    )
-    assert (
-        question_utility_score(
-            [one_noun], [plant], panel_polarization=1.0, question_count=1
-        )
-        == 0.0
-    )
-    assert (
-        question_utility_score(
-            [grounded], [plant], panel_polarization=1.0, question_count=1
-        )
-        == 1.0
-    )
+        for candidate in (no_token, one_noun, grounded)
+    ]
+
+    assert scores == [1.0, 1.0, 1.0]
 
 
-def test_short_anchor_without_informative_tokens_is_not_scorable() -> None:
+def test_short_exact_anchor_is_scorable_through_structured_fields() -> None:
     plant = {
         "doc_id": "policy",
         "quote": "Is it?",
@@ -875,7 +990,7 @@ def test_short_anchor_without_informative_tokens_is_not_scorable() -> None:
             panel_polarization=1.0,
             question_count=1,
         )
-        == 0.0
+        == 1.0
     )
 
 
@@ -947,7 +1062,6 @@ def test_configured_short_yes_no_question_and_anchor_are_scorable(
     document["text"] = document["text"].replace(plant["anchor_quote"], "Pause now.")
     plant["anchor_quote"] = "Pause now."
     plant["canonical_question"] = "Should we pause now?"
-    plant["decision_terms"] = ["pause", "now"]
     data_path = tmp_path / "short-configured.jsonl"
     data_path.write_text(json.dumps(scenario, sort_keys=True) + "\n", encoding="utf-8")
     env = load_environment(task="elicit-ask", question_count=1, data_path=data_path)
@@ -1059,7 +1173,7 @@ def test_contradiction_rejects_broad_second_document_evidence() -> None:
     assert state["metrics"]["finding_type_accuracy"] == 1.0
 
 
-def test_gap_requires_semantic_missing_condition_diagnosis() -> None:
+def test_find_diagnosis_wording_is_not_compared_with_hidden_vocabulary() -> None:
     env = load_environment()
     row = dict(env.get_eval_dataset()[0])
     response = correct_response_from_row(row)
@@ -1068,7 +1182,7 @@ def test_gap_requires_semantic_missing_condition_diagnosis() -> None:
 
     state = score_row(env, row, response)
 
-    assert 0.0 < state["reward"] < 1.0
+    assert state["reward"] == 1.0
     assert state["metrics"]["finding_localization_recall"] == 1.0
     assert state["metrics"]["finding_type_accuracy"] == 1.0
 
@@ -1077,7 +1191,7 @@ def test_ask_rewards_top_k_selection_over_lower_value_issue() -> None:
     env = load_environment(task="elicit-ask", question_count=2)
     plants = planted_questions_from_row(dict(env.get_eval_dataset()[0]))
     top_k = [candidate_for_plant(plant) for plant in plants[:2]]
-    lower_value = [candidate_for_plant(plants[0]), candidate_for_plant(plants[2])]
+    lower_value = [candidate_for_plant(plants[1]), candidate_for_plant(plants[2])]
 
     top_score = question_utility_score(
         top_k, plants, panel_polarization=1.0, question_count=2
@@ -1360,6 +1474,10 @@ def test_tiny_fragment_cannot_turn_partial_output_credit_into_a_second_match() -
         "type_recall": 0.5,
         "diagnosis_recall": 0.5,
         "relation_recall": 0.5,
+        "localization_f1": 0.5,
+        "type_f1": 0.5,
+        "diagnosis_f1": 0.5,
+        "relation_f1": 0.5,
     }
 
 
@@ -1371,6 +1489,39 @@ def test_duplicate_candidate_is_counted_as_false_positive() -> None:
     assert result["true_positive"] == 1
     assert result["false_positive"] == 1
     assert result["f1"] == pytest.approx(2 / 3)
+    assert result["localization_f1"] == pytest.approx(2 / 3)
+    assert result["relation_f1"] == pytest.approx(2 / 3)
+
+
+def test_overlapping_span_hedge_cannot_improve_any_shaped_stage() -> None:
+    document_text = "Teams respond promptly when a documented safety risk is active."
+    planted = [
+        {
+            "doc_id": "policy",
+            "quote": "respond promptly when a documented safety risk is active",
+            "type": "ambiguity",
+            "document_text": document_text,
+        }
+    ]
+    exact = [dict(planted[0])]
+    hedged = [
+        dict(planted[0]),
+        {
+            **planted[0],
+            "quote": "Teams respond promptly when a documented safety risk is active",
+        },
+    ]
+
+    exact_result = match_findings(exact, planted)
+    hedged_result = match_findings(hedged, planted)
+
+    for component in (
+        "localization_f1",
+        "type_f1",
+        "diagnosis_f1",
+        "relation_f1",
+    ):
+        assert hedged_result[component] < exact_result[component]
 
 
 def test_quote_overlap_normalizes_unicode_case_and_punctuation() -> None:
@@ -1714,12 +1865,18 @@ def candidate_for_plant(
     *,
     question: str | None = None,
     quote: str | None = None,
+    yes_choice: str | None = None,
     target_stances: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     return {
         "doc_id": plant["doc_id"],
         "quote": plant["quote"] if quote is None else quote,
+        "type": plant.get("type", "ambiguity"),
         "question": plant["question"] if question is None else question,
+        "yes_choice": plant.get("yes_choice", "alternative")
+        if yes_choice is None
+        else yes_choice,
+        "related_evidence": plant.get("related_evidence"),
         "target_stances": (
             plant["target_stances"] if target_stances is None else target_stances
         ),

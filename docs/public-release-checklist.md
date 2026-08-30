@@ -33,11 +33,16 @@ answers, distinct template/layout profiles, canonical semantic fingerprints,
 and bounded cross-split lexical/TF-IDF neighbors. The grounded-quote,
 evidence-precision, contradiction-pair, gap-
 diagnosis, wrong-document, type-hedging, malformed JSON, depth, size, and
-duplicate-span tests must pass. The Elicit-ask regressions must prove that K=2
-requires selection, an exact top-K answer reaches 1.0, and one shared noun is
-insufficient. Predict must retain 200/100 rows, disjoint policy text and
-generator families, causal statement dimensions, calibration-sensitive primary
-reward, exact response key sets, and exact 1-NN/5-NN comparator values.
+duplicate-span tests must pass. Elicit regressions must prove that K=2 requires
+selection, an exact top-K answer reaches 1.0, hidden canonical wording cannot
+affect structured credit, question-polarity reversal inverts stances, all 24
+contradiction relationships resolve to authored evidence, and related evidence
+never aliases another plant or distractor. The removed 0.4 phrase decoder must
+score zero. Adding a false positive or overlapping hedge must lower shaped Find
+reward. Predict must retain 200/100 rows, disjoint policy text and generator
+families, causal statement dimensions, calibration-sensitive primary reward,
+exact response key sets, and the probability-native comparator/Brier-skill
+table.
 
 The public distributions contain evaluation answers. Never describe a public
 score as contamination-resistant. Use a private server-side split for a
@@ -76,10 +81,10 @@ resolved-version diff, and rerun `--check`. Do not hand-edit the manifests.
 
 Publish immutable shared packages first:
 
-1. commonground-score 0.3.0
-2. commonground-scenarios 0.3.0
-3. commonground-predict 0.4.1
-4. commonground-elicit 0.4.1
+1. commonground-score 0.4.0
+2. commonground-scenarios 0.4.0
+3. commonground-predict 0.5.0
+4. commonground-elicit 0.5.0
 
 The environment packages exactly pin the shared versions. Do not reuse a
 published version number.
@@ -118,14 +123,14 @@ Push the new versions privately first. On the exact private artifacts:
   differences for Elicit;
 - review the rendered README and license/provenance notice.
 
-For the 0.4.1 study, generate the attested analysis directly from the retained
+For the 0.5.0 study, generate the attested analysis directly from retained
 native-v1 traces:
 
     uv run python scripts/analyze_release_study.py \
       --root /path/to/release-study \
       --elicit-eval-split environments/commonground_elicit/commonground_elicit/data/eval_synthetic_heldout.jsonl \
       --bootstrap-samples 50000 \
-      --seed 20260828 \
+      --seed 20260830 \
       --expected-model-count 4 \
       --expected-task-count 100 \
       --expected-rollouts-per-task 5 \
@@ -133,3 +138,5 @@ native-v1 traces:
 
 Only then should an operator manually make a listing public. Publishing and
 visibility changes are never performed by the automated local release checks.
+Create an annotated source tag and formal GitHub release only after the final
+source commit, artifact hashes, and Hub identifiers are recorded.
