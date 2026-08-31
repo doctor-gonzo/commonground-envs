@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented in this file.
 
-## 0.5.0 - Unreleased
+## 0.5.0 - 2026-08-30
 
 - Replace heuristic contradiction-passage discovery with explicit authored
   document/quote relationships for all 24 Elicit template families. Regenerate
@@ -25,8 +25,13 @@ All notable changes to this project are documented in this file.
   Predict. Report normalized Brier and Brier skill relative to uniform alongside
   probability reward and accuracy.
 - Align both Hub environments and both shared packages at 0.5.0, and bump the
-  scenario schema to `urn:commonground:schema:scenario:3`. A fresh immutable
-  artifact study and new Elicit evaluation records are required before release.
+  scenario schema to `urn:commonground:schema:scenario:3`.
+- Complete the exact-artifact four-model study: 6,000 rollouts over three task
+  modes, probability-native Predict comparators, component diagnostics, and
+  paired task/template-clustered intervals. Disclose one Qwen Ask provider 502
+  followed by a successful internal retry (1/6,000); the failure reproduced
+  under serial execution and the original run was retained without score-based
+  substitution.
 
 ## 0.4.1 - 2026-08-30
 

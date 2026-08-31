@@ -1,6 +1,6 @@
 # commonground-elicit
 
-`commonground-elicit` 0.5.0 is an unreleased deterministic Verifiers candidate
+`commonground-elicit` 0.5.0 is a public deterministic Verifiers environment
 for two structured tasks over fictional stakeholder-policy scenarios:
 
 - `find`: localize and diagnose planted ambiguities, contradictions, and gaps.
@@ -11,7 +11,7 @@ The current public 0.4.1 artifact remains available for reproducibility but is
 superseded for benchmark use. Five `regional-archives-access` rows selected the
 wrong second contradiction passage, and public faction summaries used a finite
 phrase table keyed by issue type and exact target stance. Version 0.5 replaces
-both mechanisms and requires a fresh Elicit study before promotion.
+both mechanisms and has a fresh four-model exact-artifact study.
 
 This environment is associated with [Context Engine](https://contextengine.sh),
 whose organizational workflow can surface unresolved decisions and collect
@@ -122,7 +122,7 @@ remains a deliberately small ranking problem.
 
 ## Model-free comparators
 
-Exact results on the bundled 100-row 0.5 candidate evaluation split:
+Exact results on the bundled 100-row 0.5 evaluation split:
 
 | Comparator class | Task | Comparator | mean reward |
 | --- | --- | --- | ---: |
@@ -141,6 +141,15 @@ The historical 0.4 decoder is tested against a frozen old-format fixture, where
 both the exact-issue component and public-template prompt detector reach 1.0,
 and against the 0.5 corpus, where both reach 0.0. Component oracles read hidden
 issue selection and are not prompt-observable floors.
+
+Across 100 tasks and five rollouts, strict Find means range from 0.133 to 0.314
+and Ask utility from 0.110 to 0.337 across Claude Sonnet 4.5, Gemini 2.5 Flash,
+GPT-4.1, and Qwen3 30B A3B Instruct. Component metrics expose localization,
+type, diagnosis, relationship, formatting, grounding, and stance performance.
+One Qwen Ask rollout contains a disclosed provider 502 followed by one
+successful internal retry; the report retains it rather than selecting a run
+by score. See the
+[0.5.0 evaluation report](https://github.com/doctor-gonzo/commonground-envs/blob/master/docs/evaluation-report-0.5.0.md).
 
 ## Usage
 

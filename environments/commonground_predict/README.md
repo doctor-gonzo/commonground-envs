@@ -1,11 +1,11 @@
 # commonground-predict
 
-`commonground-predict` 0.5.0 is an unreleased deterministic Verifiers candidate
+`commonground-predict` 0.5.0 is a public deterministic Verifiers environment
 for probabilistic masked-vote prediction over synthetic stakeholder panels. It
 has no judge model: reward is computed locally against eight masked cells per
-snapshot. The public 0.4.1 artifact remains valid preliminary evidence; 0.5
-adds probability-native interpretation and release reporting rather than an
-emergency Predict correctness repair.
+snapshot. The 0.5 release adds probability-native interpretation and release
+reporting; historical 0.4.1 remains valid preliminary evidence for its own
+artifact.
 
 The task is best understood as **semantic-conditioned matrix completion**.
 Statement text now causally selects a policy dimension, and latent cluster
@@ -103,6 +103,13 @@ rows are diagnostics, not floors: one reads held-out labels and one replays
 hidden generator state. Calibrated matrix factorization, item-item/spectral
 models, and shuffled-text ablations remain recommended before claiming a
 distinct language contribution.
+
+In the exact-artifact 0.5 study, Claude Sonnet 4.5, Gemini 2.5 Flash, GPT-4.1,
+and Qwen3 30B A3B Instruct achieved probability rewards of 0.808, 0.773,
+0.735, and 0.700 respectively across 100 tasks and five rollouts. All means
+exceed the 0.667 uniform reference and all pairwise task-clustered intervals
+exclude zero; all remain below the strongest matrix-only comparators. See the
+[0.5.0 evaluation report](https://github.com/doctor-gonzo/commonground-envs/blob/master/docs/evaluation-report-0.5.0.md).
 
 ## Usage
 

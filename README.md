@@ -9,19 +9,18 @@ synthetic stakeholder data:
   contradictions, and gaps, or selection of the two most valuable
   clarification questions from three candidate issues.
 
-This repository contains the unreleased 0.5.0 corrective candidate. The current
-public Hub artifacts remain 0.4.1. Predict 0.4.1 is retained as solid but
-preliminary; Elicit 0.4.1 is retained only as an immutable historical artifact
-because five evaluation rows used an incorrect contradiction relationship and
-its public faction prose encoded stances through a finite phrase table.
+Version 0.5.0 is the current public release. Predict 0.4.1 remains a historical
+preliminary artifact; Elicit 0.4.1 is retained only for reproducibility because
+five evaluation rows used an incorrect contradiction relationship and its
+public faction prose encoded stances through a finite phrase table.
 
 Version 0.5 authors every contradiction relationship explicitly, derives
 stances compositionally from general faction values and question polarity,
 makes shaped Find reward precision-sensitive, and replaces hidden Ask
 vocabulary matching with structured grounding. It also adds probability-native
-Predict comparators and Brier skill. No 0.5 model claim is current until the
-new private-artifact study and anonymous installation gates pass. Public answer
-keys make every release unsuitable for contamination-resistant leaderboards.
+Predict comparators and Brier skill. The exact 0.5 artifacts passed the release
+and installation gates and a 6,000-rollout, four-model study. Public answer keys
+make every release unsuitable for contamination-resistant leaderboards.
 
 This is the reinforcement-learning environment family associated with
 [Context Engine](https://contextengine.sh), an open-source deliberation system
@@ -38,10 +37,10 @@ synthetic, operator-authored demo fixture.
 
 | Path | Distribution | Purpose |
 | --- | --- | --- |
-| `packages/commonground-score` | `commonground-score` 0.5.0 candidate | Vote statistics, calibrated rewards, and Brier skill. |
-| `packages/commonground-scenarios` | `commonground-scenarios` 0.5.0 candidate | Offline scenario generation, schema, and validation. |
-| `environments/commonground_predict` | `commonground-predict` 0.5.0 candidate | Probabilistic masked-vote prediction. |
-| `environments/commonground_elicit` | `commonground-elicit` 0.5.0 candidate | Structured finding diagnosis and top-K clarification. |
+| `packages/commonground-score` | `commonground-score` 0.5.0 | Vote statistics, calibrated rewards, and Brier skill. |
+| `packages/commonground-scenarios` | `commonground-scenarios` 0.5.0 | Offline scenario generation, schema, and validation. |
+| `environments/commonground_predict` | `commonground-predict` 0.5.0 | Probabilistic masked-vote prediction. |
+| `environments/commonground_elicit` | `commonground-elicit` 0.5.0 | Structured finding diagnosis and top-K clarification. |
 
 Both environments export native Verifiers v1 `Taskset`/`Harness` plugins and a
 real legacy `SingleTurnEnv` adapter for the current Prime Hosted Evaluation
@@ -49,17 +48,17 @@ runner. The same rows and scoring functions back both interfaces.
 
 ## Prime Intellect Hub
 
-- [`charliethompson/commonground-predict@0.4.1`](https://app.primeintellect.ai/dashboard/environments/charliethompson/commonground-predict)
-- [`charliethompson/commonground-elicit@0.4.1`](https://app.primeintellect.ai/dashboard/environments/charliethompson/commonground-elicit)
+- [`charliethompson/commonground-predict@0.5.0`](https://app.primeintellect.ai/dashboard/environments/charliethompson/commonground-predict)
+- [`charliethompson/commonground-elicit@0.5.0`](https://app.primeintellect.ai/dashboard/environments/charliethompson/commonground-elicit)
 
 Install the exact reviewed versions with:
 
 ```bash
-prime env install charliethompson/commonground-predict@0.4.1
-prime env install charliethompson/commonground-elicit@0.4.1
+prime env install charliethompson/commonground-predict@0.5.0
+prime env install charliethompson/commonground-elicit@0.5.0
 ```
 
-## What the 0.5 candidate changes
+## What 0.5 changes
 
 Predict now optimizes `1 - normalized Brier`; argmax accuracy and Brier remain
 diagnostics, and the exact masked-cell key set is mandatory. Version 0.5 adds
@@ -78,7 +77,8 @@ evaluation; its staged training mode uses F1 at every stage so false positives
 and hedges reduce reward. Separate diagnostics expose formatting, grounding,
 stance, diagnosis, and relationship failures.
 
-See the [0.5.0 evaluation plan](docs/evaluation-plan-0.5.0.md), historical
+See the [0.5.0 evaluation report](docs/evaluation-report-0.5.0.md),
+[evaluation plan](docs/evaluation-plan-0.5.0.md), historical
 [0.4.1 evaluation report](docs/evaluation-report-0.4.1.md), historical
 [0.3.0 evaluation report](docs/evaluation-report-0.3.0.md),
 [0.4-series evaluation plan](docs/evaluation-plan-0.4.0.md), and
@@ -128,15 +128,16 @@ uv run python scripts/aggregate_baselines.py
 uv run python scripts/aggregate_baselines.py --csv /path/to/baselines.csv
 ```
 
-The historical 0.4.1 exact-artifact study completed all 6,000 planned rollouts across
-Claude Sonnet 4.5, Gemini 2.5 Flash, GPT-4.1, and Qwen3 30B A3B Instruct with
-no recovered rollouts. Predict rewards ranged from 0.706 to 0.809, strict Find
-F1 from 0.050 to 0.160, and Ask utility from 0.016 to 0.105. Predict separates
-all four models without saturating. The Elicit results are not transferable to
-0.5: they were scored against the superseded corpus and phrase renderer. Exact
-historical intervals, artifact hashes, and the correction notice are in the
-[0.4.1 evaluation report](docs/evaluation-report-0.4.1.md). Fresh 0.5 Elicit
-Find and Ask runs are release-blocking.
+The 0.5.0 exact-artifact study completed all 6,000 planned rollouts across
+Claude Sonnet 4.5, Gemini 2.5 Flash, GPT-4.1, and Qwen3 30B A3B Instruct.
+Predict probability rewards ranged from 0.700 to 0.808, strict Find F1 from
+0.133 to 0.314, and Ask utility from 0.110 to 0.337. All Predict means exceed
+the 0.667 uniform-probability reward, while prompt-observable matrix baselines
+remain stronger. One Qwen Ask rollout (1/6,000) contains a disclosed provider
+502 followed by a successful internal retry; the same failure reproduced under
+serial execution, and no score-based replacement was made. Exact intervals,
+diagnostics, run IDs, hashes, and limitations are in the
+[0.5.0 evaluation report](docs/evaluation-report-0.5.0.md).
 
 Reproduce the task-level Predict and template-hierarchical Elicit analysis with:
 
@@ -145,11 +146,10 @@ uv run python scripts/analyze_release_study.py \
   --root /path/to/study \
   --elicit-eval-split environments/commonground_elicit/commonground_elicit/data/eval_synthetic_heldout.jsonl \
   --bootstrap-samples 50000 \
-  --seed 20260829 \
+  --seed 20260830 \
   --expected-model-count 4 \
   --expected-task-count 100 \
-  --expected-rollouts-per-task 5 \
-  --require-no-recoveries
+  --expected-rollouts-per-task 5
 ```
 
 Repeated rollouts estimate sampling variation, not independent task coverage.

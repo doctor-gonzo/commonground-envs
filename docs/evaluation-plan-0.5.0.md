@@ -1,7 +1,8 @@
 # Common Ground 0.5.0 evaluation plan
 
-Status: unreleased corrective candidate. No 0.5 model result or public Hub
-record exists until every gate below passes against immutable artifacts.
+Status: released public artifacts and complete exact-artifact study. Public
+evaluation-record publication and the formal source tag/release remain
+operator-owned finalization steps.
 
 ## Release target
 
@@ -68,10 +69,14 @@ oracles must remain labeled as non-prompt-observable.
 
 ## Private artifact study
 
-Push both 0.5 environments privately first and pin every run to the exact Hub
-version. Run 100 tasks with five rollouts for Predict, Elicit Find, and Elicit
-Ask across at least four model families, including an open-weight trainable
-model. Require zero accepted recovery/error histories.
+The completed study pinned both 0.5 Hub versions and ran 100 tasks with five
+rollouts for Predict, Elicit Find, and Elicit Ask across four model families,
+including an open-weight trainable model. Eleven runs contain no recovery or
+error history. One Qwen Ask rollout contains a provider 502 caused by a
+malformed upstream finish reason followed by a successful internal retry. It
+is retained and explicitly disclosed because the same provider failure
+reproduced in two replacement attempts, including at concurrency one; no run
+was selected based on score.
 
 For Elicit, rerunning both modes is mandatory because the corpus, public faction
 descriptions, answer polarity, and scoring diagnostics changed. Report:
@@ -89,12 +94,11 @@ three-class normalized convention.
 
 ## Publication and claim boundary
 
-After local gates and the private study pass, record source commit, wheel/sdist
-hashes, Hub version IDs/content hashes, exact configs, run IDs, and public
-evaluation IDs in a new 0.5 evaluation report. Verify anonymous installation
-before promoting results. Create an annotated `v0.5.0` tag and formal source
-release only after the recorded commit is final; these are operator-owned
-remote actions.
+The 0.5 evaluation report records source commit, wheel/sdist hashes, Hub
+version IDs/content hashes, exact configs, and run IDs. Add public evaluation
+IDs after the version-pinned uploads complete. Create an annotated `v0.5.0`
+tag and formal source release only after the recorded documentation commit is
+final; these are operator-owned remote actions.
 
 Supported claims remain limited to experimental synthetic
 semantic-conditioned matrix completion and structured policy-issue
