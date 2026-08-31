@@ -19,8 +19,9 @@ stances compositionally from general faction values and question polarity,
 makes shaped Find reward precision-sensitive, and replaces hidden Ask
 vocabulary matching with structured grounding. It also adds probability-native
 Predict comparators and Brier skill. The exact 0.5 artifacts passed the release
-and installation gates and a 6,000-rollout, four-model study. Public answer keys
-make every release unsuitable for contamination-resistant leaderboards.
+and installation gates, a 6,000-rollout four-model study, and publication of 12
+version-pinned evaluation records. Public answer keys make every release
+unsuitable for contamination-resistant leaderboards.
 
 This is the reinforcement-learning environment family associated with
 [Context Engine](https://contextengine.sh), an open-source deliberation system

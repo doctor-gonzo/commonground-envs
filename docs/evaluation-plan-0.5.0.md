@@ -1,8 +1,8 @@
 # Common Ground 0.5.0 evaluation plan
 
-Status: released public artifacts and complete exact-artifact study. Public
-evaluation-record publication and the formal source tag/release remain
-operator-owned finalization steps.
+Status: released public artifacts, complete exact-artifact study, and 12
+version-pinned public evaluation records. The formal source tag/release remains
+an operator-owned finalization step.
 
 ## Release target
 
@@ -95,10 +95,10 @@ three-class normalized convention.
 ## Publication and claim boundary
 
 The 0.5 evaluation report records source commit, wheel/sdist hashes, Hub
-version IDs/content hashes, exact configs, and run IDs. Add public evaluation
-IDs after the version-pinned uploads complete. Create an annotated `v0.5.0`
-tag and formal source release only after the recorded documentation commit is
-final; these are operator-owned remote actions.
+version IDs/content hashes, exact configs, run IDs, and all 12 public
+evaluation IDs. Create an annotated `v0.5.0` tag and formal source release only
+after the recorded documentation commit is final; these are operator-owned
+remote actions.
 
 Supported claims remain limited to experimental synthetic
 semantic-conditioned matrix completion and structured policy-issue

@@ -32,6 +32,9 @@ All notable changes to this project are documented in this file.
   followed by a successful internal retry (1/6,000); the failure reproduced
   under serial execution and the original run was retained without score-based
   substitution.
+- Publish and read back 12 version-pinned Prime evaluation records, each with
+  500 samples and exact artifact provenance; the Qwen Ask record reports the
+  single disclosed recovery.
 
 ## 0.4.1 - 2026-08-30
 

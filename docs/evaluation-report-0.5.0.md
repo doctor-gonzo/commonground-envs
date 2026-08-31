@@ -1,8 +1,8 @@
 # Common Ground 0.5.0 evaluation report
 
-Status: exact public Hub artifacts, shared PyPI packages, and the full
-exact-artifact model study are complete. Twelve version-pinned public Prime
-evaluation records are the remaining evidence-publication step.
+Status: exact public Hub artifacts, shared PyPI packages, the full
+exact-artifact model study, and all 12 version-pinned public Prime evaluation
+records are complete.
 
 Version 0.5.0 is an immutable correction to Elicit 0.4.1. It replaces inferred
 contradiction links with authored relationships, replaces the issue/stance
@@ -130,11 +130,27 @@ learning benefit or real organizational information gain.
 
 ## Public evaluation records
 
-The 12 retained runs are ready for version-pinned public Prime evaluation
-records. This section intentionally remains pending until each record has been
-uploaded, read back, and checked for the exact environment/version IDs, 500
-samples, metrics, source commit, and disclosed recovery count. Historical
-0.4.1 records remain attached only to that superseded artifact.
+Each retained run was published as a version-pinned Prime evaluation and then
+read back. Every record contains the exact environment/version IDs, source
+commit, model, task mode, and 500 samples. Eleven records report zero recovered
+rollouts; Qwen Ask reports the one disclosed recovery.
+
+| Task | Model | Public evaluation |
+| --- | --- | --- |
+| Predict | Claude Sonnet 4.5 | [`h53h3jh5xqrxcefk120zg6a3`](https://app.primeintellect.ai/dashboard/evaluations/h53h3jh5xqrxcefk120zg6a3) |
+| Predict | Gemini 2.5 Flash | [`a64zgxyplf0bdjctvwsthi4p`](https://app.primeintellect.ai/dashboard/evaluations/a64zgxyplf0bdjctvwsthi4p) |
+| Predict | GPT-4.1 | [`w9rqq2hrgcb3robo5wjgq0jo`](https://app.primeintellect.ai/dashboard/evaluations/w9rqq2hrgcb3robo5wjgq0jo) |
+| Predict | Qwen3 30B A3B Instruct | [`dcjocb7xn9bu3v7ig1jydx50`](https://app.primeintellect.ai/dashboard/evaluations/dcjocb7xn9bu3v7ig1jydx50) |
+| Find | Claude Sonnet 4.5 | [`pbcjlnnn50e3qqy06eo5t9zz`](https://app.primeintellect.ai/dashboard/evaluations/pbcjlnnn50e3qqy06eo5t9zz) |
+| Find | Gemini 2.5 Flash | [`jf0zg6v2ijemhl6f0oxh7dyi`](https://app.primeintellect.ai/dashboard/evaluations/jf0zg6v2ijemhl6f0oxh7dyi) |
+| Find | GPT-4.1 | [`l2cusquqqote65c9g2rjaw99`](https://app.primeintellect.ai/dashboard/evaluations/l2cusquqqote65c9g2rjaw99) |
+| Find | Qwen3 30B A3B Instruct | [`uvvu8qpdbejzmvhpddo5p0b0`](https://app.primeintellect.ai/dashboard/evaluations/uvvu8qpdbejzmvhpddo5p0b0) |
+| Ask | Claude Sonnet 4.5 | [`t1jdpbdxsf9pogpxv3be7jh8`](https://app.primeintellect.ai/dashboard/evaluations/t1jdpbdxsf9pogpxv3be7jh8) |
+| Ask | Gemini 2.5 Flash | [`i41tu5avi39g9lujkirslpas`](https://app.primeintellect.ai/dashboard/evaluations/i41tu5avi39g9lujkirslpas) |
+| Ask | GPT-4.1 | [`bynvikb7anxgztz9uhdx51oj`](https://app.primeintellect.ai/dashboard/evaluations/bynvikb7anxgztz9uhdx51oj) |
+| Ask | Qwen3 30B A3B Instruct | [`dwdfe1onowyzk5pd22ow8rpe`](https://app.primeintellect.ai/dashboard/evaluations/dwdfe1onowyzk5pd22ow8rpe) |
+
+Historical 0.4.1 records remain attached only to that superseded artifact.
 
 ## Integrity and operational evidence
 
@@ -179,4 +195,4 @@ private generator; Predict also needs text/matrix ablations.
 | `commonground-elicit` 0.5.0 wheel/Hub content SHA-256 | `fd7cac8b92daaeb59bbc2c6f707a62556f1dc9c07cdfc64e0c614cb213443df8` / `8ff9a364be53cfec2dabe785eafe1e5d177365f4a1882771446b65867ab69c8f` |
 | Hub version IDs | Predict `kcsr5z1a9rq4ywj7mhswa5zh`; Elicit `sos42d21n3sr7p3zyph66wiz` |
 | Native evaluation run IDs | 12 run IDs in the exact-artifact model-study table |
-| Public evaluation IDs | Pending exact-record publication and read-back |
+| Public evaluation IDs | 12 version-pinned records listed above |
