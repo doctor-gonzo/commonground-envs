@@ -858,12 +858,15 @@ def analyze_runs(
         )
         if cluster_labels:
             missing = sorted(set(task_ids) - set(cluster_labels))
-            extra = sorted(set(cluster_labels) - set(task_ids))
-            if missing or extra:
+            if missing:
                 raise aggregate.InvalidRunError(
                     f"{environment}: task cluster labels do not match tasks "
-                    f"(missing={missing[:5]}, extra={extra[:5]})"
+                    f"(missing={missing[:5]})"
                 )
+            # A split-wide map legitimately contains unused rows when a pilot
+            # evaluates a deterministic task subset. Restrict resampling to
+            # the observed task roster after proving that every task is mapped.
+            cluster_labels = {task_id: cluster_labels[task_id] for task_id in task_ids}
         else:
             cluster_labels = {task_id: f"task:{task_id}" for task_id in task_ids}
         positions_by_cluster: dict[str, list[int]] = defaultdict(list)

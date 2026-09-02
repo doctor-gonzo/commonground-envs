@@ -703,6 +703,48 @@ def test_elicit_hierarchical_bootstrap_resamples_templates_then_variants() -> No
     assert hierarchical_diagnostic.ci_high > task_diagnostic.ci_high
 
 
+def test_elicit_subset_accepts_split_wide_cluster_map_but_requires_task_labels() -> (
+    None
+):
+    task_ids = (0, 0, 1, 1)
+    run = complete_run(
+        model="model/a",
+        rewards=(1.0, 1.0, 0.0, 0.0),
+        task_ids=task_ids,
+        environment="commonground-elicit:find",
+    )
+
+    study = analysis_module.analyze_runs(
+        [run],
+        bootstrap_samples=1_000,
+        seed=17,
+        task_cluster_labels={
+            "commonground-elicit:find": {
+                0: "template-a",
+                1: "template-a",
+                2: "unused-template-b",
+            }
+        },
+    )
+
+    [summary] = study.summaries
+    assert summary.cluster_count == 1
+    assert summary.resampling_unit == "template then variant"
+
+    with pytest.raises(aggregate.InvalidRunError, match=r"missing=\[1\]"):
+        analysis_module.analyze_runs(
+            [run],
+            bootstrap_samples=1_000,
+            seed=17,
+            task_cluster_labels={
+                "commonground-elicit:find": {
+                    0: "template-a",
+                    2: "unused-template-b",
+                }
+            },
+        )
+
+
 def test_template_cluster_loader_uses_row_order(tmp_path: Path) -> None:
     split = tmp_path / "eval.jsonl"
     split.write_text(

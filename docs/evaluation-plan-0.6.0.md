@@ -87,7 +87,17 @@ the raw-JSON envelope and Elicit's auxiliary-first yes/no surface rule; JSON
 decoding only prevents Markdown/prose wrappers and does not supply answers.
 The baseline aggregator accepts both native trace directories and the nested
 `evals/<environment>/<run>` saved-result layout produced when `vf-eval` is
-given a wrapper output directory.
+given a wrapper output directory. It also canonicalizes `vf-eval`'s legacy
+`question_format_validity` rubric name to the native/reporting name
+`question_format_valid`; this is a reporting-only alias for the same recorded
+value. For deterministic subset pilots, the hierarchical analyzer accepts the
+full evaluation split's template map, requires a label for every evaluated
+task, and ignores labels for unevaluated rows. Predict views saved by
+`vf-eval` are paired only when their recorded endpoint, sampling, package/source
+versions, non-treatment task arguments, task roster, and answer digests match;
+`prompt_mode` is the sole excluded treatment field. Saved-result completion
+order is intentionally excluded because concurrent `vf-eval` writes can finish
+in a different order; statistical pairing is by task ID.
 
 Proceed to the complete study only if:
 

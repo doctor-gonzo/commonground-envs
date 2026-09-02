@@ -348,6 +348,141 @@ def test_nested_vf_eval_saved_results_include_current_find_diagnostics(
     assert summary.metrics["finding_f1"] == (0.5, 0.25)
 
 
+def test_nested_vf_eval_canonicalizes_legacy_ask_format_metric(
+    tmp_path: Path,
+) -> None:
+    run_dir = (
+        tmp_path
+        / "outputs"
+        / "ask--gpt41"
+        / "run"
+        / "evals"
+        / "commonground-elicit--openai--gpt-4.1"
+        / "0a062ed9"
+    )
+    run_dir.mkdir(parents=True)
+    metadata = {
+        "env_id": "commonground-elicit",
+        "env_args": {"task": "elicit-ask"},
+        "model": "openai/gpt-4.1",
+        "num_examples": 1,
+        "rollouts_per_example": 1,
+        "version_info": {
+            "vf_version": "0.3.0",
+            "env_version": "0.6.0",
+        },
+    }
+    (run_dir / "metadata.json").write_text(
+        json.dumps(metadata) + "\n", encoding="utf-8"
+    )
+    row = {
+        "example_id": 0,
+        "reward": 0.5,
+        "metrics": {
+            "question_utility": 0.5,
+            "question_format_validity": 1.0,
+            "question_top1_selection_accuracy": 0.0,
+            "question_grounding_recall": 1.0,
+            "question_grounded_stance_recall": 0.5,
+            "question_evidence_match_recall": 1.0,
+            "question_evidence_matched_stance_accuracy": 0.5,
+            "num_turns": 1.0,
+        },
+        "info": {"task_label": "elicit-ask"},
+        "is_completed": True,
+        "is_truncated": False,
+        "error": None,
+    }
+    (run_dir / "results.jsonl").write_text(json.dumps(row) + "\n", encoding="utf-8")
+
+    [summary] = aggregate.load_summaries(tmp_path)
+
+    assert summary.metrics["question_format_valid"] == (1.0, 0.0)
+    assert "question_format_validity" not in summary.metrics
+
+    row["metrics"]["question_format_valid"] = 1.0
+    (run_dir / "results.jsonl").write_text(json.dumps(row) + "\n", encoding="utf-8")
+    with pytest.raises(aggregate.InvalidRunError, match="duplicate canonical signal"):
+        aggregate.load_summaries(tmp_path)
+
+
+def test_nested_vf_eval_predict_ablations_have_stable_saved_provenance(
+    tmp_path: Path,
+) -> None:
+    result_paths: list[Path] = []
+    for prompt_mode in aggregate.PREDICT_PROMPT_MODES:
+        run_dir = (
+            tmp_path
+            / "outputs"
+            / f"predict-{prompt_mode}--gpt41"
+            / "run"
+            / "evals"
+            / "commonground-predict--openai--gpt-4.1"
+            / prompt_mode
+        )
+        run_dir.mkdir(parents=True)
+        metadata = {
+            "env_id": "commonground-predict",
+            "env_args": {
+                "data_path": "/fixture/selected-predict-tasks.jsonl",
+                "prompt_mode": prompt_mode,
+                "split": "eval",
+            },
+            "model": "openai/gpt-4.1",
+            "num_examples": 1,
+            "rollouts_per_example": 1,
+            "base_url": "https://fixture.invalid/v1",
+            "sampling_args": {
+                "max_tokens": 256,
+                "response_format": {"type": "json_object"},
+                "temperature": 0.2,
+            },
+            "shuffle": False,
+            "shuffle_seed": None,
+            "version_info": {
+                "env_commit": "a" * 40,
+                "env_version": "0.6.0",
+                "vf_version": "0.3.0",
+            },
+        }
+        (run_dir / "metadata.json").write_text(
+            json.dumps(metadata) + "\n", encoding="utf-8"
+        )
+        row = {
+            "example_id": 0,
+            "answer": json.dumps({"0,0": 1}),
+            "reward": 0.75,
+            "metrics": {
+                "probability_reward": 0.75,
+                "vote_accuracy": 0.5,
+                "brier": 0.25,
+                "original_snapshot_visible_prior_brier": 1 / 3,
+                "num_turns": 1.0,
+            },
+            "info": {"prompt_mode": prompt_mode},
+            "is_completed": True,
+            "is_truncated": False,
+            "error": None,
+        }
+        result_path = run_dir / "results.jsonl"
+        result_path.write_text(json.dumps(row) + "\n", encoding="utf-8")
+        result_paths.append(result_path)
+
+    runs = [aggregate.load_complete_run(path) for path in result_paths]
+
+    assert len({run.comparison_signature for run in runs}) == 1
+    assert all(run.comparison_signature is not None for run in runs)
+    assert all(len(run.task_answer_digests) == 1 for run in runs)
+    assert all(run.raw_reward_scores["probability_reward"] == (0.75,) for run in runs)
+    assert all(run.raw_reward_weights["probability_reward"] == (1.0,) for run in runs)
+
+    changed_row = json.loads(result_paths[-1].read_text(encoding="utf-8"))
+    changed_row["answer"] = json.dumps({"0,0": -1})
+    result_paths[-1].write_text(json.dumps(changed_row) + "\n", encoding="utf-8")
+    changed = aggregate.load_complete_run(result_paths[-1])
+    assert changed.comparison_signature != runs[-1].comparison_signature
+
+
 def test_snapshot_prior_skill_uses_pooled_losses_and_can_be_negative(
     tmp_path: Path,
 ) -> None:

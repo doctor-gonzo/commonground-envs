@@ -50,6 +50,11 @@ METRIC_NAMES = (
     # Historical 0.5.x traces used this name for end-to-end grounded recall.
     "question_stance_accuracy",
 )
+LEGACY_METRIC_ALIASES = {
+    # ``vf-eval`` names zero-weight rubric diagnostics after their Python
+    # functions. The native task API and release reports use this shorter key.
+    "question_format_validity": "question_format_valid",
+}
 ELICIT_TASK_MODES = frozenset({"find", "elicit-ask"})
 PREDICT_PROMPT_MODES = ("full", "matrix-only", "text-only", "shuffled-text")
 PREDICT_ABLATION_SIGNATURE_SCHEMA = "commonground-predict-ablation-v1"
@@ -297,6 +302,19 @@ def load_legacy_run(result_path: Path) -> CompleteRun:
     rollouts_per_example = require_positive_int(
         metadata, "rollouts_per_example", metadata_path
     )
+    legacy_ablation_provenance = (
+        require_legacy_predict_ablation_provenance(
+            metadata,
+            base_environment=base_environment,
+            env_args=env_args,
+            model=model,
+            num_examples=num_examples,
+            rollouts_per_example=rollouts_per_example,
+            metadata_path=metadata_path,
+        )
+        if prompt_mode_explicit
+        else None
+    )
     expected_count = num_examples * rollouts_per_example
 
     outputs = load_json_lines(result_path)
@@ -309,8 +327,11 @@ def load_legacy_run(result_path: Path) -> CompleteRun:
     counts_by_example: dict[int, int] = {}
     task_ids: list[int] = []
     rewards: list[float] = []
+    raw_reward_scores: dict[str, list[float]] = {}
+    raw_reward_weights: dict[str, list[float]] = {}
     metric_values: dict[str, list[float]] = {}
     expected_metric_keys: tuple[str, ...] | None = None
+    task_answer_digests: dict[int, str] = {}
     for line_number, output in enumerate(outputs, start=1):
         if output.get("is_completed") is not True or output.get("error") is not None:
             raise InvalidRunError(
@@ -337,6 +358,17 @@ def load_legacy_run(result_path: Path) -> CompleteRun:
             path=result_path,
             line_number=line_number,
         )
+        if prompt_mode_explicit:
+            answer_digest = legacy_task_answer_digest(
+                output, path=result_path, line_number=line_number
+            )
+            previous_answer_digest = task_answer_digests.setdefault(
+                example_id, answer_digest
+            )
+            if previous_answer_digest != answer_digest:
+                raise InvalidRunError(
+                    f"{result_path}:{line_number}: task answer changed across rollouts"
+                )
 
         raw_metrics = output.get("metrics")
         if not isinstance(raw_metrics, Mapping):
@@ -346,7 +378,41 @@ def load_legacy_run(result_path: Path) -> CompleteRun:
         raw_metric_keys = validated_mapping_keys(
             raw_metrics, "metrics", result_path, line_number
         )
-        known_metric_keys = tuple(name for name in METRIC_NAMES if name in raw_metrics)
+        if prompt_mode_explicit:
+            probability_reward = require_number(
+                raw_metrics, "probability_reward", result_path, line_number
+            )
+            validate_metric_domain(
+                "probability_reward",
+                probability_reward,
+                result_path,
+                line_number,
+            )
+            if not math.isclose(
+                reward, probability_reward, rel_tol=1e-12, abs_tol=1e-12
+            ):
+                raise InvalidRunError(
+                    f"{result_path}:{line_number}: weighted reward total does not "
+                    "match probability_reward"
+                )
+            raw_reward_scores.setdefault("probability_reward", []).append(
+                probability_reward
+            )
+            raw_reward_weights.setdefault("probability_reward", []).append(1.0)
+        known_metric_sources: dict[str, str] = {}
+        for raw_metric_name in raw_metric_keys:
+            canonical_name = LEGACY_METRIC_ALIASES.get(raw_metric_name, raw_metric_name)
+            if canonical_name not in METRIC_NAMES:
+                continue
+            if canonical_name in known_metric_sources:
+                raise InvalidRunError(
+                    f"{result_path}:{line_number}: metrics contain duplicate "
+                    f"canonical signal {canonical_name!r}"
+                )
+            known_metric_sources[canonical_name] = raw_metric_name
+        known_metric_keys = tuple(
+            name for name in METRIC_NAMES if name in known_metric_sources
+        )
         if known_metric_keys != expected_legacy_signals:
             raise InvalidRunError(
                 f"{result_path}:{line_number}: expected Common Ground metrics "
@@ -362,11 +428,12 @@ def load_legacy_run(result_path: Path) -> CompleteRun:
             metric_value = require_number(
                 raw_metrics, metric_name, result_path, line_number
             )
-            if metric_name in METRIC_NAMES:
+            canonical_name = LEGACY_METRIC_ALIASES.get(metric_name, metric_name)
+            if canonical_name in METRIC_NAMES:
                 validate_metric_domain(
-                    metric_name, metric_value, result_path, line_number
+                    canonical_name, metric_value, result_path, line_number
                 )
-                metric_values.setdefault(metric_name, []).append(metric_value)
+                metric_values.setdefault(canonical_name, []).append(metric_value)
 
     validate_rollout_distribution(
         counts_by_example,
@@ -374,6 +441,31 @@ def load_legacy_run(result_path: Path) -> CompleteRun:
         rollouts_per_example=rollouts_per_example,
         result_path=result_path,
     )
+    comparison_signature: str | None = None
+    if prompt_mode_explicit:
+        if legacy_ablation_provenance is None:  # pragma: no cover - invariant
+            raise InvalidRunError(
+                f"{result_path}: declared Predict ablation lacks saved provenance"
+            )
+        task_roster = [
+            {
+                "task_id": task_id,
+                "rollouts": counts_by_example[task_id],
+                "answer_sha256": task_answer_digests[task_id],
+            }
+            for task_id in sorted(counts_by_example)
+        ]
+        comparison_signature = stable_json_digest(
+            {
+                **legacy_ablation_provenance,
+                "tasks": task_roster,
+                "reward_contract": {
+                    "name": "probability_reward",
+                    "weight": 1.0,
+                },
+            },
+            f"{result_path}: Predict ablation comparison provenance",
+        )
 
     return CompleteRun(
         model=model,
@@ -385,6 +477,14 @@ def load_legacy_run(result_path: Path) -> CompleteRun:
         rewards=tuple(rewards),
         metrics={name: tuple(values) for name, values in metric_values.items()},
         prompt_mode=prompt_mode,
+        comparison_signature=comparison_signature,
+        task_answer_digests=tuple(sorted(task_answer_digests.items())),
+        raw_reward_scores={
+            name: tuple(values) for name, values in raw_reward_scores.items()
+        },
+        raw_reward_weights={
+            name: tuple(values) for name, values in raw_reward_weights.items()
+        },
     )
 
 
@@ -923,6 +1023,83 @@ def require_predict_ablation_config_provenance(
         "shuffle": config.get("shuffle"),
         "taskset": taskset_without_prompt_mode,
     }
+
+
+def require_legacy_predict_ablation_provenance(
+    metadata: Mapping[str, Any],
+    *,
+    base_environment: str,
+    env_args: Any,
+    model: str,
+    num_examples: int,
+    rollouts_per_example: int,
+    metadata_path: Path,
+) -> dict[str, Any]:
+    """Return comparable provenance saved by the legacy ``vf-eval`` runner."""
+
+    if not isinstance(env_args, Mapping):
+        raise InvalidRunError(
+            f"{metadata_path}: declared Predict ablations require env_args"
+        )
+    base_url = require_nonempty_string(metadata, "base_url", metadata_path)
+    sampling = metadata.get("sampling_args")
+    if not isinstance(sampling, Mapping):
+        raise InvalidRunError(
+            f"{metadata_path}: declared Predict ablations require sampling_args"
+        )
+    version_info = metadata.get("version_info")
+    if not isinstance(version_info, Mapping) or not version_info:
+        raise InvalidRunError(
+            f"{metadata_path}: declared Predict ablations require version_info"
+        )
+    if metadata.get("shuffle") is not False:
+        raise InvalidRunError(
+            f"{metadata_path}: declared Predict ablations require shuffle=false"
+        )
+    env_args_without_prompt_mode = {
+        key: value for key, value in env_args.items() if key != "prompt_mode"
+    }
+    return {
+        "schema": PREDICT_ABLATION_SIGNATURE_SCHEMA,
+        "runner": "vf-eval-saved-results",
+        "environment": base_environment,
+        "model": model,
+        "client": {"base_url": base_url},
+        "sampling": dict(sampling),
+        "num_tasks": num_examples,
+        "num_rollouts": rollouts_per_example,
+        "shuffle": False,
+        "shuffle_seed": metadata.get("shuffle_seed"),
+        "taskset": env_args_without_prompt_mode,
+        "version_info": dict(version_info),
+    }
+
+
+def legacy_task_answer_digest(
+    output: Mapping[str, Any], *, path: Path, line_number: int
+) -> str:
+    """Hash one ``vf-eval`` answer after decoding its JSON-string envelope."""
+
+    if "answer" not in output:
+        raise InvalidRunError(
+            f"{path}:{line_number}: declared Predict ablation result is missing "
+            "the task answer"
+        )
+    answer = output["answer"]
+    if isinstance(answer, str):
+        try:
+            answer = strict_json_loads(answer)
+        except (json.JSONDecodeError, ValueError) as error:
+            raise InvalidRunError(
+                f"{path}:{line_number}: declared Predict ablation answer is not "
+                f"valid JSON: {error}"
+            ) from error
+    if not isinstance(answer, Mapping):
+        raise InvalidRunError(
+            f"{path}:{line_number}: declared Predict ablation answer must decode "
+            "to an object"
+        )
+    return stable_json_digest(answer, f"{path}:{line_number}: task answer")
 
 
 def require_predict_ablation_trace_provenance(
