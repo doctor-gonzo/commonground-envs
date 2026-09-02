@@ -1204,7 +1204,7 @@ def render_markdown(analysis: StudyAnalysis) -> str:
                 "contributes its mean across repeated rollouts, and paired "
                 "comparisons reuse the same resample. Diagnostic intervals use "
                 "the same task/template resampling as reward. Predict prompt "
-                "ablations require matching native comparison signatures and "
+                "ablations require matching saved comparison signatures and "
                 "compare raw named probability_reward scores for each mode with "
                 "full on the same task-answer roster; their percentile intervals "
                 "are exploratory and are not multiplicity-adjusted. "
@@ -1255,8 +1255,9 @@ def write_json(path: Path, analysis: StudyAnalysis) -> None:
                 "paired task percentile bootstrap of full minus prompt mode"
             ),
             "prompt_ablation_provenance": (
-                "matching native comparison signature over model, client, "
-                "sampling, concurrency, task answers, and reward contract"
+                "matching comparison signature over recorded model, client, "
+                "sampling, taskset, task answers, and reward contract; native "
+                "traces additionally bind concurrency and call settings"
             ),
             "brier_skill_references": {
                 "brier_skill_vs_uniform": (

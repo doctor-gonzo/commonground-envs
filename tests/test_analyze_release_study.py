@@ -250,7 +250,7 @@ def test_predict_prompt_ablations_are_preserved_and_compared_with_full(
         ),
     }
     assert payload["method"]["prompt_ablation_provenance"].startswith(
-        "matching native comparison signature"
+        "matching comparison signature"
     )
     assert {item["comparison_signature"] for item in payload["prompt_ablations"]} == {
         runs[0].comparison_signature
