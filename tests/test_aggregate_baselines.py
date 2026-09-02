@@ -278,6 +278,76 @@ def test_native_v1_run_aggregates_weighted_rewards_and_named_signals(
     assert run.comparison_signature is None
 
 
+def test_nested_vf_eval_saved_results_include_current_find_diagnostics(
+    tmp_path: Path,
+) -> None:
+    run_dir = (
+        tmp_path
+        / "outputs"
+        / "find--gpt41"
+        / "run"
+        / "evals"
+        / "commonground-elicit--openai--gpt-4.1"
+        / "c51ffbc1"
+    )
+    run_dir.mkdir(parents=True)
+    metadata = {
+        "env_id": "commonground-elicit",
+        "env_args": {"task": "find"},
+        "model": "openai/gpt-4.1",
+        "num_examples": 1,
+        "rollouts_per_example": 2,
+        "version_info": {
+            "vf_version": "0.3.0",
+            "env_version": "0.6.0",
+        },
+    }
+    (run_dir / "metadata.json").write_text(
+        json.dumps(metadata) + "\n", encoding="utf-8"
+    )
+    rows = []
+    for score in (0.25, 0.75):
+        rows.append(
+            {
+                "example_id": 0,
+                "reward": score,
+                "metrics": {
+                    "finding_f1": score,
+                    "finding_localization_recall": score,
+                    "finding_type_accuracy": score,
+                    "finding_diagnosis_recall": score,
+                    "finding_relation_recall": score,
+                    "question_utility": 0.0,
+                    "num_turns": 1.0,
+                },
+                "info": {"task_label": "find"},
+                "is_completed": True,
+                "is_truncated": False,
+                "error": None,
+            }
+        )
+    (run_dir / "results.jsonl").write_text(
+        "".join(f"{json.dumps(row)}\n" for row in rows), encoding="utf-8"
+    )
+
+    [summary] = aggregate.load_summaries(tmp_path)
+
+    assert summary.model == "openai/gpt-4.1"
+    assert summary.environment == "commonground-elicit:find"
+    assert summary.run_id == "c51ffbc1"
+    assert summary.rollout_count == 2
+    assert summary.reward_mean == 0.5
+    assert set(summary.metrics) == {
+        "finding_diagnosis_recall",
+        "finding_f1",
+        "finding_localization_recall",
+        "finding_relation_recall",
+        "finding_type_accuracy",
+        "question_utility",
+    }
+    assert summary.metrics["finding_f1"] == (0.5, 0.25)
+
+
 def test_snapshot_prior_skill_uses_pooled_losses_and_can_be_negative(
     tmp_path: Path,
 ) -> None:
@@ -838,6 +908,44 @@ def test_060_ask_signals_use_evidence_matched_stance_metric(
         "question_grounding_recall",
         "question_top1_selection_accuracy",
     )
+
+
+def test_060_saved_result_metrics_track_expanded_elicit_contracts(
+    tmp_path: Path,
+) -> None:
+    find_metrics = aggregate.expected_legacy_metrics(
+        "charliethompson/commonground-elicit@0.6.0",
+        "find",
+        tmp_path / "find-metadata.json",
+    )
+    ask_metrics = aggregate.expected_legacy_metrics(
+        "charliethompson/commonground-elicit@0.6.0",
+        "elicit-ask",
+        tmp_path / "ask-metadata.json",
+    )
+
+    assert find_metrics == (
+        "finding_localization_recall",
+        "finding_type_accuracy",
+        "finding_diagnosis_recall",
+        "finding_relation_recall",
+        "finding_f1",
+        "question_utility",
+    )
+    assert ask_metrics == (
+        "question_utility",
+        "question_format_valid",
+        "question_top1_selection_accuracy",
+        "question_grounding_recall",
+        "question_grounded_stance_recall",
+        "question_evidence_match_recall",
+        "question_evidence_matched_stance_accuracy",
+    )
+    assert aggregate.expected_legacy_metrics(
+        "charliethompson/commonground-elicit@0.4.1",
+        "find",
+        tmp_path / "historical-metadata.json",
+    ) == ("finding_f1", "question_utility")
 
 
 def test_060_predict_signals_add_prompt_visible_climatology_loss(

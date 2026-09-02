@@ -85,6 +85,9 @@ Use JSON-object decoding when the provider exposes it, and record the resolved
 sampling configuration with every run. The task prompts independently state
 the raw-JSON envelope and Elicit's auxiliary-first yes/no surface rule; JSON
 decoding only prevents Markdown/prose wrappers and does not supply answers.
+The baseline aggregator accepts both native trace directories and the nested
+`evals/<environment>/<run>` saved-result layout produced when `vf-eval` is
+given a wrapper output directory.
 
 Proceed to the complete study only if:
 

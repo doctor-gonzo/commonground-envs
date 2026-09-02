@@ -1,8 +1,9 @@
 """Aggregate complete local Common Ground evaluation runs.
 
 Native ``verifiers==0.3.0`` runs contain ``config.toml`` and one episode per
-rollout in ``traces.jsonl``. Historical ``verifiers==0.1.x``
-``metadata.json``/``results.jsonl`` runs remain readable.
+rollout in ``traces.jsonl``. Saved ``vf-eval`` runs can instead contain
+``metadata.json``/``results.jsonl``; both the historical direct layout and the
+current nested ``evals/<environment>/<run>`` layout remain readable.
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_RUN_DIRS_GLOBS = (
     "environments/*/outputs/evals/*/*",
     "environments/*/outputs/*/*",
+    "outputs/*/*/evals/*/*",
     "outputs/*/*",
 )
 LEGACY_ARTIFACTS = ("metadata.json", "results.jsonl")
@@ -263,7 +265,7 @@ def load_complete_run(result_path: Path) -> CompleteRun:
 
 
 def load_legacy_run(result_path: Path) -> CompleteRun:
-    """Load one complete historical Verifiers 0.1.x run."""
+    """Load one complete saved-result ``vf-eval`` run."""
 
     metadata_path = result_path.with_name("metadata.json")
     metadata = load_json_object(metadata_path)
@@ -1293,12 +1295,14 @@ def expected_legacy_metrics(
             if uses_snapshot_prior_skill(environment)
             else ("vote_accuracy", "brier")
         )
-    if package_name == "commonground-elicit" and task_mode == "find":
-        # Historical 0.2.x legacy runs did not emit the diagnostic metrics
-        # added to the native 0.3.0 task contract.
-        return ("finding_f1", "question_utility")
-    if package_name == "commonground-elicit" and task_mode == "elicit-ask":
-        return ("question_utility",)
+    if package_name == "commonground-elicit" and task_mode in ELICIT_TASK_MODES:
+        signal_names = {"question_utility"}
+        if task_mode == "find":
+            signal_names.add("finding_f1")
+        if uses_structured_elicit_diagnostics(environment):
+            _, diagnostic_names = expected_native_signals(environment, task_mode, path)
+            signal_names.update(diagnostic_names)
+        return tuple(name for name in METRIC_NAMES if name in signal_names)
     raise InvalidRunError(f"{path}: unsupported Common Ground metric profile")
 
 
