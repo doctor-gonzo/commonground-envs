@@ -11,6 +11,7 @@ from types import ModuleType
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
+RELEASE_VERSION = "0.6.0"
 
 
 def _load_manifest_script() -> ModuleType:
@@ -40,14 +41,16 @@ def test_workspace_paths_are_replaced_with_exact_locked_pins() -> None:
     rendered = manifests.canonicalize_export(
         exported,
         {
-            "environments/commonground_predict": "commonground-predict==0.5.0",
-            "packages/commonground-score": "commonground-score==0.5.0",
+            "environments/commonground_predict": (
+                f"commonground-predict=={RELEASE_VERSION}"
+            ),
+            "packages/commonground-score": (f"commonground-score=={RELEASE_VERSION}"),
         },
     )
 
     assert rendered == (
-        "commonground-predict==0.5.0\n"
-        "commonground-score==0.5.0\n"
+        f"commonground-predict=={RELEASE_VERSION}\n"
+        f"commonground-score=={RELEASE_VERSION}\n"
         "    # via commonground-predict\n"
         "verifiers==0.3.0\n"
     )
@@ -87,8 +90,8 @@ def test_checked_in_manifests_match_the_exact_lock() -> None:
 @pytest.mark.parametrize(
     ("distribution", "import_package", "expected_version"),
     [
-        ("commonground-predict", "commonground_predict", "0.5.0"),
-        ("commonground-elicit", "commonground_elicit", "0.5.0"),
+        ("commonground-predict", "commonground_predict", RELEASE_VERSION),
+        ("commonground-elicit", "commonground_elicit", RELEASE_VERSION),
     ],
 )
 def test_manifest_records_release_scope_without_local_paths(
@@ -107,8 +110,8 @@ def test_manifest_records_release_scope_without_local_paths(
     assert "# Resolution-SHA256: " in content
     assert "# Lock-SHA256: " not in content
     assert "# uv-Version: 0.10.9" in content
-    assert "commonground-scenarios==0.5.0" in content
-    assert "commonground-score==0.5.0" in content
+    assert f"commonground-scenarios=={RELEASE_VERSION}" in content
+    assert f"commonground-score=={RELEASE_VERSION}" in content
     assert "datasets==5.0.1" in content
     assert "verifiers==0.3.0" in content
     assert "--hash=sha256:" in content

@@ -38,10 +38,16 @@ def write_native_run(
     environment: str,
     run_id: str,
     task_mode: str | None = None,
+    prompt_mode: str | None = None,
     model: str = "fixture/native-oracle",
     num_tasks: int = 2,
     num_rollouts: int = 3,
     reward_weight: float = 1.0,
+    client_base_url: str = "https://fixture.invalid/v1",
+    call_endpoint: str = "/chat/completions",
+    sampling_temperature: float = 0.2,
+    max_concurrent: int = 8,
+    include_ablation_provenance: bool = True,
 ) -> Path:
     output_name = environment.replace("/", "--").replace("@", "--")
     run_dir = (
@@ -56,21 +62,30 @@ def write_native_run(
         'split = "eval"',
     ]
     if task_mode is not None:
+        question_count = (
+            1 if aggregate.uses_grounded_stance_diagnostics(environment) else 2
+        )
         taskset_lines.extend(
             [
                 f'task_mode = "{task_mode}"',
                 "planted_density = 1.0",
                 "distractor_density = 1.0",
                 "panel_polarization = 1.0",
-                "question_count = 2",
+                f"question_count = {question_count}",
             ]
         )
-    config = "\n".join(
+    if prompt_mode is not None:
+        taskset_lines.append(f'prompt_mode = "{prompt_mode}"')
+    config_lines = [
+        f'model = "{model}"',
+        f"num_tasks = {num_tasks}",
+        f"num_rollouts = {num_rollouts}",
+        "shuffle = false",
+    ]
+    if include_ablation_provenance:
+        config_lines.append(f"max_concurrent = {max_concurrent}")
+    config_lines.extend(
         [
-            f'model = "{model}"',
-            f"num_tasks = {num_tasks}",
-            f"num_rollouts = {num_rollouts}",
-            "shuffle = false",
             "",
             "[env.taskset]",
             *taskset_lines,
@@ -80,6 +95,30 @@ def write_native_run(
             "",
         ]
     )
+    client_config = {
+        "base_url": client_base_url,
+        "api_key_var": "FIXTURE_API_KEY",
+        "type": "eval",
+    }
+    sampling_config = {
+        "temperature": sampling_temperature,
+        "max_tokens": 256,
+    }
+    if include_ablation_provenance:
+        config_lines.extend(
+            [
+                "[client]",
+                f'base_url = "{client_base_url}"',
+                'api_key_var = "FIXTURE_API_KEY"',
+                'type = "eval"',
+                "",
+                "[sampling]",
+                f"temperature = {sampling_temperature}",
+                "max_tokens = 256",
+                "",
+            ]
+        )
+    config = "\n".join(config_lines)
     (run_dir / "config.toml").write_text(config, encoding="utf-8")
 
     is_predict = (
@@ -103,6 +142,10 @@ def write_native_run(
                 metrics["brier"] = 1.0 - score
                 if not environment.endswith("@0.3.0"):
                     metrics["vote_accuracy"] = score
+                if aggregate.uses_snapshot_prior_skill(environment):
+                    metrics["original_snapshot_visible_prior_brier"] = (
+                        0.25 + 0.25 * task_index
+                    )
             elif task_mode == "find":
                 metrics["finding_localization_recall"] = score
                 metrics["finding_type_accuracy"] = score
@@ -116,8 +159,25 @@ def write_native_run(
             ):
                 metrics["question_format_valid"] = score
                 metrics["question_grounding_recall"] = score
-                metrics["question_stance_accuracy"] = score
+                if aggregate.uses_grounded_stance_diagnostics(environment):
+                    metrics["question_grounded_stance_recall"] = score
+                    metrics["question_evidence_match_recall"] = score
+                    metrics["question_evidence_matched_stance_accuracy"] = score
+                    metrics["question_top1_selection_accuracy"] = score
+                else:
+                    metrics["question_stance_accuracy"] = score
             task_info = {"task_label": task_mode} if task_mode is not None else {}
+            if prompt_mode is not None:
+                task_info["prompt_mode"] = prompt_mode
+            agent_config = (
+                {
+                    "model": model,
+                    "client": client_config,
+                    "sampling": sampling_config,
+                }
+                if include_ablation_provenance
+                else {}
+            )
             trace_id = f"trace-{task_index}-{rollout_index}"
             trace = {
                 "version": 1,
@@ -126,9 +186,21 @@ def write_native_run(
                 "run": {"type": "eval", "id": run_id},
                 "task": {
                     "type": "PredictionTask" if is_predict else "ElicitTask",
-                    "data": {"idx": task_index, "info": task_info},
+                    "data": {
+                        "idx": task_index,
+                        "answer": {f"{task_index},0": 1},
+                        "info": task_info,
+                    },
                 },
-                "agent": {"config": {}, "trainable": True},
+                "agent": {"config": agent_config, "trainable": True},
+                "calls": [
+                    {
+                        "model": model,
+                        "sampling": sampling_config,
+                        "endpoint": call_endpoint,
+                        "finish_reason": "stop",
+                    }
+                ],
                 "rewards": {reward_name: {"score": score, "weight": reward_weight}},
                 "metrics": metrics,
                 "is_completed": True,
@@ -192,9 +264,48 @@ def test_native_v1_run_aggregates_weighted_rewards_and_named_signals(
     assert summary.reward_mean == pytest.approx(1 / 3)
     assert summary.metrics["vote_accuracy"] == pytest.approx((2 / 3, math.sqrt(2) / 3))
     assert summary.metrics["brier"] == pytest.approx((1 / 3, math.sqrt(2) / 3))
+    assert summary.metrics["original_snapshot_visible_prior_brier"] == pytest.approx(
+        (0.375, 0.125)
+    )
+    assert summary.metrics[
+        "brier_skill_vs_original_snapshot_visible_prior"
+    ] == pytest.approx((1 / 9, (math.sqrt(2) / 3) / 0.375))
 
     run = aggregate.load_complete_run(next(tmp_path.glob("outputs/*/*/traces.jsonl")))
     assert run.task_ids == (0, 0, 0, 1, 1, 1)
+    assert run.raw_reward_scores["probability_reward"] == (1.0, 0.0, 1.0) * 2
+    assert run.raw_reward_weights["probability_reward"] == (0.5,) * 6
+    assert run.comparison_signature is None
+
+
+def test_snapshot_prior_skill_uses_pooled_losses_and_can_be_negative(
+    tmp_path: Path,
+) -> None:
+    traces_path = write_native_run(
+        tmp_path,
+        environment="commonground-predict",
+        run_id="negative-skill",
+        num_tasks=1,
+        num_rollouts=1,
+    )
+    rows = read_native_rows(traces_path)
+    rows[0]["traces"][0]["metrics"]["brier"] = 1.0
+    rows[0]["traces"][0]["metrics"]["original_snapshot_visible_prior_brier"] = 0.25
+    write_native_rows(traces_path, rows)
+
+    [summary] = aggregate.load_summaries(tmp_path)
+    assert summary.metrics["brier_skill_vs_original_snapshot_visible_prior"] == (
+        -3.0,
+        0.0,
+    )
+
+
+def test_original_snapshot_prior_skill_rejects_zero_pooled_reference() -> None:
+    with pytest.raises(
+        aggregate.InvalidRunError,
+        match="reference must have positive pooled loss",
+    ):
+        aggregate.pooled_brier_skill([0.0, 0.0], [0.0, 0.0])
 
 
 def test_native_predict_030_reward_contract_remains_readable(tmp_path: Path) -> None:
@@ -238,6 +349,264 @@ def test_native_elicit_modes_never_collapse_to_one_environment_key(
     assert summaries[1].metrics["question_utility"][0] == pytest.approx(1 / 3)
 
 
+def test_native_predict_prompt_modes_never_collapse_to_one_run_key(
+    tmp_path: Path,
+) -> None:
+    modes = ("full", "matrix-only", "text-only", "shuffled-text")
+    for index, prompt_mode in enumerate(modes):
+        write_native_run(
+            tmp_path,
+            environment="commonground-predict",
+            prompt_mode=prompt_mode,
+            run_id=f"predict-mode-{index}",
+        )
+
+    summaries = aggregate.load_summaries(tmp_path)
+
+    assert {(summary.prompt_mode, summary.run_id) for summary in summaries} == {
+        (prompt_mode, f"predict-mode-{index}")
+        for index, prompt_mode in enumerate(modes)
+    }
+    assert all(summary.environment == "commonground-predict" for summary in summaries)
+    runs = [
+        aggregate.load_complete_run(path)
+        for path in sorted(tmp_path.glob("outputs/*/*/traces.jsonl"))
+    ]
+    assert len({run.comparison_signature for run in runs}) == 1
+    assert all(run.comparison_signature is not None for run in runs)
+    assert all(len(run.task_answer_digests) == 2 for run in runs)
+    assert all(
+        run.raw_reward_scores["probability_reward"] == (1.0, 0.0, 1.0) * 2
+        for run in runs
+    )
+
+
+@pytest.mark.parametrize(
+    "provenance_change",
+    ["client", "sampling", "concurrency", "task_ids", "answer", "call_endpoint"],
+)
+def test_predict_ablation_comparison_signature_covers_saved_provenance(
+    tmp_path: Path, provenance_change: str
+) -> None:
+    full_path = write_native_run(
+        tmp_path,
+        environment="commonground-predict",
+        prompt_mode="full",
+        run_id="full-provenance",
+    )
+    changed_kwargs: dict[str, Any] = {}
+    if provenance_change == "client":
+        changed_kwargs["client_base_url"] = "https://other-fixture.invalid/v1"
+    elif provenance_change == "sampling":
+        changed_kwargs["sampling_temperature"] = 0.7
+    elif provenance_change == "concurrency":
+        changed_kwargs["max_concurrent"] = 3
+    elif provenance_change == "call_endpoint":
+        changed_kwargs["call_endpoint"] = "/responses"
+    changed_path = write_native_run(
+        tmp_path,
+        environment="commonground-predict",
+        prompt_mode="matrix-only",
+        run_id="changed-provenance",
+        **changed_kwargs,
+    )
+    if provenance_change in {"task_ids", "answer"}:
+        rows = read_native_rows(changed_path)
+        for row in rows:
+            task_data = row["traces"][0]["task"]["data"]
+            if provenance_change == "task_ids":
+                task_data["idx"] += 10
+            elif task_data["idx"] == 0:
+                task_data["answer"] = {"0,0": -1}
+        write_native_rows(changed_path, rows)
+
+    full = aggregate.load_complete_run(full_path)
+    changed = aggregate.load_complete_run(changed_path)
+
+    assert full.comparison_signature != changed.comparison_signature
+
+
+def test_predict_ablation_signature_preserves_task_execution_order(
+    tmp_path: Path,
+) -> None:
+    full_path = write_native_run(
+        tmp_path,
+        environment="commonground-predict",
+        prompt_mode="full",
+        run_id="ordered-provenance",
+    )
+    reordered_path = write_native_run(
+        tmp_path,
+        environment="commonground-predict",
+        prompt_mode="matrix-only",
+        run_id="reordered-provenance",
+    )
+    rows = read_native_rows(reordered_path)
+    write_native_rows(reordered_path, list(reversed(rows)))
+
+    full = aggregate.load_complete_run(full_path)
+    reordered = aggregate.load_complete_run(reordered_path)
+
+    assert full.comparison_signature != reordered.comparison_signature
+
+
+def test_declared_predict_ablation_requires_complete_native_provenance(
+    tmp_path: Path,
+) -> None:
+    write_native_run(
+        tmp_path,
+        environment="commonground-predict",
+        prompt_mode="matrix-only",
+        run_id="missing-provenance",
+        include_ablation_provenance=False,
+    )
+
+    with pytest.raises(
+        aggregate.InvalidRunError, match="require resolved client provenance"
+    ):
+        aggregate.load_summaries(tmp_path)
+
+
+@pytest.mark.parametrize("client_base_url", ["", "   "])
+def test_declared_predict_ablation_requires_nonempty_client_identity(
+    tmp_path: Path, client_base_url: str
+) -> None:
+    write_native_run(
+        tmp_path,
+        environment="commonground-predict",
+        prompt_mode="matrix-only",
+        run_id="empty-client-identity",
+        client_base_url=client_base_url,
+    )
+
+    with pytest.raises(
+        aggregate.InvalidRunError, match="client base_url must be non-empty"
+    ):
+        aggregate.load_summaries(tmp_path)
+
+
+def test_declared_predict_ablation_requires_saved_task_answers(tmp_path: Path) -> None:
+    traces_path = write_native_run(
+        tmp_path,
+        environment="commonground-predict",
+        prompt_mode="matrix-only",
+        run_id="missing-answer-provenance",
+    )
+    rows = read_native_rows(traces_path)
+    del rows[0]["traces"][0]["task"]["data"]["answer"]
+    write_native_rows(traces_path, rows)
+
+    with pytest.raises(
+        aggregate.InvalidRunError, match="trace is missing the task answer"
+    ):
+        aggregate.load_summaries(tmp_path)
+
+
+def test_declared_predict_ablation_requires_canonical_reward_weight(
+    tmp_path: Path,
+) -> None:
+    write_native_run(
+        tmp_path,
+        environment="commonground-predict",
+        prompt_mode="matrix-only",
+        run_id="weighted-ablation",
+        reward_weight=0.5,
+    )
+
+    with pytest.raises(
+        aggregate.InvalidRunError, match=r"probability_reward weight 1\.0"
+    ):
+        aggregate.load_summaries(tmp_path)
+
+
+def test_declared_predict_ablation_trace_settings_must_match_config(
+    tmp_path: Path,
+) -> None:
+    traces_path = write_native_run(
+        tmp_path,
+        environment="commonground-predict",
+        prompt_mode="matrix-only",
+        run_id="trace-provenance-mismatch",
+    )
+    rows = read_native_rows(traces_path)
+    rows[0]["traces"][0]["agent"]["config"]["sampling"]["temperature"] = 0.9
+    write_native_rows(traces_path, rows)
+
+    with pytest.raises(
+        aggregate.InvalidRunError, match="trace sampling does not match saved config"
+    ):
+        aggregate.load_summaries(tmp_path)
+
+
+@pytest.mark.parametrize("field", ["model", "sampling"])
+def test_declared_predict_ablation_call_settings_must_match_config(
+    tmp_path: Path, field: str
+) -> None:
+    traces_path = write_native_run(
+        tmp_path,
+        environment="commonground-predict",
+        prompt_mode="matrix-only",
+        run_id="call-provenance-mismatch",
+    )
+    rows = read_native_rows(traces_path)
+    call = rows[0]["traces"][0]["calls"][0]
+    if field == "model":
+        call["model"] = "different/model"
+    else:
+        call["sampling"]["temperature"] = 0.99
+    write_native_rows(traces_path, rows)
+
+    with pytest.raises(
+        aggregate.InvalidRunError, match=rf"call {field} does not match saved config"
+    ):
+        aggregate.load_summaries(tmp_path)
+
+
+def test_declared_predict_ablation_requires_one_recorded_call(tmp_path: Path) -> None:
+    traces_path = write_native_run(
+        tmp_path,
+        environment="commonground-predict",
+        prompt_mode="matrix-only",
+        run_id="missing-call-provenance",
+    )
+    rows = read_native_rows(traces_path)
+    del rows[0]["traces"][0]["calls"]
+    write_native_rows(traces_path, rows)
+
+    with pytest.raises(
+        aggregate.InvalidRunError, match="record exactly one model call"
+    ):
+        aggregate.load_summaries(tmp_path)
+
+
+def test_native_predict_trace_prompt_mode_must_match_config(tmp_path: Path) -> None:
+    traces_path = write_native_run(
+        tmp_path,
+        environment="commonground-predict",
+        prompt_mode="matrix-only",
+        run_id="prompt-mode-mismatch",
+    )
+    rows = read_native_rows(traces_path)
+    rows[0]["traces"][0]["task"]["data"]["info"]["prompt_mode"] = "full"
+    write_native_rows(traces_path, rows)
+
+    with pytest.raises(
+        aggregate.InvalidRunError, match=r"prompt mode does not match run config"
+    ):
+        aggregate.load_summaries(tmp_path)
+
+
+def test_historical_predict_run_without_prompt_mode_defaults_to_full() -> None:
+    summaries = aggregate.load_summaries(FIXTURE_ROOT)
+    predict = next(
+        summary
+        for summary in summaries
+        if summary.environment == "commonground-predict"
+    )
+
+    assert predict.prompt_mode == "full"
+
+
 @pytest.mark.parametrize(
     ("case", "message"),
     [
@@ -269,7 +638,9 @@ def test_native_v1_complete_run_validation_fails_closed(
         rows[1]["id"] = rows[0]["id"]
     elif case == "wrong-distribution":
         for row in rows:
-            row["traces"][0]["task"]["data"]["idx"] = 0
+            task_data = row["traces"][0]["task"]["data"]
+            task_data["idx"] = 0
+            task_data["answer"] = {"0,0": 1}
     elif case == "mixed-run-ids":
         rows[0]["traces"][0]["run"]["id"] = "another-run"
     elif case == "unexpected-metric":
@@ -441,12 +812,96 @@ def test_aggregate_complete_runs_in_deterministic_order() -> None:
 
     assert aggregate.render_markdown(summaries) == "\n".join(
         [
-            "| Model | Environment | Run ID | Rollouts | Recovered rollouts | Reward (mean ± std) | vote_accuracy (mean ± std) | brier (mean ± std) | finding_localization_recall (mean ± std) | finding_type_accuracy (mean ± std) | finding_diagnosis_recall (mean ± std) | finding_relation_recall (mean ± std) | finding_f1 (mean ± std) | question_utility (mean ± std) | question_format_valid (mean ± std) | question_grounding_recall (mean ± std) | question_stance_accuracy (mean ± std) |",
-            "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
-            "| fixture/offline-oracle | commonground-elicit:find | d4c3b2a1 | 6 | 0 | 0.667 ± 0.471 | — | — | — | — | — | — | 0.667 ± 0.471 | 0.415 ± 0.294 | — | — | — |",
-            "| fixture/offline-oracle | commonground-predict | a1b2c3d4 | 6 | 0 | 0.667 ± 0.471 | 0.667 ± 0.471 | 0.333 ± 0.471 | — | — | — | — | — | — | — | — | — |",
+            "| Model | Environment | Prompt mode | Run ID | Rollouts | Recovered rollouts | Reward (mean ± std) | vote_accuracy (mean ± std) | brier (mean ± std) | original_snapshot_visible_prior_brier (mean ± std) | brier_skill_vs_original_snapshot_visible_prior (mean ± std) | finding_localization_recall (mean ± std) | finding_type_accuracy (mean ± std) | finding_diagnosis_recall (mean ± std) | finding_relation_recall (mean ± std) | finding_f1 (mean ± std) | question_utility (mean ± std) | question_format_valid (mean ± std) | question_top1_selection_accuracy (mean ± std) | question_grounding_recall (mean ± std) | question_grounded_stance_recall (mean ± std) | question_evidence_match_recall (mean ± std) | question_evidence_matched_stance_accuracy (mean ± std) | question_stance_accuracy (mean ± std) |",
+            "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+            "| fixture/offline-oracle | commonground-elicit:find | — | d4c3b2a1 | 6 | 0 | 0.667 ± 0.471 | — | — | — | — | — | — | — | — | 0.667 ± 0.471 | 0.415 ± 0.294 | — | — | — | — | — | — | — |",
+            "| fixture/offline-oracle | commonground-predict | full | a1b2c3d4 | 6 | 0 | 0.667 ± 0.471 | 0.667 ± 0.471 | 0.333 ± 0.471 | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — |",
         ]
     )
+
+
+def test_060_ask_signals_use_evidence_matched_stance_metric(
+    tmp_path: Path,
+) -> None:
+    rewards, metrics = aggregate.expected_native_signals(
+        "charliethompson/commonground-elicit@0.6.0",
+        "elicit-ask",
+        tmp_path / "config.toml",
+    )
+
+    assert rewards == ("question_utility",)
+    assert metrics == (
+        "question_evidence_match_recall",
+        "question_evidence_matched_stance_accuracy",
+        "question_format_valid",
+        "question_grounded_stance_recall",
+        "question_grounding_recall",
+        "question_top1_selection_accuracy",
+    )
+
+
+def test_060_predict_signals_add_prompt_visible_climatology_loss(
+    tmp_path: Path,
+) -> None:
+    current_rewards, current_metrics = aggregate.expected_native_signals(
+        "charliethompson/commonground-predict@0.6.0",
+        None,
+        tmp_path / "current.toml",
+    )
+    historical_rewards, historical_metrics = aggregate.expected_native_signals(
+        "charliethompson/commonground-predict@0.5.0",
+        None,
+        tmp_path / "historical.toml",
+    )
+
+    assert current_rewards == historical_rewards == ("probability_reward",)
+    assert current_metrics == (
+        "brier",
+        "original_snapshot_visible_prior_brier",
+        "vote_accuracy",
+    )
+    assert historical_metrics == ("brier", "vote_accuracy")
+
+
+@pytest.mark.parametrize(
+    ("environment", "question_count"),
+    [
+        ("charliethompson/commonground-elicit@0.5.0", 2),
+        ("charliethompson/commonground-elicit@0.6.0", 1),
+        ("charliethompson/commonground-elicit@0.7.0", 1),
+        ("commonground-elicit", 1),
+    ],
+)
+def test_native_elicit_question_budget_tracks_immutable_contract(
+    tmp_path: Path, environment: str, question_count: int
+) -> None:
+    taskset: dict[str, Any] = {
+        "split": "eval",
+        "task": {"judges": []},
+        "task_mode": "elicit-ask",
+        "planted_density": 1.0,
+        "distractor_density": 1.0,
+        "panel_polarization": 1.0,
+        "question_count": question_count,
+    }
+
+    aggregate.validate_native_baseline_profile(
+        {"shuffle": False},
+        base_environment=environment,
+        taskset=taskset,
+        task_mode="elicit-ask",
+        config_path=tmp_path / "config.toml",
+    )
+
+    taskset["question_count"] = 2 if question_count == 1 else 1
+    with pytest.raises(aggregate.InvalidRunError, match="noncanonical Elicit"):
+        aggregate.validate_native_baseline_profile(
+            {"shuffle": False},
+            base_environment=environment,
+            taskset=taskset,
+            task_mode="elicit-ask",
+            config_path=tmp_path / "config.toml",
+        )
 
 
 def test_newest_metadata_timestamp_wins_unless_all_runs_requested(
@@ -517,7 +972,9 @@ def test_cli_prints_markdown_and_optionally_writes_csv(
     assert aggregate.main(["--root", str(FIXTURE_ROOT), "--csv", str(csv_path)]) == 0
 
     output = capsys.readouterr().out
-    assert output.startswith("| Model | Environment | Run ID | Rollouts |")
+    assert output.startswith(
+        "| Model | Environment | Prompt mode | Run ID | Rollouts |"
+    )
     with csv_path.open(encoding="utf-8", newline="") as csv_file:
         rows = list(csv.DictReader(csv_file))
     assert [(row["model"], row["environment"]) for row in rows] == [
@@ -525,7 +982,9 @@ def test_cli_prints_markdown_and_optionally_writes_csv(
         ("fixture/offline-oracle", "commonground-predict"),
     ]
     assert rows[0]["brier_mean"] == ""
+    assert rows[0]["prompt_mode"] == ""
     assert rows[0]["recovered_rollouts"] == "0"
     assert rows[0]["run_id"] == "d4c3b2a1"
     assert rows[1]["vote_accuracy_mean"] == "0.6666666666666666"
     assert rows[1]["brier_mean"] == "0.3333333333333333"
+    assert rows[1]["prompt_mode"] == "full"

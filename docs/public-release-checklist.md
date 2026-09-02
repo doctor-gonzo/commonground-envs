@@ -31,22 +31,62 @@ must exactly match their environment READMEs. Elicit generation must report 100
 unique training prompts and answers and 100 unique evaluation prompts and
 answers, distinct template/layout profiles, canonical semantic fingerprints,
 and bounded cross-split lexical/TF-IDF neighbors. The grounded-quote,
-evidence-precision, contradiction-pair, gap-
-diagnosis, wrong-document, type-hedging, malformed JSON, depth, size, and
-duplicate-span tests must pass. Elicit regressions must prove that K=2 requires
-selection, an exact top-K answer reaches 1.0, hidden canonical wording cannot
-affect structured credit, question-polarity reversal inverts stances, all 24
+evidence-precision, contradiction-pair, gap-diagnosis, wrong-document,
+type-hedging, malformed JSON, depth, size, and
+duplicate-span tests must pass. Elicit regressions must prove that the default
+K=1 budget requires selection from three candidates and an exact top-one answer
+reaches 1.0. Find must accept a findings-only root and independently score an
+optional requested-cardinality `questions` companion at weight zero; companion
+omission or malformation must not erase valid findings. Verbatim canonical-
+question wording must not be required or receive special lexical credit. Find
+must recover its hidden gold frame and role-specific accepted concepts. Ask
+must expose each canonical candidate decision and exact signed trade-off
+weights, while keeping accepted aliases, key metadata, labels, and utility
+hidden. Cited passages independently anchor the issue and applicable outcomes,
+and candidate profiles or response prose cannot validate their own frame.
+Generic questions, unsupported clauses appended to either visible-question
+segment, and unchanged-prose polarity flips must receive zero. Unknown issue
+types and malformed stance/decision types fail closed, question-polarity
+reversal inverts stances, and every accepted target-changing weight mutation
+changes the Ask prompt (while Find is unchanged) or validation rejects it. At
+every supported distractor density and bounded document length, retained keys
+must have every accepted actor alias visible; density changes only true neutral
+noise, and an unobservable issue and its anchor must be removed. All 24
 contradiction relationships resolve to authored evidence, and related evidence
-never aliases another plant or distractor. The removed 0.4 phrase decoder must
-score zero. Adding a false positive or overlapping hedge must lower shaped Find
+never aliases another plant or distractor. Faction summaries must expose the
+exact signed values used by `value-composition-v2`. The fixed-marker,
+sector-team-marker, equal-length, length/position, and prompt-only
+longest-sentence probes must be rerun with exact non-localization components so
+semantic failure cannot hide locator precision/recall. All five single-feature
+layout-label audits and the combined title/length/anchor-position
+leave-one-template-out balanced classifier must pass with explicit issue-class
+shares and the `1/3` chance reference. On helper-built rows, the five-way
+document-role and binary relationship-document leave-one-template-out probes
+must pass with exact role/prevalence and 0.20/0.50 balanced-chance references.
+The exact analytic uniform-random expectation/accuracy, runner-up
+reward/accuracy, public-profile composition reward/accuracy, exact-top-one
+reward/accuracy, top-one tie rate, and mean/minimum raw and normalized margins
+must satisfy the thresholds in the 0.6 evaluation plan. The floor report
+must separate
+prompt-observable rows from the source-aware deterministic replay/memorization
+ceiling. Adding a false positive or overlapping hedge must lower shaped Find
 reward. Predict must retain 200/100 rows, disjoint policy text and generator
-families, causal statement dimensions, calibration-sensitive primary reward,
-exact response key sets, and the probability-native comparator/Brier-skill
-table.
+families, causal statement dimensions,
+calibration-sensitive primary reward, exact response key sets, canonical ties,
+fail-closed numeric parsing, four same-task prompt modes, and the
+probability-native comparator/Brier-skill table.
+The model-completion size bound must not make a larger trusted, generated
+answer key unscorable; trusted answers retain independent depth and node
+bounds.
+
+Once source and scorer are frozen, retain a separately constructed attack
+holdout that was not used to tune the candidate. A failed holdout reopens the
+candidate; do not tune against it and continue calling it independent.
 
 The public distributions contain evaluation answers. Never describe a public
 score as contamination-resistant. Use a private server-side split for a
-leaderboard or consequential comparison.
+leaderboard or consequential comparison, and require an independently
+implemented private generator before making transfer claims.
 
 Run native Verifiers validation explicitly in the local subprocess runtime:
 
@@ -81,10 +121,10 @@ resolved-version diff, and rerun `--check`. Do not hand-edit the manifests.
 
 Publish immutable shared packages first:
 
-1. commonground-score 0.5.0
-2. commonground-scenarios 0.5.0
-3. commonground-predict 0.5.0
-4. commonground-elicit 0.5.0
+1. commonground-score 0.6.0
+2. commonground-scenarios 0.6.0
+3. commonground-predict 0.6.0
+4. commonground-elicit 0.6.0
 
 The environment packages exactly pin the shared versions. Do not reuse a
 published version number.
@@ -119,21 +159,35 @@ Push the new versions privately first. On the exact private artifacts:
   evaluation for predict and both elicit task modes;
 - run the full 100-task/five-rollout sweep on at least four model families for
   Predict and both Elicit modes; preserve exact configs and per-example traces;
+- require zero recovered/error histories; quarantine failed attempts and rerun
+  the complete frozen model/task stratum rather than selecting episodes;
+- verify exact extended Elicit answers remain at most 1,024 `cl100k_base`
+  tokens under the 2,048-token generation cap, then report observed pilot
+  completion lengths;
+- run the same-model Predict `full`, `matrix-only`, `text-only`, and
+  `shuffled-text` prompt ablations with paired task IDs and answers;
 - analyze paired task differences for Predict and template-hierarchical
-  differences for Elicit;
+  differences for Elicit, clustered component diagnostics, exploratory
+  cluster-level sign-flip tests under the declared sign-symmetry/exchangeability
+  assumption, and the predeclared 18-comparison global Holm family; keep
+  component and prompt-ablation intervals explicitly pointwise/unadjusted;
 - review the rendered README and license/provenance notice.
 
-For the 0.5.0 study, generate the attested analysis directly from retained
+For the 0.6.0 study, generate the attested analysis directly from retained
 native-v1 traces:
 
     uv run python scripts/analyze_release_study.py \
       --root /path/to/release-study \
       --elicit-eval-split environments/commonground_elicit/commonground_elicit/data/eval_synthetic_heldout.jsonl \
+      --diagnostics-csv /path/to/diagnostics.csv \
+      --pairwise-csv /path/to/pairwise.csv \
+      --json /path/to/release-analysis.json \
       --bootstrap-samples 50000 \
-      --seed 20260830 \
+      --seed RELEASE_SEED \
       --expected-model-count 4 \
       --expected-task-count 100 \
       --expected-rollouts-per-task 5 \
+      --expected-pairwise-family-size 18 \
       --require-no-recoveries
 
 Only then should an operator manually make a listing public. Publishing and

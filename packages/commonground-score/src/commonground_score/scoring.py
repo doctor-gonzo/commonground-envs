@@ -189,7 +189,7 @@ def brier_skill_score(
 def _prediction_probs(prediction: Prediction | None) -> dict[str, float]:
     if isinstance(prediction, Mapping):
         return _mapping_prediction_probs(prediction)
-    if prediction in _VOTE_TO_LABEL:
+    if type(prediction) is int and prediction in _VOTE_TO_LABEL:
         label = _VOTE_TO_LABEL[prediction]
         return {candidate: float(candidate == label) for candidate in _LABELS}
     return _uniform_probs()
@@ -202,9 +202,12 @@ def _mapping_prediction_probs(prediction: Mapping[object, object]) -> dict[str, 
         label = _coerce_class_label(key)
         if label is None:
             continue
+        if type(value) not in (int, float):
+            invalid = True
+            continue
         try:
             score = float(cast(Any, value))
-        except (TypeError, ValueError):
+        except (OverflowError, TypeError, ValueError):
             invalid = True
             continue
         if not isfinite(score):
@@ -215,7 +218,7 @@ def _mapping_prediction_probs(prediction: Mapping[object, object]) -> dict[str, 
             invalid = True
 
     total = sum(scores.get(label, 0.0) for label in _LABELS)
-    if scores and not invalid and total > 0:
+    if scores and not invalid and isfinite(total) and total > 0:
         return {label: scores.get(label, 0.0) / total for label in _LABELS}
     return _uniform_probs()
 

@@ -7,10 +7,11 @@ import hashlib
 import json
 import os
 import re
+from collections import Counter
 from collections.abc import Mapping
 from math import isfinite
 from pathlib import Path
-from typing import Any, Never
+from typing import Any, Literal, Never
 
 import verifiers as legacy_vf
 import verifiers.v1 as vf
@@ -38,14 +39,41 @@ BUNDLED_SPLIT_PATHS = {
 VALID_VOTES = {-1, 0, 1}
 LABEL_TO_VOTE = {"agree": 1, "disagree": -1, "pass": 0}
 VOTE_TO_LABEL = {vote: label for label, vote in LABEL_TO_VOTE.items()}
+ARGMAX_VOTE_ORDER = (1, 0, -1)
+PromptMode = Literal["full", "matrix-only", "text-only", "shuffled-text"]
+PROMPT_MODES: tuple[PromptMode, ...] = (
+    "full",
+    "matrix-only",
+    "text-only",
+    "shuffled-text",
+)
 MAX_COMPLETION_CHARS = 65_536
 MAX_JSON_NESTING = 64
 MAX_JSON_CANDIDATES = 128
 CELL_ID_PATTERN = re.compile(r"(0|[1-9]\d*),(0|[1-9]\d*)")
 
 
+class _DuplicateJsonKeyError(ValueError):
+    """Raised before JSON object construction can erase a repeated key."""
+
+
+def _reject_duplicate_json_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    value: dict[str, Any] = {}
+    for key, item in pairs:
+        if key in value:
+            raise _DuplicateJsonKeyError(f"duplicate JSON key {key!r}")
+        value[key] = item
+    return value
+
+
+def _reject_non_finite_json_constant(value: str) -> Any:
+    """Reject Python JSON extensions such as NaN and Infinity at decode time."""
+
+    raise ValueError(f"non-finite JSON constant {value!r}")
+
+
 class PredictionJsonParser(legacy_vf.Parser):
-    """Extract the last predictions JSON object from a completion."""
+    """Parse one complete predictions JSON object from a completion."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -118,6 +146,14 @@ class PredictionTask(vf.Task[PredictionTaskData]):
             return 1.0 if self.data.answer else 0.0
         return float(score_brier_score(predictions, self.data.answer))
 
+    @vf.metric
+    async def original_snapshot_visible_prior_brier(self, trace: vf.Trace) -> float:
+        del trace
+        return original_snapshot_visible_prior_brier_loss(
+            self.data.answer,
+            self.data.info.get("snapshot_visible_prior"),
+        )
+
 
 class CommonGroundPredictConfig(vf.TasksetConfig):
     """Public load-time controls for the prediction taskset."""
@@ -125,6 +161,7 @@ class CommonGroundPredictConfig(vf.TasksetConfig):
     masked_vote_count: int | None = None
     min_cluster_count: int | None = None
     data_path: Path | None = None
+    prompt_mode: PromptMode = "full"
     split: str = "eval"
 
 
@@ -145,7 +182,14 @@ class CommonGroundPredictTaskset(vf.Taskset[PredictionTask, CommonGroundPredictC
             min_cluster_count=self.config.min_cluster_count,
         )
         return [
-            PredictionTask(snapshot_to_task_data(snapshot, index), self.config.task)
+            PredictionTask(
+                snapshot_to_task_data(
+                    snapshot,
+                    index,
+                    prompt_mode=self.config.prompt_mode,
+                ),
+                self.config.task,
+            )
             for index, snapshot in enumerate(snapshots)
         ]
 
@@ -154,6 +198,7 @@ def load_taskset(
     masked_vote_count: int | None = None,
     min_cluster_count: int | None = None,
     data_path: str | os.PathLike[str] | None = None,
+    prompt_mode: PromptMode = "full",
     split: str = "eval",
     **config_kwargs: Any,
 ) -> CommonGroundPredictTaskset:
@@ -165,6 +210,7 @@ def load_taskset(
             masked_vote_count=masked_vote_count,
             min_cluster_count=min_cluster_count,
             data_path=Path(data_path) if data_path is not None else None,
+            prompt_mode=prompt_mode,
             split=split,
             **config_kwargs,
         )
@@ -175,6 +221,7 @@ def load_environment(
     masked_vote_count: int | None = None,
     min_cluster_count: int | None = None,
     data_path: str | os.PathLike[str] | None = None,
+    prompt_mode: PromptMode = "full",
     split: str = "eval",
     **kwargs: Any,
 ) -> legacy_vf.SingleTurnEnv:
@@ -187,14 +234,20 @@ def load_environment(
         masked_vote_count=masked_vote_count,
         min_cluster_count=min_cluster_count,
         data_path=data_path,
+        prompt_mode=prompt_mode,
         split=split,
     )
     rows = [_prediction_task_to_legacy_row(task) for task in taskset]
     dataset = Dataset.from_list(rows)
     parser = PredictionJsonParser()
     rubric = legacy_vf.Rubric(
-        funcs=[probability_reward, vote_accuracy, brier],
-        weights=[1.0, 0.0, 0.0],
+        funcs=[
+            probability_reward,
+            vote_accuracy,
+            brier,
+            original_snapshot_visible_prior_brier,
+        ],
+        weights=[1.0, 0.0, 0.0, 0.0],
         parser=parser,
     )
     configured_path = data_path or os.environ.get(DATA_ENV_VAR)
@@ -205,6 +258,7 @@ def load_environment(
         "masked_vote_count": masked_vote_count,
         "min_cluster_count": min_cluster_count,
         "data_path": str(resolved_path),
+        "prompt_mode": prompt_mode,
         "split": split,
     }
     return legacy_vf.SingleTurnEnv(
@@ -674,6 +728,8 @@ def snapshot_cluster_count(snapshot: Mapping[str, Any]) -> int:
 def snapshot_to_task_data(
     snapshot: Mapping[str, Any],
     index: int,
+    *,
+    prompt_mode: PromptMode = "full",
 ) -> PredictionTaskData:
     """Build typed task data without duplicating hidden labels in snapshot state."""
 
@@ -684,6 +740,8 @@ def snapshot_to_task_data(
         "session_id": snapshot["session_id"],
         "masked_vote_count": len(held_out),
         "cluster_count": snapshot_cluster_count(snapshot),
+        "prompt_mode": prompt_mode,
+        "snapshot_visible_prior": snapshot_visible_class_prior(snapshot),
         "synthetic": bool(snapshot["meta"].get("synthetic")),
     }
     public_snapshot = copy.deepcopy(dict(snapshot))
@@ -691,7 +749,7 @@ def snapshot_to_task_data(
     return PredictionTaskData(
         idx=index,
         name=str(snapshot["session_id"]),
-        prompt=render_prompt(snapshot),
+        prompt=render_prompt(snapshot, prompt_mode=prompt_mode),
         answer=held_out,
         info=info,
         snapshot=public_snapshot,
@@ -711,10 +769,14 @@ def _prediction_task_to_legacy_row(task: PredictionTask) -> dict[str, Any]:
     }
 
 
-def render_prompt(snapshot: Mapping[str, Any]) -> str:
+def render_prompt(
+    snapshot: Mapping[str, Any],
+    prompt_mode: PromptMode = "full",
+) -> str:
     """Render the compact masked-vote prediction prompt."""
 
     statements = snapshot["statements"]
+    prompt_texts = _prompt_statement_texts(snapshot, prompt_mode)
     masked_cells = [
         f"{participant_index},{statement_index}"
         for participant_index, statement_index in snapshot["masked_cells"]
@@ -726,19 +788,30 @@ def render_prompt(snapshot: Mapping[str, Any]) -> str:
         "Statements:",
     ]
     lines.extend(
-        f"{statement['index']}: {statement['text']}" for statement in statements
+        f"{statement['index']}: {prompt_text}"
+        for statement, prompt_text in zip(statements, prompt_texts, strict=True)
     )
-    lines.extend(
-        [
-            "",
-            "Visible vote matrix:",
-            "columns: " + " ".join(str(statement["index"]) for statement in statements),
-        ]
-    )
-    for participant_index, row in enumerate(snapshot["votes"]):
-        lines.append(
-            f"p{participant_index:02d}: " + " ".join(_vote_symbol(vote) for vote in row)
+    if prompt_mode == "text-only":
+        lines.extend(
+            [
+                "",
+                "Visible vote matrix withheld for this text-only ablation.",
+            ]
         )
+    else:
+        lines.extend(
+            [
+                "",
+                "Visible vote matrix:",
+                "columns: "
+                + " ".join(str(statement["index"]) for statement in statements),
+            ]
+        )
+        for participant_index, row in enumerate(snapshot["votes"]):
+            lines.append(
+                f"p{participant_index:02d}: "
+                + " ".join(_vote_symbol(vote) for vote in row)
+            )
     lines.extend(
         [
             "",
@@ -751,6 +824,33 @@ def render_prompt(snapshot: Mapping[str, Any]) -> str:
         ]
     )
     return "\n".join(lines)
+
+
+def _prompt_statement_texts(
+    snapshot: Mapping[str, Any],
+    prompt_mode: PromptMode,
+) -> list[str]:
+    """Return the deterministic statement-text view for one ablation mode."""
+
+    if prompt_mode not in PROMPT_MODES:
+        valid_modes = ", ".join(PROMPT_MODES)
+        raise ValueError(
+            f"unknown prompt_mode {prompt_mode!r}; valid modes: {valid_modes}"
+        )
+    texts = [str(statement["text"]) for statement in snapshot["statements"]]
+    if prompt_mode in {"full", "text-only"}:
+        return texts
+    if prompt_mode == "matrix-only":
+        return ["[policy text withheld for matrix-only ablation]" for _ in texts]
+    if len(texts) < 2:
+        return texts
+
+    session_id = str(snapshot["session_id"])
+    digest = hashlib.sha256(
+        f"commonground-shuffled-text-v1:{session_id}".encode()
+    ).digest()
+    offset = 1 + int.from_bytes(digest[:8], "big") % (len(texts) - 1)
+    return texts[offset:] + texts[:offset]
 
 
 async def vote_accuracy(
@@ -791,7 +891,7 @@ async def brier(
     answer: Mapping[str, int] | str,
     parser: PredictionJsonParser,
 ) -> float:
-    """Metric: normalized 0-1 Brier; invalid forecasts score as uniform."""
+    """Metric: normalized 0-1 Brier; invalid exact-contract forecasts score 1."""
 
     held_out = parse_held_out(answer)
     parsed = exact_probability_predictions(
@@ -802,22 +902,88 @@ async def brier(
     return float(score_brier_score(parsed, held_out))
 
 
+async def original_snapshot_visible_prior_brier(
+    completion: list[dict[str, Any]],
+    answer: Mapping[str, int] | str,
+    info: Mapping[str, Any] | str,
+    parser: PredictionJsonParser,
+) -> float:
+    """Metric: loss of the evaluator-side original visible-matrix prior.
+
+    The reference is fixed across prompt ablations. It is therefore not an
+    agent-observable baseline when ``prompt_mode`` is ``text-only``.
+    """
+
+    del completion, parser
+    held_out = parse_held_out(answer)
+    info_payload = parse_prediction_info(info)
+    return original_snapshot_visible_prior_brier_loss(
+        held_out,
+        info_payload.get("snapshot_visible_prior"),
+    )
+
+
+def original_snapshot_visible_prior_brier_loss(
+    held_out: Mapping[str, int],
+    raw_prior: Any,
+) -> float:
+    """Return loss for the non-transductive original-snapshot climatology."""
+
+    if not held_out:
+        return 0.0
+    if valid_probability_mapping(raw_prior):
+        prior = dict(raw_prior)
+    else:
+        prior = {label: 1 / len(VALID_VOTES) for label in LABEL_TO_VOTE}
+    reference = {cell_id: prior for cell_id in held_out}
+    return float(score_brier_score(reference, held_out))
+
+
+def snapshot_visible_class_prior(snapshot: Mapping[str, Any]) -> dict[str, float]:
+    """Return class frequencies visible within one prediction prompt."""
+
+    votes = snapshot.get("votes")
+    counts: Counter[int] = Counter()
+    if isinstance(votes, list):
+        for row in votes:
+            if not isinstance(row, list):
+                continue
+            counts.update(
+                vote for vote in row if type(vote) is int and vote in VALID_VOTES
+            )
+    total = sum(counts.values())
+    if total == 0:
+        return {label: 1 / len(VALID_VOTES) for label in LABEL_TO_VOTE}
+    return {label: counts[vote] / total for label, vote in LABEL_TO_VOTE.items()}
+
+
 def parse_completion_predictions(
     completion: list[dict[str, Any]],
     parser: PredictionJsonParser,
 ) -> Mapping[str, Any]:
     parsed = parser.parse_answer(completion)
-    predictions = parsed.get("predictions", {})
-    if not isinstance(predictions, Mapping):
-        return {}
-    return predictions
+    return _prediction_mapping_from_root(parsed)
 
 
 def parse_prediction_text(text: str) -> Mapping[str, Any]:
     """Return the predictions mapping from one bounded completion string."""
 
     parsed = PredictionJsonParser().parse(text)
-    predictions = parsed.get("predictions", {})
+    return _prediction_mapping_from_root(parsed)
+
+
+def _prediction_mapping_from_root(parsed: Any) -> Mapping[str, Any]:
+    """Require the one public response field and reject silent extensions.
+
+    Exact nested key validation is not enough if an otherwise valid completion
+    can smuggle unrelated top-level state past the contract. Keeping this check
+    at the shared extraction boundary makes the native and compatibility
+    interfaces fail closed in the same way.
+    """
+
+    if not isinstance(parsed, Mapping) or set(parsed) != {"predictions"}:
+        return {}
+    predictions = parsed["predictions"]
     return predictions if isinstance(predictions, Mapping) else {}
 
 
@@ -828,6 +994,16 @@ def parse_held_out(held_out: Mapping[str, int] | str) -> dict[str, int]:
         for cell_id, vote in loaded.items()
         if type(vote) is int and vote in VALID_VOTES
     }
+
+
+def parse_prediction_info(info: Mapping[str, Any] | str) -> Mapping[str, Any]:
+    """Decode one legacy row's info payload without trusting its shape."""
+
+    try:
+        loaded = json.loads(info) if isinstance(info, str) else info
+    except (RecursionError, TypeError, ValueError):
+        return {}
+    return loaded if isinstance(loaded, Mapping) else {}
 
 
 def coerce_point_predictions(predictions: Mapping[str, Any]) -> dict[str, int]:
@@ -872,7 +1048,7 @@ def coerce_probability_vote(prediction: Any) -> int | None:
     if not valid_probability_mapping(prediction):
         return None
     vote_scores = coerce_vote_scores(prediction)
-    return max(vote_scores.items(), key=lambda item: item[1])[0]
+    return _argmax_vote(vote_scores)
 
 
 def valid_probability_mapping(prediction: Any) -> bool:
@@ -882,16 +1058,17 @@ def valid_probability_mapping(prediction: Any) -> bool:
         return False
     values: list[float] = []
     for value in prediction.values():
-        if isinstance(value, bool):
+        if type(value) not in (int, float):
             return False
         try:
             numeric = float(value)
-        except (TypeError, ValueError):
+        except (OverflowError, TypeError, ValueError):
             return False
         if not isfinite(numeric) or numeric < 0:
             return False
         values.append(numeric)
-    return sum(values) > 0
+    total = sum(values)
+    return isfinite(total) and total > 0
 
 
 def coerce_vote(prediction: Any) -> int | None:
@@ -910,7 +1087,7 @@ def coerce_vote(prediction: Any) -> int | None:
     if isinstance(prediction, Mapping):
         vote_scores = coerce_vote_scores(prediction)
         if vote_scores:
-            return max(vote_scores.items(), key=lambda item: item[1])[0]
+            return _argmax_vote(vote_scores)
     return None
 
 
@@ -918,15 +1095,24 @@ def coerce_vote_scores(prediction: Mapping[str, Any]) -> dict[int, float]:
     vote_scores: dict[int, float] = {}
     for key, value in prediction.items():
         label = coerce_class_label(key)
-        if label is None:
+        if label is None or type(value) not in (int, float):
             continue
         try:
             score = float(value)
-        except (TypeError, ValueError):
+        except (OverflowError, TypeError, ValueError):
             continue
         if isfinite(score):
             vote_scores[LABEL_TO_VOTE[label]] = score
     return vote_scores
+
+
+def _argmax_vote(vote_scores: Mapping[int, float]) -> int:
+    """Return the highest-scoring vote under the public canonical tie order."""
+
+    best_score = max(vote_scores.values())
+    return next(
+        vote for vote in ARGMAX_VOTE_ORDER if vote_scores.get(vote) == best_score
+    )
 
 
 def coerce_class_label(key: Any) -> str | None:
@@ -943,7 +1129,7 @@ def coerce_class_label(key: Any) -> str | None:
 
 
 def extract_json_object(text: str) -> Any:
-    """Decode bounded JSON candidates without suffix copies or parser crashes."""
+    """Decode exactly one bounded JSON value without parser recovery."""
 
     if not isinstance(text, str):
         raise ValueError("completion must be text")
@@ -952,24 +1138,22 @@ def extract_json_object(text: str) -> Any:
             f"completion exceeds {MAX_COMPLETION_CHARS} character JSON limit"
         )
 
-    decoder = json.JSONDecoder()
-    last_decodable: Any = None
-    last_with_predictions: dict[str, Any] | None = None
-    found_decodable = False
-    for index in _json_candidate_indices(text):
-        try:
-            parsed, _ = decoder.raw_decode(text, index)
-        except (json.JSONDecodeError, RecursionError):
-            continue
-        found_decodable = True
-        last_decodable = parsed
-        if isinstance(parsed, dict) and isinstance(parsed.get("predictions"), dict):
-            last_with_predictions = parsed
-    if last_with_predictions is not None:
-        return last_with_predictions
-    if found_decodable:
-        return last_decodable
-    raise ValueError("no JSON object found")
+    payload = text.strip()
+    # Validate nesting and work bounds before decoding. Exact key-set
+    # validation cannot detect duplicates after a normal decoder has silently
+    # collapsed them, so reject repeats while objects are built.
+    _json_candidate_indices(payload)
+    decoder = json.JSONDecoder(
+        object_pairs_hook=_reject_duplicate_json_keys,
+        parse_constant=_reject_non_finite_json_constant,
+    )
+    try:
+        parsed, end = decoder.raw_decode(payload)
+    except (json.JSONDecodeError, RecursionError, _DuplicateJsonKeyError) as error:
+        raise ValueError("completion is not one JSON value") from error
+    if payload[end:].strip():
+        raise ValueError("completion contains content after the JSON value")
+    return parsed
 
 
 def _json_candidate_indices(text: str) -> list[int]:

@@ -6,19 +6,21 @@ import subprocess
 import sys
 import tomllib
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 REPOSITORY_URL = "https://github.com/doctor-gonzo/commonground-envs"
+RELEASE_VERSION = "0.6.0"
 PROJECTS = {
     "commonground-predict": (
         ROOT / "environments" / "commonground_predict",
         "commonground_predict",
-        "0.5.0",
+        RELEASE_VERSION,
         [
-            "commonground-scenarios==0.5.0",
-            "commonground-score==0.5.0",
+            f"commonground-scenarios=={RELEASE_VERSION}",
+            f"commonground-score=={RELEASE_VERSION}",
             "datasets>=5.0.1,<6.0.0",
             "verifiers==0.3.0",
         ],
@@ -26,10 +28,10 @@ PROJECTS = {
     "commonground-elicit": (
         ROOT / "environments" / "commonground_elicit",
         "commonground_elicit",
-        "0.5.0",
+        RELEASE_VERSION,
         [
-            "commonground-scenarios==0.5.0",
-            "commonground-score==0.5.0",
+            f"commonground-scenarios=={RELEASE_VERSION}",
+            f"commonground-score=={RELEASE_VERSION}",
             "datasets>=5.0.1,<6.0.0",
             "verifiers==0.3.0",
         ],
@@ -37,13 +39,13 @@ PROJECTS = {
     "commonground-score": (
         ROOT / "packages" / "commonground-score",
         "commonground_score",
-        "0.5.0",
+        RELEASE_VERSION,
         [],
     ),
     "commonground-scenarios": (
         ROOT / "packages" / "commonground-scenarios",
         "commonground_scenarios",
-        "0.5.0",
+        RELEASE_VERSION,
         [],
     ),
 }
@@ -53,10 +55,40 @@ EXPECTED_ENVIRONMENT_DESCRIPTIONS = {
         "Probabilistic masked-vote prediction over synthetic stakeholder panels."
     ),
     "commonground-elicit": (
-        "Structured policy-issue diagnosis and top-k clarification over synthetic "
-        "stakeholder scenarios."
+        "Structured policy-issue diagnosis and single-target clarification over "
+        "synthetic stakeholder scenarios."
     ),
 }
+
+
+def test_workspace_distributions_share_release_version_and_exact_family_pins() -> None:
+    root_document = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    members = root_document["tool"]["uv"]["workspace"]["members"]
+    discovered: dict[str, dict[str, Any]] = {}
+    for member in members:
+        project = tomllib.loads(
+            (ROOT / member / "pyproject.toml").read_text(encoding="utf-8")
+        )["project"]
+        discovered[str(project["name"])] = project
+
+    assert set(discovered) == set(PROJECTS)
+    assert {project["version"] for project in discovered.values()} == {RELEASE_VERSION}
+
+    shared_distributions = {"commonground-scenarios", "commonground-score"}
+    for environment in ("commonground-predict", "commonground-elicit"):
+        family_dependencies = {
+            dependency.split("==", maxsplit=1)[0]: dependency
+            for dependency in discovered[environment]["dependencies"]
+            if dependency.split("==", maxsplit=1)[0] in shared_distributions
+        }
+        assert family_dependencies == {
+            distribution: f"{distribution}=={RELEASE_VERSION}"
+            for distribution in shared_distributions
+        }
+
+    assert root_document["project"]["dependencies"] == [
+        f"commonground-scenarios=={RELEASE_VERSION}"
+    ]
 
 
 @pytest.mark.parametrize(("distribution", "project"), PROJECTS.items())

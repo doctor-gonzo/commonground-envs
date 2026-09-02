@@ -18,6 +18,7 @@ class DomainTemplate:
     documents: tuple[dict[str, str], ...]
     planted_items: tuple[dict[str, Any], ...]
     distractors: tuple[dict[str, str], ...]
+    balance_type_neutral_distractors: bool = False
 
 
 VALUE_DIMENSIONS = (
@@ -658,7 +659,15 @@ HELDOUT_TEMPLATES: tuple[DomainTemplate, ...] = (
 def _additional_heldout_template(
     spec: tuple[str, ...], pattern_code: int
 ) -> DomainTemplate:
-    """Build one compact, authored held-out domain with a unique plant layout."""
+    """Build one held-out domain whose layout is balanced during generation.
+
+    Earlier releases attached two fixed administrative sentences to particular
+    issue types and placed the contradiction's second rule in the gap document.
+    Those choices formed a prompt-visible codebook.  These templates instead
+    keep each issue and the authored opposing rule in separate documents.  The
+    generator adds seeded, type-neutral distractors and balances sentence counts
+    before it independently randomizes sentence order, titles, and styles.
+    """
 
     (
         template_id,
@@ -691,89 +700,68 @@ def _additional_heldout_template(
         assurance_profiles[(pattern_code + 1) % 3],
         community_profiles[(pattern_code + 2) % 3],
     )
-    ambiguity_weights = _select_split_vector(
-        role_values,
+    # Rotate the strongest authored trade-off across issue families instead of
+    # making the ambiguity candidate the top-ranked item in nearly every row.
+    # Every vector is a genuine value composition (not a score epsilon), splits
+    # the corresponding faction panel at PASS_THRESHOLD, and yields a
+    # normalized top-one utility margin comfortably above the preregistered
+    # 0.10 release floor. The exact vectors are rendered in Ask.
+    balanced_tradeoffs = (
         (
             _vector(0.1, 0.8, 0.1, -0.6, 0.1),
-            _vector(0.2, 0.5, 0.1, -0.5, 0.5),
-            _vector(0.3, 0.7, 0.2, -0.5, -0.2),
-        ),
-        pattern_code,
-    )
-    contradiction_weights = _select_split_vector(
-        role_values,
-        (
-            _vector(0.4, 0.4, 0.6, -0.5, -0.2),
-            _vector(0.2, 0.2, 0.4, -0.4, 0.7),
-            _vector(0.6, 0.3, 0.2, -0.5, 0.1),
             _vector(-0.3, -0.3, -0.4, 0.7, 0.4),
-        ),
-        pattern_code + 1,
-    )
-    gap_weights = _select_split_vector(
-        role_values,
-        (
-            _vector(0.8, 0.3, 0.4, -0.5, -0.1),
-            _vector(0.4, 0.2, 0.5, -0.3, 0.6),
-            _vector(0.7, 0.5, 0.3, -0.4, 0.1),
             _vector(-0.2, -0.3, -0.2, 0.7, 0.6),
         ),
-        pattern_code + 2,
+        (
+            _vector(-0.3, -0.3, -0.4, 0.7, 0.4),
+            _vector(0.1, 0.8, 0.1, -0.6, 0.1),
+            _vector(0.8, 0.3, 0.4, -0.5, -0.1),
+        ),
+        (
+            _vector(0.4, 0.4, 0.6, -0.5, -0.2),
+            _vector(0.7, 0.5, 0.3, -0.4, 0.1),
+            _vector(0.1, 0.8, 0.1, -0.6, 0.1),
+        ),
+    )[pattern_code % 3]
+    ambiguity_weights, contradiction_weights, gap_weights = (
+        _select_split_vector(role_values, (weights,), 0)
+        for weights in balanced_tradeoffs
     )
-    fillers = (
-        "The document owner records each revision.",
-        "Approved copies carry a control code.",
-        "Archived versions remain read-only.",
-    )
-
-    def document(
-        doc_id: str,
-        title: str,
-        style: str,
-        anchor: str,
-        distractor: str | None,
-        prefix_count: int,
-        *extra: str,
-    ) -> dict[str, str]:
-        sentences = [*fillers[:prefix_count], anchor]
-        if distractor is not None:
-            sentences.append(distractor)
-        sentences.extend(extra)
-        return {
-            "doc_id": doc_id,
-            "title": title,
-            "style": style,
-            "text": " ".join(sentences),
-        }
-
-    ambiguity_distractor = "Completed reviews are dated in the case record."
-    contradiction_distractor = "The responsible desk logs each completed handoff."
     documents = [
-        document(
-            "scope-note",
-            "Scope review note",
-            "review note",
-            ambiguity_anchor,
-            ambiguity_distractor,
-            pattern_code % 3,
-        ),
-        document(
-            "authority-bulletin",
-            "Authority bulletin",
-            "authority bulletin",
-            contradiction_anchor,
-            contradiction_distractor,
-            (pattern_code // 3) % 3,
-        ),
-        document(
-            "exception-card",
-            "Exception response card",
-            "contingency card",
-            gap_anchor,
-            None,
-            2 + pattern_code // 9,
-            conflicting_rule,
-        ),
+        {
+            "doc_id": "scope-note",
+            "title": "Scope review note",
+            "style": "review note",
+            "text": ambiguity_anchor,
+        },
+        {
+            "doc_id": "authority-bulletin",
+            "title": "Authority bulletin",
+            "style": "authority bulletin",
+            "text": contradiction_anchor,
+        },
+        {
+            "doc_id": "exception-card",
+            "title": "Exception response card",
+            "style": "contingency card",
+            "text": gap_anchor,
+        },
+        {
+            "doc_id": "related-reference",
+            "title": "Related operating reference",
+            "style": "reference sheet",
+            "text": conflicting_rule,
+        },
+        {
+            "doc_id": "operations-ledger",
+            "title": "Operations ledger",
+            "style": "administrative record",
+            "text": (
+                f"The {sector} team closes a routine case only after the "
+                "assigned owner confirms completion in the operating register "
+                "and the scheduled review date remains current."
+            ),
+        },
     ]
     rotation = pattern_code % len(documents)
     documents = documents[rotation:] + documents[:rotation]
@@ -832,7 +820,7 @@ def _additional_heldout_template(
                     in {"food-bank-distribution", "regional-archives-access"}
                     else "alternative"
                 ),
-                "related_plant_doc_id": "exception-card",
+                "related_plant_doc_id": "related-reference",
                 "related_anchor_quote": conflicting_rule,
             },
             {
@@ -848,16 +836,16 @@ def _additional_heldout_template(
         ),
         distractors=(
             {
-                "doc_id": "scope-note",
-                "anchor_quote": ambiguity_distractor,
-                "reason": "The review record and timing are explicit.",
-            },
-            {
-                "doc_id": "authority-bulletin",
-                "anchor_quote": contradiction_distractor,
-                "reason": "The handoff record is precisely specified.",
+                "doc_id": "operations-ledger",
+                "anchor_quote": (
+                    f"The {sector} team closes a routine case only after the "
+                    "assigned owner confirms completion in the operating register "
+                    "and the scheduled review date remains current."
+                ),
+                "reason": "The routine closure rule names its condition and record.",
             },
         ),
+        balance_type_neutral_distractors=True,
     )
 
 

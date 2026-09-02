@@ -10,7 +10,7 @@ import re
 import sys
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
-from math import exp, log
+from math import exp, isfinite, log
 from pathlib import Path
 from typing import Any, Protocol, cast
 
@@ -66,6 +66,7 @@ def compute_floors(
 
     baseline_names = (
         "uniform-probability",
+        "snapshot-visible-prior",
         "global-visible-prior",
         "train-global-prior",
         "train-text-naive-bayes",
@@ -150,6 +151,12 @@ def compute_floors(
         snapshot_truth = list(held_out.values())
         truth_counts = Counter(snapshot_truth)
         best_constant = max(VALID_VOTES, key=lambda vote: (truth_counts[vote], vote))
+        snapshot_visible_prior = probability_distribution(
+            vote
+            for row in prepared["votes"]
+            for vote in row
+            if type(vote) is int and vote in VALID_VOTES
+        )
         forecasts: dict[str, dict[str, Forecast]] = {name: {} for name in totals}
         for cell_id in held_out:
             participant_index_text, statement_index_text = cell_id.split(
@@ -181,6 +188,7 @@ def compute_floors(
                 smoothing=0.5,
             )
             forecasts["uniform-probability"][cell_id] = probability_distribution(())
+            forecasts["snapshot-visible-prior"][cell_id] = snapshot_visible_prior
             forecasts["global-visible-prior"][cell_id] = global_visible_prior
             if text_vote_model is not None and train_global_prior is not None:
                 forecasts["train-global-prior"][cell_id] = train_global_prior
@@ -236,13 +244,25 @@ def compute_floors(
 
     if target_count == 0:
         raise ValueError(f"no held-out votes available in {path}")
-    return {
+    averaged = {
         name: {
             metric: _clean_float(total / target_count)
             for metric, total in metric_totals.items()
         }
         for name, metric_totals in totals.items()
     }
+    # A uniform reference is distribution-free but easy on three classes
+    # (reward 2/3). The current snapshot's visible class prior is a stronger,
+    # prompt-observable climatology. Report both so model reward is not framed
+    # only against the weaker reference.
+    snapshot_reference_brier = averaged["snapshot-visible-prior"]["brier"]
+    for metrics in averaged.values():
+        metrics["brier_skill_vs_original_snapshot_visible_prior"] = _clean_float(
+            0.0
+            if snapshot_reference_brier <= 0
+            else 1.0 - metrics["brier"] / snapshot_reference_brier
+        )
+    return averaged
 
 
 def load_snapshot_rows(path: Path) -> list[dict[str, Any]]:
@@ -332,7 +352,13 @@ def probability_distribution(
 ) -> dict[str, float]:
     """Normalize vote counts into an agree/disagree/pass forecast."""
 
-    counts: Counter[int] = Counter(votes)
+    if not isinstance(smoothing, (int, float)) or isinstance(smoothing, bool):
+        raise TypeError("smoothing must be a finite non-negative number")
+    if not isfinite(float(smoothing)) or smoothing < 0:
+        raise ValueError("smoothing must be a finite non-negative number")
+    counts: Counter[int] = Counter(
+        vote for vote in votes if type(vote) is int and vote in VALID_VOTES
+    )
     weighted = {vote: float(counts[vote]) + smoothing for vote in VALID_VOTES}
     total = sum(weighted.values())
     if total <= 0:
@@ -420,6 +446,12 @@ def nearest_participant_probabilities(
 ) -> dict[str, float]:
     """Return a prompt-visible k-NN vote distribution."""
 
+    if type(neighbor_count) is not int or neighbor_count <= 0:
+        raise ValueError("neighbor_count must be a positive integer")
+    if not isinstance(smoothing, (int, float)) or isinstance(smoothing, bool):
+        raise TypeError("smoothing must be a finite non-negative number")
+    if not isfinite(float(smoothing)) or smoothing < 0:
+        raise ValueError("smoothing must be a finite non-negative number")
     selected = ranked_neighbor_votes(votes, participant_index, statement_index)[
         :neighbor_count
     ]
@@ -485,6 +517,10 @@ def load_synthetic_generator() -> SyntheticGenerator:
 def render_markdown(floors: Mapping[str, Mapping[str, float]]) -> str:
     labels = {
         "uniform-probability": ("No-input", "Uniform probability"),
+        "snapshot-visible-prior": (
+            "Prompt-observable matrix-only",
+            "Per-snapshot visible class prior",
+        ),
         "global-visible-prior": (
             "Evaluation-corpus visible (transductive)",
             "Global visible class prior",
@@ -532,15 +568,16 @@ def render_markdown(floors: Mapping[str, Mapping[str, float]]) -> str:
         ),
     }
     lines = [
-        "| Comparator class | Comparator | probability reward | vote_accuracy | normalized Brier | Brier skill vs uniform |",
-        "| --- | --- | ---: | ---: | ---: | ---: |",
+        "| Comparator class | Comparator | probability reward | vote_accuracy | normalized Brier | Brier skill vs uniform | Brier skill vs snapshot prior |",
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: |",
     ]
     lines.extend(
         f"| {labels[name][0]} | {labels[name][1]} | "
         f"{metrics['probability_reward']:.3f} | "
         f"{metrics['vote_accuracy']:.3f} | "
         f"{metrics['brier']:.3f} | "
-        f"{metrics['brier_skill_vs_uniform']:.3f} |"
+        f"{metrics['brier_skill_vs_uniform']:.3f} | "
+        f"{metrics['brier_skill_vs_original_snapshot_visible_prior']:.3f} |"
         for name, metrics in floors.items()
     )
     return "\n".join(lines)

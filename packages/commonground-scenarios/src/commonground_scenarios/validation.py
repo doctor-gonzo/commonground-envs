@@ -6,10 +6,10 @@ import hashlib
 import json
 import re
 import unicodedata
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import date
 from importlib.resources import files
-from math import isfinite
+from math import isfinite, sqrt
 from typing import Any
 
 from commonground_scenarios.snapshot_validation import (
@@ -42,6 +42,13 @@ CE_SNAPSHOT_FIELDS = {
 }
 PLANT_TYPES = {"ambiguity", "contradiction", "gap"}
 STANCES = {"agree", "disagree", "pass"}
+DECISION_FIELDS = {
+    "actor",
+    "action",
+    "condition",
+    "anchor_outcome",
+    "alternative_outcome",
+}
 ID_PATTERN = re.compile(r"^[a-z][a-z0-9-]*$")
 PASS_THRESHOLD = 0.25
 YES_NO_AUXILIARIES = frozenset(
@@ -162,15 +169,10 @@ def _validate_factions(value: Any) -> dict[str, dict[str, Any]]:
         normalized_values: dict[str, float] = {}
         for dimension in VALUE_DIMENSIONS:
             value_score = values[dimension]
-            if isinstance(value_score, bool) or not isinstance(
-                value_score, (int, float)
-            ):
-                raise ScenarioValidationError(f"value {dimension} must be numeric")
-            numeric_value = float(value_score)
-            if not isfinite(numeric_value) or not -1 <= numeric_value <= 1:
-                raise ScenarioValidationError(
-                    f"value {dimension} must be finite and within [-1, 1]"
-                )
+            label = f"factions[{index}].values.{dimension}"
+            numeric_value = _finite_number(value_score, label)
+            if not -1 <= numeric_value <= 1:
+                raise ScenarioValidationError(f"{label} must be within [-1, 1]")
             normalized_values[dimension] = numeric_value
         factions[faction_id] = {**faction, "values": normalized_values}
     return factions
@@ -201,14 +203,11 @@ def _validate_panel(
     panel = _exact_object(
         value, {"vote_rule", "pass_threshold", "faction_ids"}, "persona_panel"
     )
-    if panel["vote_rule"] != "value-composition-v1":
+    if panel["vote_rule"] != "value-composition-v2":
         raise ScenarioValidationError(
-            "persona_panel.vote_rule must be value-composition-v1"
+            "persona_panel.vote_rule must be value-composition-v2"
         )
-    threshold = panel["pass_threshold"]
-    if isinstance(threshold, bool) or not isinstance(threshold, (int, float)):
-        raise ScenarioValidationError("persona_panel.pass_threshold must be numeric")
-    threshold = float(threshold)
+    threshold = _finite_number(panel["pass_threshold"], "persona_panel.pass_threshold")
     if threshold != PASS_THRESHOLD:
         raise ScenarioValidationError(
             f"persona_panel.pass_threshold must equal {PASS_THRESHOLD}"
@@ -245,6 +244,8 @@ def _validate_plants(
                 "type",
                 "canonical_question",
                 "canonical_question_aliases",
+                "decision",
+                "decision_aliases",
                 "value_weights",
                 "alternative_stances",
                 "canonical_yes_choice",
@@ -258,7 +259,7 @@ def _validate_plants(
         if plant_id in seen_ids:
             raise ScenarioValidationError(f"duplicate plant_id: {plant_id}")
         seen_ids.add(plant_id)
-        if plant["type"] not in PLANT_TYPES:
+        if not isinstance(plant["type"], str) or plant["type"] not in PLANT_TYPES:
             raise ScenarioValidationError(f"invalid planted type: {plant['type']!r}")
         seen_types.add(plant["type"])
         doc_id = _identifier(plant["doc_id"], f"planted_items[{index}].doc_id")
@@ -311,6 +312,62 @@ def _validate_plants(
                     f"duplicate canonical question or alias: {plant_id}"
                 )
             seen_question_fingerprints.add(alias_key)
+        decision = _exact_object(
+            plant["decision"],
+            DECISION_FIELDS,
+            f"planted_items[{index}].decision",
+        )
+        for field in sorted(DECISION_FIELDS):
+            decision_text = _nonempty_text(
+                decision[field],
+                f"planted_items[{index}].decision.{field}",
+            )
+            if len(decision_text) > 240:
+                raise ScenarioValidationError(
+                    f"planted_items[{index}].decision.{field} exceeds 240 characters"
+                )
+        decision_aliases = _exact_object(
+            plant["decision_aliases"],
+            DECISION_FIELDS,
+            f"planted_items[{index}].decision_aliases",
+        )
+        for field in sorted(DECISION_FIELDS):
+            raw_aliases = decision_aliases[field]
+            if not isinstance(raw_aliases, list) or not 1 <= len(raw_aliases) <= 8:
+                raise ScenarioValidationError(
+                    f"planted_items[{index}].decision_aliases.{field} must contain one to eight aliases"
+                )
+            aliases_for_field = [
+                _nonempty_text(
+                    alias,
+                    f"planted_items[{index}].decision_aliases.{field}[{alias_index}]",
+                )
+                for alias_index, alias in enumerate(raw_aliases)
+            ]
+            if any(len(alias) > 240 for alias in aliases_for_field):
+                raise ScenarioValidationError(
+                    f"planted_items[{index}].decision_aliases.{field} exceeds 240 characters"
+                )
+            if len(set(aliases_for_field)) != len(aliases_for_field):
+                raise ScenarioValidationError(
+                    f"planted_items[{index}].decision_aliases.{field} must be unique"
+                )
+            if aliases_for_field[0] != decision[field]:
+                raise ScenarioValidationError(
+                    f"planted_items[{index}].decision_aliases.{field} must begin with the canonical decision field"
+                )
+        # Actor labels are concrete source roles, unlike a gap's deliberately
+        # missing alternative. Every spelling accepted by the semantic scorer
+        # must occur in the plant's own evidence document; otherwise a custom
+        # scenario can validate successfully but lose the plant when the
+        # runtime enforces prompt observability.
+        if not all(
+            alias.casefold() in str(documents[doc_id]["text"]).casefold()
+            for alias in decision_aliases["actor"]
+        ):
+            raise ScenarioValidationError(
+                f"planted_items[{index}].decision_aliases.actor must all be source-observable roles"
+            )
         weights = _validate_value_vector(
             plant["value_weights"],
             f"planted_items[{index}].value_weights",
@@ -326,7 +383,10 @@ def _validate_plants(
             raise ScenarioValidationError(
                 f"alternative_stances must cover every faction: {plant_id}"
             )
-        if any(stance not in STANCES for stance in alternative_stances.values()):
+        if any(
+            not isinstance(stance, str) or stance not in STANCES
+            for stance in alternative_stances.values()
+        ):
             raise ScenarioValidationError(f"invalid alternative stance: {plant_id}")
         expected_alternative = {
             faction_id: _stance_for(
@@ -340,7 +400,10 @@ def _validate_plants(
                 f"alternative_stances do not match value composition: {plant_id}"
             )
         yes_choice = plant["canonical_yes_choice"]
-        if yes_choice not in {"anchor", "alternative"}:
+        if not isinstance(yes_choice, str) or yes_choice not in {
+            "anchor",
+            "alternative",
+        }:
             raise ScenarioValidationError(
                 f"canonical_yes_choice must be anchor or alternative: {plant_id}"
             )
@@ -349,7 +412,10 @@ def _validate_plants(
             raise ScenarioValidationError(
                 f"target_stances must cover every faction: {plant_id}"
             )
-        if any(stance not in STANCES for stance in stances.values()):
+        if any(
+            not isinstance(stance, str) or stance not in STANCES
+            for stance in stances.values()
+        ):
             raise ScenarioValidationError(f"invalid target stance: {plant_id}")
         expected = _orient_stances(expected_alternative, str(yes_choice))
         if dict(stances) != expected:
@@ -360,15 +426,21 @@ def _validate_plants(
             raise ScenarioValidationError(
                 f"plant must mark latently split factions: {plant_id}"
             )
-        decision_value = plant["decision_value"]
-        if (
-            isinstance(decision_value, bool)
-            or not isinstance(decision_value, (int, float))
-            or not isfinite(float(decision_value))
-            or not 0 < float(decision_value) <= 1
-        ):
+        decision_value = _finite_number(
+            plant["decision_value"],
+            f"planted_items[{index}].decision_value",
+        )
+        if not 0 < decision_value <= 1:
             raise ScenarioValidationError(
                 f"decision_value must be within (0, 1]: {plant_id}"
+            )
+        expected_decision_value = preference_tradeoff_value(
+            list(factions.values()),
+            weights,
+        )
+        if decision_value != expected_decision_value:
+            raise ScenarioValidationError(
+                f"decision_value does not match preference trade-off: {plant_id}"
             )
         related_evidence = plant["related_evidence"]
         if plant["type"] == "contradiction":
@@ -513,14 +585,18 @@ def _validate_provenance(value: Any, scenario_id: str) -> dict[str, Any]:
         raise ScenarioValidationError(
             "scenario_id must match provenance template and seed"
         )
-    if provenance["template_set"] not in {"train", "heldout"}:
+    template_set = _identifier(provenance["template_set"], "provenance.template_set")
+    if template_set not in {"train", "heldout"}:
         raise ScenarioValidationError(
             "provenance.template_set must be train or heldout"
         )
     canonical_date(provenance["generated_at"])
     if type(provenance["synthetic"]) is not bool:
         raise ScenarioValidationError("provenance.synthetic must be boolean")
-    if provenance["generation_mode"] not in {"template", "operator-polished", "human"}:
+    generation_mode = _identifier(
+        provenance["generation_mode"], "provenance.generation_mode"
+    )
+    if generation_mode not in {"template", "operator-polished", "human"}:
         raise ScenarioValidationError("invalid provenance.generation_mode")
     _identifier(provenance["generator_family"], "provenance.generator_family")
     return provenance
@@ -569,15 +645,26 @@ def _validate_value_vector(value: Any, label: str) -> dict[str, float]:
     normalized: dict[str, float] = {}
     for dimension in VALUE_DIMENSIONS:
         component = value[dimension]
-        if isinstance(component, bool) or not isinstance(component, (int, float)):
-            raise ScenarioValidationError(f"{label}.{dimension} must be numeric")
-        numeric = float(component)
-        if not isfinite(numeric) or not -1 <= numeric <= 1:
-            raise ScenarioValidationError(
-                f"{label}.{dimension} must be finite and within [-1, 1]"
-            )
+        component_label = f"{label}.{dimension}"
+        numeric = _finite_number(component, component_label)
+        if not -1 <= numeric <= 1:
+            raise ScenarioValidationError(f"{component_label} must be within [-1, 1]")
         normalized[dimension] = numeric
     return normalized
+
+
+def _finite_number(value: Any, label: str) -> float:
+    """Coerce a JSON number without leaking Python float conversion errors."""
+
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ScenarioValidationError(f"{label} must be numeric")
+    try:
+        numeric = float(value)
+    except OverflowError as error:
+        raise ScenarioValidationError(f"{label} must be finite") from error
+    if not isfinite(numeric):
+        raise ScenarioValidationError(f"{label} must be finite")
+    return numeric
 
 
 def _composed_preference(
@@ -590,6 +677,25 @@ def _composed_preference(
         sum(values[dimension] * weights[dimension] for dimension in VALUE_DIMENSIONS)
         / scale
     )
+
+
+def preference_tradeoff_value(
+    factions: Sequence[Mapping[str, Any]],
+    value_weights: Mapping[str, float],
+) -> float:
+    """Return the deterministic continuous value of one faction trade-off."""
+
+    if not factions:
+        raise ScenarioValidationError("decision value requires at least one faction")
+    preferences = [
+        _composed_preference(faction["values"], value_weights) for faction in factions
+    ]
+    strength = sqrt(
+        sum(preference * preference for preference in preferences) / len(preferences)
+    )
+    tradeoff = (max(preferences) - min(preferences)) / 2
+    value = 4 * (strength * tradeoff) ** 2
+    return min(1.0, max(float.fromhex("0x1.0p-52"), value))
 
 
 def _orient_stances(

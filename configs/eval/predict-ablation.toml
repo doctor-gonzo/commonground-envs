@@ -1,0 +1,15 @@
+# Predict prompt ablations use one immutable task split and change only the
+# prompt view. Run this config four times, overriding prompt-mode with each of:
+# full, matrix-only, text-only, shuffled-text. Native Verifiers records the
+# resolved mode, client/sampling/concurrency settings, and task answers in the
+# saved config/traces. Analysis requires their stable comparison signatures to
+# match after excluding prompt_mode itself.
+num_tasks = 100
+num_rollouts = 5
+shuffle = false
+push = false
+
+[env.taskset]
+id = "commonground-predict"
+split = "eval"
+prompt_mode = "full"

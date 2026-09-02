@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import math
 import os
@@ -17,6 +18,9 @@ from commonground_scenarios import (
     is_yes_no_question,
     validate_scenario,
 )
+from commonground_scenarios.generator import ACTOR_SUPPORT_REASON, SEMANTIC_SCOPES
+from commonground_scenarios.templates import VALUE_DIMENSIONS
+from commonground_scenarios.validation import PASS_THRESHOLD, YES_NO_AUXILIARIES
 from commonground_score import (
     cluster_separation,
     vote_entropy,
@@ -39,7 +43,6 @@ QUOTE_OVERLAP_THRESHOLD = 0.8
 PLANT_COVERAGE_THRESHOLD = 0.9
 QUOTE_PRECISION_THRESHOLD = 0.8
 MAX_COMPLETION_CHARS = 32_768
-MAX_JSON_STARTS = 64
 MAX_JSON_DEPTH = 32
 MAX_JSON_NODES = 10_000
 VALID_TASKS = frozenset({"find", "elicit-ask"})
@@ -47,15 +50,142 @@ VALID_REWARD_MODES = frozenset({"strict", "shaped"})
 STANCE_TO_VOTE = {"agree": 1, "disagree": -1, "pass": 0}
 QUESTION_GROUNDING_WEIGHT = 0.5
 STANCE_ACCURACY_WEIGHT = 0.5
+DECISION_FRAME_FIELDS = frozenset(
+    {
+        "actor",
+        "action",
+        "condition",
+        "anchor_outcome",
+        "alternative_outcome",
+    }
+)
+_SEMANTIC_STOPWORDS = frozenset(
+    {
+        "a",
+        "an",
+        "and",
+        "are",
+        "at",
+        "be",
+        "between",
+        "by",
+        "can",
+        "for",
+        "from",
+        "has",
+        "have",
+        "in",
+        "is",
+        "it",
+        "of",
+        "on",
+        "or",
+        "should",
+        "that",
+        "the",
+        "this",
+        "to",
+        "than",
+        "unless",
+        "when",
+        "whenever",
+        "whether",
+        "who",
+        "with",
+        "rather",
+    }
+)
+_YES_NO_AUXILIARY_TOKENS = frozenset(
+    auxiliary.casefold() for auxiliary in YES_NO_AUXILIARIES
+)
+_SEMANTIC_EQUIVALENTS = {
+    "allow": "permit",
+    "allowed": "permit",
+    "allows": "permit",
+    "authorise": "permit",
+    "authorize": "permit",
+    # Deterministic active/passive normalization for common policy actions.
+    # Keep this explicit: an open-ended stemmer would conflate unrelated
+    # authored concepts and make the semantic gate harder to audit.
+    "approved": "approve",
+    "choosing": "choose",
+    "defined": "define",
+    "disclosed": "disclose",
+    "issued": "issue",
+    "permitted": "permit",
+    "pausing": "pause",
+    "immediately": "immediate",
+    "removal": "remove",
+    "removed": "remove",
+    "released": "release",
+    "prohibit": "forbid",
+    "prohibited": "forbid",
+    "prevent": "forbid",
+    "prevents": "forbid",
+    "require": "must",
+    "required": "must",
+    "requires": "must",
+    "used": "use",
+}
+_QUESTION_INFERENCE_TOKENS = frozenset({"choose", "make", "permit", "wait"})
+_POLARITY_TOKENS = frozenset(
+    {
+        "!",
+        "!=",
+        "cannot",
+        "no",
+        "neither",
+        "never",
+        "nor",
+        "not",
+        "lack",
+        "lacking",
+        "lacks",
+        "without",
+        "~",
+        "¬",
+        "≠",
+    }
+)
 _TOKEN_PATTERN = re.compile(
     r"(?:!=|<=|>=|==)|[!~](?=\s*[^\W_])|-(?=\s*\d)|[^\W_]+|"
     r"[¬≠≤≥=<>±+\N{MINUS SIGN}%$€£¥∉∈∧\N{LOGICAL OR}]",
     flags=re.UNICODE,
 )
+_ORIENTATION_MARKER_PATTERN = re.compile(
+    r"\byes\s+selects\s+the\s+(anchor|alternative)\s+outcome\b",
+    flags=re.IGNORECASE,
+)
+_NEGATION_CONTRACTION_PATTERN = re.compile(r"\b[^\W_]+n['\u2019]t\b", re.IGNORECASE)
+_NEGATING_VERB_PATTERN = re.compile(
+    r"\b(?:avoid(?:s|ed|ing)?|refus(?:e|es|ed|ing)|declin(?:e|es|ed|ing))\b",
+    re.IGNORECASE,
+)
+_FAIL_TO_PATTERN = re.compile(r"\bfail(?:s|ed|ing)?\s+to\b", re.IGNORECASE)
+_SUBMITTED_SLOT_PRECISION_THRESHOLD = 0.75
+
+
+class _DuplicateJsonKeyError(ValueError):
+    """Raised before JSON object construction can erase a repeated key."""
+
+
+def _reject_duplicate_json_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    value: dict[str, Any] = {}
+    for key, item in pairs:
+        if key in value:
+            raise _DuplicateJsonKeyError(f"duplicate JSON key {key!r}")
+        value[key] = item
+    return value
+
+
+def _reject_non_finite_json_constant(value: str) -> Any:
+    """Reject the non-standard NaN and infinity tokens accepted by Python JSON."""
+
+    raise ValueError(f"non-finite JSON constant {value!r}")
 
 
 class ElicitJsonParser(legacy_vf.Parser):
-    """Extract the last task-specific JSON object from a completion."""
+    """Parse one complete task-specific JSON object from a completion."""
 
     def __init__(self, preferred_key: str = "findings") -> None:
         super().__init__()
@@ -128,19 +258,22 @@ class ElicitTask(vf.Task[ElicitTaskData]):
                 "question_format_valid": await question_format_validity(
                     completion, self.data.answer, self.data.info, parser
                 ),
+                "question_top1_selection_accuracy": await question_top1_selection_accuracy(
+                    completion, self.data.answer, self.data.info, parser
+                ),
                 "question_grounding_recall": await question_grounding_recall(
                     completion, self.data.answer, self.data.info, parser
                 ),
-                "question_stance_accuracy": await question_stance_accuracy(
+                "question_grounded_stance_recall": await question_grounded_stance_recall(
+                    completion, self.data.answer, self.data.info, parser
+                ),
+                "question_evidence_match_recall": await question_evidence_match_recall(
+                    completion, self.data.answer, self.data.info, parser
+                ),
+                "question_evidence_matched_stance_accuracy": await question_evidence_matched_stance_accuracy(
                     completion, self.data.answer, self.data.info, parser
                 ),
             }
-        question_score = await question_utility(
-            completion,
-            self.data.answer,
-            self.data.info,
-            ElicitJsonParser("findings"),
-        )
         localization = await finding_localization_recall(
             completion,
             self.data.answer,
@@ -149,6 +282,12 @@ class ElicitTask(vf.Task[ElicitTaskData]):
         type_score = await finding_type_accuracy(
             completion,
             self.data.answer,
+            ElicitJsonParser("findings"),
+        )
+        question_score = await question_utility(
+            completion,
+            self.data.answer,
+            self.data.info,
             ElicitJsonParser("findings"),
         )
         metrics = {
@@ -184,7 +323,7 @@ class ElicitTasksetConfig(vf.TasksetConfig):
     train_data_path: Path | None = None
     task_mode: Literal["find", "elicit-ask"] = "find"
     panel_polarization: float = 1.0
-    question_count: int = 2
+    question_count: int = 1
     split: Literal["eval", "train"] = "eval"
     reward_mode: Literal["strict", "shaped"] = "strict"
 
@@ -213,10 +352,27 @@ class _CompatibilityRubric:
             metrics["question_format_valid"] = await question_format_validity(
                 completion, answer, info, ElicitJsonParser("questions")
             )
+            metrics[
+                "question_top1_selection_accuracy"
+            ] = await question_top1_selection_accuracy(
+                completion, answer, info, ElicitJsonParser("questions")
+            )
             metrics["question_grounding_recall"] = await question_grounding_recall(
                 completion, answer, info, ElicitJsonParser("questions")
             )
-            metrics["question_stance_accuracy"] = await question_stance_accuracy(
+            metrics[
+                "question_grounded_stance_recall"
+            ] = await question_grounded_stance_recall(
+                completion, answer, info, ElicitJsonParser("questions")
+            )
+            metrics[
+                "question_evidence_match_recall"
+            ] = await question_evidence_match_recall(
+                completion, answer, info, ElicitJsonParser("questions")
+            )
+            metrics[
+                "question_evidence_matched_stance_accuracy"
+            ] = await question_evidence_matched_stance_accuracy(
                 completion, answer, info, ElicitJsonParser("questions")
             )
         else:
@@ -352,7 +508,7 @@ def load_taskset(
     *,
     task: str = "find",
     panel_polarization: float = 1.0,
-    question_count: int = 2,
+    question_count: int = 1,
     train_data_path: str | os.PathLike[str] | None = None,
     split: str = "eval",
     reward_mode: str = "strict",
@@ -405,7 +561,7 @@ def load_environment(
     *,
     task: str = "find",
     panel_polarization: float = 1.0,
-    question_count: int = 2,
+    question_count: int = 1,
     train_data_path: str | os.PathLike[str] | None = None,
     split: str = "eval",
     reward_mode: str = "strict",
@@ -435,10 +591,13 @@ def load_environment(
             funcs=[
                 question_utility,
                 question_format_validity,
+                question_top1_selection_accuracy,
                 question_grounding_recall,
-                question_stance_accuracy,
+                question_grounded_stance_recall,
+                question_evidence_match_recall,
+                question_evidence_matched_stance_accuracy,
             ],
-            weights=[1.0, 0.0, 0.0, 0.0],
+            weights=[1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
             parser=parser,
         )
         if task == "elicit-ask"
@@ -596,7 +755,13 @@ def scenario_to_row(
             "doc_id": plant["doc_id"],
             "quote": plant["anchor_quote"],
             "type": plant["type"],
-            "diagnosis": plant["canonical_question"],
+            "diagnosis": _oriented_decision_question(
+                str(plant["canonical_question"]),
+                _canonical_decision_frame(plant, documents),
+                str(plant["canonical_yes_choice"]),
+            ),
+            "decision": _canonical_decision_frame(plant, documents),
+            "decision_aliases": copy.deepcopy(plant["decision_aliases"]),
             "related_evidence": plant["related_evidence"],
             "related_document_text": (
                 next(
@@ -620,8 +785,25 @@ def scenario_to_row(
             "doc_id": plant["doc_id"],
             "quote": plant["anchor_quote"],
             "type": plant["type"],
-            "question": plant["canonical_question"],
-            "question_aliases": list(plant["canonical_question_aliases"]),
+            "question": _oriented_decision_question(
+                str(plant["canonical_question"]),
+                _canonical_decision_frame(plant, documents),
+                str(plant["canonical_yes_choice"]),
+            ),
+            "question_aliases": [
+                _oriented_decision_question(
+                    str(alias),
+                    _canonical_decision_frame(plant, documents),
+                    str(plant["canonical_yes_choice"]),
+                )
+                for alias in plant["canonical_question_aliases"]
+            ],
+            "decision": _canonical_decision_frame(plant, documents),
+            "decision_aliases": copy.deepcopy(plant["decision_aliases"]),
+            "value_weights": {
+                dimension: float(plant["value_weights"][dimension])
+                for dimension in VALUE_DIMENSIONS
+            },
             "yes_choice": plant["canonical_yes_choice"],
             "target_stances": dict(plant["target_stances"]),
             "alternative_stances": dict(plant["alternative_stances"]),
@@ -657,7 +839,11 @@ def scenario_to_row(
     answer = (
         {"questions": question_oracle}
         if task == "elicit-ask"
-        else {"findings": findings_answer, "questions": question_oracle}
+        else {
+            "findings": findings_answer,
+            "questions": question_oracle,
+            "question_count": effective_question_count,
+        }
     )
     info = {
         "scenario_id": scenario["scenario_id"],
@@ -676,7 +862,11 @@ def scenario_to_row(
                 "role": "user",
                 "content": (
                     render_ask_prompt(
-                        documents, scenario["factions"], effective_question_count
+                        documents,
+                        scenario["factions"],
+                        visible_plants,
+                        effective_question_count,
+                        panel_polarization=panel_polarization,
                     )
                     if task == "elicit-ask"
                     else render_prompt(
@@ -691,6 +881,41 @@ def scenario_to_row(
         "info": json.dumps(info, sort_keys=True),
         "example_id": str(scenario["scenario_id"]),
     }
+
+
+def _canonical_decision_frame(
+    plant: Mapping[str, Any], documents: Sequence[Mapping[str, str]]
+) -> dict[str, str]:
+    """Return the template-authored structured decision reference.
+
+    ``documents`` remains in the private helper signature for compatibility
+    with release-analysis code.  The reference itself is deliberately not
+    synthesized from token positions: every template authors the five semantic
+    slots and generation validates them as part of the scenario answer key.
+    """
+
+    del documents
+    decision = _parse_decision_frame(plant.get("decision"))
+    if decision is None:
+        raise ValueError("planted issue is missing its authored decision frame")
+    return decision
+
+
+def _oriented_decision_question(
+    question: str, decision: Mapping[str, str], yes_choice: str
+) -> str:
+    """Make the scored yes-side explicit instead of inferring polarity from prose."""
+
+    outcome_field = (
+        "anchor_outcome" if yes_choice == "anchor" else "alternative_outcome"
+    )
+    stem = question.strip().removesuffix("?").strip()
+    if not _decision_stem_expresses_core(stem, decision):
+        stem = (
+            f"Should {decision['actor']} {decision['action']} when "
+            f"{decision['condition']}"
+        )
+    return f"{stem} (yes selects the {yes_choice} outcome: {decision[outcome_field]})?"
 
 
 def build_document_view(
@@ -730,16 +955,44 @@ def build_document_view(
         if plant["plant_id"] not in selected_plant_ids
     }
 
-    visible_distractors = _density_prefix(
+    selected_distractors = [
+        item for item in scenario["distractors"] if item["doc_id"] in selected_doc_ids
+    ]
+    actor_support_distractors = [
+        item for item in selected_distractors if item["reason"] == ACTOR_SUPPORT_REASON
+    ]
+    required_actor_support = [
+        item
+        for item in actor_support_distractors
+        if any(
+            plant["doc_id"] == item["doc_id"]
+            and any(
+                str(alias).casefold() in str(item["anchor_quote"]).casefold()
+                for alias in _plant_actor_aliases(plant)
+            )
+            for plant in selected_plants
+        )
+    ]
+    visible_neutral_distractors = _density_prefix(
         [
             item
-            for item in scenario["distractors"]
-            if item["doc_id"] in selected_doc_ids
+            for item in selected_distractors
+            if item["reason"] != ACTOR_SUPPORT_REASON
         ],
         distractor_density,
     )
+    # Regression guard: actor support is part of a scored candidate's public
+    # evidence, not optional noise. Density still controls only true neutral
+    # distractors, while support for omitted plants stays hidden.
+    visible_distractors = [*required_actor_support, *visible_neutral_distractors]
     visible_distractor_anchors = {
         (item["doc_id"], item["anchor_quote"]) for item in visible_distractors
+    }
+    visible_neutral_anchors = {
+        (item["doc_id"], item["anchor_quote"]) for item in visible_neutral_distractors
+    }
+    required_actor_support_anchors = {
+        (item["doc_id"], item["anchor_quote"]) for item in required_actor_support
     }
     all_distractor_anchors = {
         (item["doc_id"], item["anchor_quote"]) for item in scenario["distractors"]
@@ -758,43 +1011,153 @@ def build_document_view(
                 text = text.replace(anchor, "")
         text = " ".join(text.split())
         if docs_length is not None and len(text) > docs_length:
-            truncation_index = _safe_truncation_index(
+            document_plants = [
+                plant
+                for plant in selected_plants
+                if plant["doc_id"] == document["doc_id"]
+            ]
+            visible_anchors = [plant["anchor_quote"] for plant in document_plants] + [
+                anchor
+                for doc_id, anchor in sorted(visible_distractor_anchors)
+                if doc_id == document["doc_id"]
+            ]
+            truncated = _truncate_document(text, docs_length, visible_anchors)
+
+            # Optional noise must not crowd a scored actor key out of a bounded
+            # excerpt. Prefer the ordinary density view; only discard its
+            # neutral spans when doing so preserves more complete candidates.
+            support_first_source = _remove_document_anchors(
                 text,
-                docs_length,
                 [
-                    plant["anchor_quote"]
-                    for plant in selected_plants
-                    if plant["doc_id"] == document["doc_id"]
-                ]
-                + [
                     anchor
-                    for doc_id, anchor in sorted(visible_distractor_anchors)
+                    for doc_id, anchor in sorted(visible_neutral_anchors)
                     if doc_id == document["doc_id"]
                 ],
             )
-            text = text[:truncation_index].rstrip() + "…"
+            support_first_source = " ".join(support_first_source.split())
+            protected_anchors = [plant["anchor_quote"] for plant in document_plants] + [
+                anchor
+                for doc_id, anchor in sorted(required_actor_support_anchors)
+                if doc_id == document["doc_id"]
+            ]
+            support_first = _truncate_document(
+                support_first_source,
+                docs_length,
+                protected_anchors,
+            )
+            standard_complete = sum(
+                plant["anchor_quote"] in truncated
+                and _plant_actor_aliases_visible(plant, truncated)
+                for plant in document_plants
+            )
+            support_first_complete = sum(
+                plant["anchor_quote"] in support_first
+                and _plant_actor_aliases_visible(plant, support_first)
+                for plant in document_plants
+            )
+            text = (
+                support_first
+                if support_first_complete > standard_complete
+                else truncated
+            )
         documents.append({**document, "text": text})
 
     visible_text_by_doc = {
         document["doc_id"]: document["text"] for document in documents
     }
-    visible_plants = [
+    initially_visible_plants = [
         plant
         for plant in selected_plants
         if plant["doc_id"] in visible_text_by_doc
         and plant["anchor_quote"] in visible_text_by_doc[plant["doc_id"]]
     ]
+    visible_plants = [
+        plant
+        for plant in initially_visible_plants
+        if _plant_actor_aliases_visible(
+            plant,
+            visible_text_by_doc[plant["doc_id"]],
+        )
+    ]
+    unobservable_anchors = {
+        (plant["doc_id"], plant["anchor_quote"])
+        for plant in initially_visible_plants
+        if plant not in visible_plants
+    }
+    if unobservable_anchors:
+        # A prefix may preserve an issue anchor but truncate its accepted actor
+        # evidence. Remove that now-unscorable issue rather than emitting a
+        # visible prompt with a hidden semantic answer-key requirement.
+        documents = [
+            {
+                **document,
+                "text": " ".join(
+                    _remove_document_anchors(
+                        document["text"],
+                        [
+                            anchor
+                            for doc_id, anchor in sorted(unobservable_anchors)
+                            if doc_id == document["doc_id"]
+                        ],
+                    ).split()
+                ),
+            }
+            for document in documents
+        ]
     return documents, visible_plants
+
+
+def _plant_actor_aliases(plant: Mapping[str, Any]) -> tuple[str, ...]:
+    """Return the exact actor concepts accepted by the semantic scorer."""
+
+    decision = plant.get("decision")
+    canonical = (
+        str(decision.get("actor", "")).strip() if isinstance(decision, Mapping) else ""
+    )
+    decision_aliases = plant.get("decision_aliases")
+    raw_aliases = (
+        decision_aliases.get("actor", ())
+        if isinstance(decision_aliases, Mapping)
+        else ()
+    )
+    aliases = tuple(
+        str(alias).strip()
+        for alias in raw_aliases
+        if isinstance(alias, str) and alias.strip()
+    )
+    return aliases or ((canonical,) if canonical else ())
+
+
+def _plant_actor_aliases_visible(plant: Mapping[str, Any], text: str) -> bool:
+    """Require every accepted actor spelling to appear in the public document."""
+
+    folded_text = text.casefold()
+    aliases = _plant_actor_aliases(plant)
+    return bool(aliases) and all(alias.casefold() in folded_text for alias in aliases)
+
+
+def _remove_document_anchors(text: str, anchors: Sequence[str]) -> str:
+    for anchor in anchors:
+        text = text.replace(anchor, "")
+    return text
+
+
+def _truncate_document(text: str, limit: int, anchors: Sequence[str]) -> str:
+    if len(text) <= limit:
+        return text
+    truncation_index = _safe_truncation_index(text, limit, anchors)
+    return text[:truncation_index].rstrip() + "…"
 
 
 def render_prompt(
     documents: Sequence[Mapping[str, str]],
     *,
     factions: Sequence[Mapping[str, Any]] = (),
-    question_count: int = 2,
+    question_count: int = 1,
 ) -> str:
     """Render the finding task and its observable weight-zero T2 metric."""
 
+    question_object_label = "question object" + ("" if question_count == 1 else "s")
     lines = [
         "Find material ambiguities, contradictions, and gaps in these policy documents.",
         "Use an exact or close quote from the relevant document for each finding.",
@@ -818,19 +1181,27 @@ def render_prompt(
     lines.extend(
         [
             "",
-            "Return STRICT JSON only, with this shape:",
+            (
+                "Return STRICT JSON only. The extended form below includes the "
+                "optional weight-zero companion; a findings-only root is valid:"
+            ),
             (
                 '{"findings":[{"doc_id":"<document id>","quote":"<minimal passage>","type":"ambiguity|contradiction|gap",'
-                '"diagnosis":"<yes/no question naming the unresolved decision>","related_evidence":null|{"doc_id":"<conflicting document id>","quote":"<conflicting passage>"}}],'
+                '"diagnosis":"<yes/no question naming the unresolved decision>",'
+                '"decision":{"actor":"<decision maker>","action":"<decision action>","condition":"<trigger or scope>","anchor_outcome":"<outcome preserving the primary rule>","alternative_outcome":"<clarification, fallback, or conflicting outcome>"},'
+                '"related_evidence":null|{"doc_id":"<conflicting document id>","quote":"<conflicting passage>"}}],'
                 '"questions":[{"doc_id":"<document id>","quote":"<passage>","type":"ambiguity|contradiction|gap",'
-                '"question":"<specific yes/no clarifying question>","yes_choice":"anchor|alternative",'
+                '"question":"<specific yes/no clarifying question>",'
+                '"decision":{"actor":"<decision maker>","action":"<decision action>","condition":"<trigger or scope>","anchor_outcome":"<outcome preserving the primary rule>","alternative_outcome":"<clarification, fallback, or conflicting outcome>"},'
+                '"yes_choice":"anchor|alternative",'
                 '"related_evidence":null|{"doc_id":"<conflicting document id>","quote":"<conflicting passage>"},'
                 '"target_stances":{"<faction id>":"agree|disagree|pass"}}]}'
             ),
-            f"Return exactly {question_count} question objects. Select the issues most likely to reveal faction disagreement. The findings determine reward; questions are scored as a logged weight-zero companion metric.",
+            f"The root may also include exactly {question_count} optional {question_object_label} for the logged weight-zero companion metric. Omitting or malformed companion questions never changes the findings reward.",
             "Phrase each question as yes/no: agree means that faction predicts yes, disagree means no, and pass means no position.",
             "Set yes_choice to anchor when yes preserves or applies the primary quoted rule; set it to alternative when yes favors a clarification, fallback, or the second conflicting rule.",
-            "For every finding and question, identify the concrete unresolved threshold, exception, authority conflict, or alternative using the visible evidence.",
+            "For every finding and question, fill all five decision fields from the visible documents. The prose must express that same actor, action, condition, and the outcome designated by yes_choice.",
+            'Because findings have no yes_choice field, end each diagnosis with "(yes selects the anchor outcome: <anchor_outcome>)" or "(yes selects the alternative outcome: <alternative_outcome>)".',
             "For contradictions, related_evidence must quote the second conflicting rule. For other finding types it must be null.",
         ]
     )
@@ -840,24 +1211,51 @@ def render_prompt(
 def render_ask_prompt(
     documents: Sequence[Mapping[str, str]],
     factions: Sequence[Mapping[str, Any]],
+    candidate_plants: Sequence[Mapping[str, Any]],
     question_count: int,
+    *,
+    panel_polarization: float,
 ) -> str:
-    """Render the question-raising task without exposing planted stances."""
+    """Render Ask as selection among explicit synthetic decision profiles.
 
+    The profile list exposes exactly the issue-specific weights used with the
+    already visible faction vectors. It deliberately omits evidence locations,
+    issue labels, relationships, stored stances, and precomputed utilities, so
+    the model must still ground and diagnose each candidate in the documents.
+    """
+
+    question_label = "question" if question_count == 1 else "questions"
     lines = [
-        f"Select and raise exactly {question_count} clarifying questions grounded in these policy documents.",
+        f"Select and raise exactly {question_count} clarifying {question_label} grounded in these policy documents.",
         "Each question should expose a specific ambiguity, contradiction, or uncovered case that could split the listed stakeholder factions.",
         "Phrase every question as yes/no. Predict every faction's answer: agree means yes, disagree means no, and pass means no position.",
         "Set yes_choice to anchor when yes preserves or applies the primary quoted rule; set it to alternative when yes favors a clarification, fallback, or the second conflicting rule. The stance labels are scored in that declared orientation.",
-        "Choose from more candidate issues than the output budget. Prioritize questions whose answers would distinguish the factions' stated policy principles.",
+        "Choose from more candidate issues than the output budget. Candidate order is not a ranking.",
+        "For each candidate and faction, compute alternative_preference = sum(faction_value[d] * alternative_tradeoff_weight[d]) / sum(abs(alternative_tradeoff_weight[d])). Scores >= +0.25 favor the alternative, scores <= -0.25 favor the anchor, and scores strictly between those thresholds pass.",
+        "Orient target_stances to your submitted yes_choice: alternative keeps those labels; anchor swaps agree and disagree while leaving pass unchanged.",
+        "Rank candidates by utility = decision_value * ((1 - panel_polarization) + panel_polarization * disagreement). decision_value = min(1, 4 * (RMS(alternative_preference) * ((max(alternative_preference) - min(alternative_preference)) / 2))^2). disagreement is the mean of (a) normalized three-label Shannon entropy and (b) the fraction of unordered faction pairs with different labels.",
+        f"This row uses panel_polarization={panel_polarization:.6g} and pass_threshold={PASS_THRESHOLD:.6g}. Select the {question_count} highest-utility candidate profile(s).",
         "Copy the exact supporting passage into quote and classify its issue type. For contradictions, also copy the second conflicting rule into related_evidence; otherwise related_evidence must be null.",
-        "Question wording must be a yes/no question, but is not compared with hidden canonical vocabulary. The structured document, evidence, type, relationship, and yes_choice fields determine semantic grounding.",
+        "Copy the selected profile's complete decision object into the response. Ground it in the visible documents; the yes/no prose must express that same actor, action, condition, and the outcome designated by yes_choice. Generic questions receive no semantic credit.",
         "",
         "Stakeholder factions:",
     ]
     lines.extend(
         f"[{faction['faction_id']}] {faction['name']}: {faction['summary']}"
         for faction in factions
+    )
+    lines.extend(
+        [
+            "",
+            "Candidate decision profiles (unordered; one per possible issue):",
+            json.dumps(
+                _public_candidate_profiles(candidate_plants),
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+                allow_nan=False,
+            ),
+        ]
     )
     lines.extend(["", "Documents:"])
     for document in documents:
@@ -872,10 +1270,43 @@ def render_ask_prompt(
         [
             "",
             "Return STRICT JSON only, with this shape:",
-            '{"questions":[{"doc_id":"<document id>","quote":"<passage>","type":"ambiguity|contradiction|gap","question":"<specific clarifying question>","yes_choice":"anchor|alternative","related_evidence":null|{"doc_id":"<conflicting document id>","quote":"<conflicting passage>"},"target_stances":{"<faction id>":"agree|disagree|pass"}}]}',
+            '{"questions":[{"doc_id":"<document id>","quote":"<passage>","type":"ambiguity|contradiction|gap","question":"<specific clarifying question>","decision":{"actor":"<decision maker>","action":"<decision action>","condition":"<trigger or scope>","anchor_outcome":"<outcome preserving the primary rule>","alternative_outcome":"<clarification, fallback, or conflicting outcome>"},"yes_choice":"anchor|alternative","related_evidence":null|{"doc_id":"<conflicting document id>","quote":"<conflicting passage>"},"target_stances":{"<faction id>":"agree|disagree|pass"}}]}',
         ]
     )
     return "\n".join(lines)
+
+
+def _public_candidate_profiles(
+    candidate_plants: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Return only the candidate fields intentionally visible in Ask.
+
+    Sorting by the authored decision frame, never by a hidden label or utility,
+    prevents list position from becoming the selection answer.
+    """
+
+    profiles = [
+        {
+            "decision": {
+                field: str(plant["decision"][field])
+                for field in sorted(DECISION_FRAME_FIELDS)
+            },
+            "alternative_tradeoff_weights": {
+                dimension: float(plant["value_weights"][dimension])
+                for dimension in VALUE_DIMENSIONS
+            },
+        }
+        for plant in candidate_plants
+    ]
+    profiles.sort(
+        key=lambda profile: json.dumps(
+            profile["decision"],
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        )
+    )
+    return profiles
 
 
 async def question_utility(
@@ -925,36 +1356,14 @@ async def question_format_validity(
     return float(candidates is not None and len(candidates) == question_count)
 
 
-async def question_grounding_recall(
+async def question_top1_selection_accuracy(
     completion: list[dict[str, Any]],
     answer: Mapping[str, Any] | str,
     info: Mapping[str, Any] | str,
     parser: ElicitJsonParser,
 ) -> float:
-    """Metric: selected questions match exact public structured evidence."""
+    """Metric: exact public evidence selects the highest-utility candidate."""
 
-    components = _question_diagnostic_components(completion, answer, info, parser)
-    return components[0]
-
-
-async def question_stance_accuracy(
-    completion: list[dict[str, Any]],
-    answer: Mapping[str, Any] | str,
-    info: Mapping[str, Any] | str,
-    parser: ElicitJsonParser,
-) -> float:
-    """Metric: stance accuracy after optimal structured issue matching."""
-
-    components = _question_diagnostic_components(completion, answer, info, parser)
-    return components[1]
-
-
-def _question_diagnostic_components(
-    completion: list[dict[str, Any]],
-    answer: Mapping[str, Any] | str,
-    info: Mapping[str, Any] | str,
-    parser: ElicitJsonParser,
-) -> tuple[float, float]:
     answer_payload = _parse_mapping_payload(answer)
     info_payload = _parse_mapping_payload(info)
     parsed = parser.parse_answer(completion)
@@ -971,38 +1380,242 @@ def _question_diagnostic_components(
         or not isinstance(planted, Sequence)
         or isinstance(planted, str)
     ):
-        return 0.0, 0.0
-    grounding_weights: list[list[float]] = []
-    stance_weights: list[list[float]] = []
+        return 0.0
+    top_plants = sorted(
+        planted,
+        key=lambda plant: (
+            -_plant_attainable_question_utility(
+                plant,
+                panel_polarization=float(info_payload.get("panel_polarization", 0.0)),
+            ),
+            str(plant.get("doc_id", "")),
+            str(plant.get("quote", "")),
+        ),
+    )[:question_count]
+    eligible = [
+        [_candidate_plant_evidence_match(candidate, plant) for plant in top_plants]
+        for candidate in candidates
+    ]
+    selected, _, _ = _best_question_assignment(
+        eligible,
+        [[0] * len(top_plants) for _ in candidates],
+        [[0] * len(top_plants) for _ in candidates],
+    )
+    return selected / question_count
+
+
+async def question_grounding_recall(
+    completion: list[dict[str, Any]],
+    answer: Mapping[str, Any] | str,
+    info: Mapping[str, Any] | str,
+    parser: ElicitJsonParser,
+) -> float:
+    """Metric: selected questions match exact public structured evidence."""
+
+    components = _question_diagnostic_components(completion, answer, info, parser)
+    return components[0]
+
+
+async def question_grounded_stance_recall(
+    completion: list[dict[str, Any]],
+    answer: Mapping[str, Any] | str,
+    info: Mapping[str, Any] | str,
+    parser: ElicitJsonParser,
+) -> float:
+    """Metric: end-to-end stance credit, with ungrounded questions scored zero."""
+
+    components = _question_diagnostic_components(completion, answer, info, parser)
+    return components[1]
+
+
+async def question_evidence_matched_stance_accuracy(
+    completion: list[dict[str, Any]],
+    answer: Mapping[str, Any] | str,
+    info: Mapping[str, Any] | str,
+    parser: ElicitJsonParser,
+) -> float:
+    """Metric: stance accuracy after exact evidence localization.
+
+    Unlike grounded stance recall, this denominator does not require the
+    submitted decision/question semantics to pass.  It therefore isolates
+    faction-orientation quality after the model has found the right passage.
+    """
+
+    components = _question_diagnostic_components(completion, answer, info, parser)
+    return components[3]
+
+
+async def question_evidence_match_recall(
+    completion: list[dict[str, Any]],
+    answer: Mapping[str, Any] | str,
+    info: Mapping[str, Any] | str,
+    parser: ElicitJsonParser,
+) -> float:
+    """Metric: fraction of requested questions with exact evidence matches."""
+
+    components = _question_diagnostic_components(completion, answer, info, parser)
+    return components[2]
+
+
+async def question_conditional_stance_accuracy(
+    completion: list[dict[str, Any]],
+    answer: Mapping[str, Any] | str,
+    info: Mapping[str, Any] | str,
+    parser: ElicitJsonParser,
+) -> float:
+    """Deprecated source-compatible alias for the evidence-matched metric."""
+
+    return await question_evidence_matched_stance_accuracy(
+        completion, answer, info, parser
+    )
+
+
+async def question_stance_accuracy(
+    completion: list[dict[str, Any]],
+    answer: Mapping[str, Any] | str,
+    info: Mapping[str, Any] | str,
+    parser: ElicitJsonParser,
+) -> float:
+    """Backward-compatible alias for end-to-end grounded stance recall."""
+
+    return await question_grounded_stance_recall(completion, answer, info, parser)
+
+
+def _question_diagnostic_components(
+    completion: list[dict[str, Any]],
+    answer: Mapping[str, Any] | str,
+    info: Mapping[str, Any] | str,
+    parser: ElicitJsonParser,
+) -> tuple[float, float, float, float]:
+    answer_payload = _parse_mapping_payload(answer)
+    info_payload = _parse_mapping_payload(info)
+    parsed = parser.parse_answer(completion)
+    candidates = parse_candidate_questions(
+        parsed,
+        allow_findings=bool(info_payload.get("allow_combined_questions", False)),
+    )
+    planted = answer_payload.get("questions", [])
+    question_count = int(info_payload.get("question_count", 0))
+    if (
+        candidates is None
+        or len(candidates) != question_count
+        or question_count <= 0
+        or not isinstance(planted, Sequence)
+        or isinstance(planted, str)
+    ):
+        return 0.0, 0.0, 0.0, 0.0
+    grounding_edges: list[list[bool]] = []
+    evidence_edges: list[list[bool]] = []
+    correct_stances: list[list[int]] = []
+    stance_opportunities: list[list[int]] = []
     for candidate in candidates:
-        candidate_grounding: list[float] = []
-        candidate_stances: list[float] = []
+        candidate_grounding: list[bool] = []
+        candidate_evidence: list[bool] = []
+        candidate_correct_stances: list[int] = []
+        candidate_stance_opportunities: list[int] = []
         for plant in planted:
-            grounded = _candidate_plant_grounding(candidate, plant) is not None
-            candidate_grounding.append(float(grounded))
-            if not grounded:
-                candidate_stances.append(0.0)
-                continue
+            evidence_matched = _candidate_plant_evidence_match(candidate, plant)
+            grounded = (
+                evidence_matched
+                and _candidate_plant_grounding(candidate, plant) is not None
+            )
+            candidate_evidence.append(evidence_matched)
+            candidate_grounding.append(grounded)
             expected = _stances_for_yes_choice(
                 plant, str(candidate.get("yes_choice", ""))
             )
             submitted = candidate.get("target_stances", {})
-            candidate_stances.append(
-                sum(
-                    isinstance(submitted, Mapping)
-                    and submitted.get(faction_id) == stance
-                    for faction_id, stance in expected.items()
-                )
-                / len(expected)
-                if expected
-                else 0.0
+            exact_faction_set = isinstance(submitted, Mapping) and set(
+                submitted
+            ) == set(expected)
+            correct_count = sum(
+                exact_faction_set and submitted.get(faction_id) == stance
+                for faction_id, stance in expected.items()
             )
-        grounding_weights.append(candidate_grounding)
-        stance_weights.append(candidate_stances)
-    return (
-        _maximum_weight_sum(grounding_weights) / question_count,
-        _maximum_weight_sum(stance_weights) / question_count,
+            candidate_correct_stances.append(correct_count)
+            candidate_stance_opportunities.append(len(expected))
+        grounding_edges.append(candidate_grounding)
+        evidence_edges.append(candidate_evidence)
+        correct_stances.append(candidate_correct_stances)
+        stance_opportunities.append(candidate_stance_opportunities)
+
+    grounded_count, grounded_correct, _ = _best_question_assignment(
+        grounding_edges, correct_stances, stance_opportunities
     )
+    evidence_count, evidence_correct, evidence_opportunities = (
+        _best_question_assignment(evidence_edges, correct_stances, stance_opportunities)
+    )
+    faction_count = max(
+        (
+            len(plant.get("target_stances", {}))
+            if isinstance(plant, Mapping)
+            and isinstance(plant.get("target_stances"), Mapping)
+            else 0
+            for plant in planted
+        ),
+        default=0,
+    )
+    total_stance_opportunities = question_count * faction_count
+    return (
+        grounded_count / question_count,
+        grounded_correct / total_stance_opportunities
+        if total_stance_opportunities
+        else 0.0,
+        evidence_count / question_count,
+        evidence_correct / evidence_opportunities if evidence_opportunities else 0.0,
+    )
+
+
+def _best_question_assignment(
+    eligible: Sequence[Sequence[bool]],
+    correct_stances: Sequence[Sequence[int]],
+    stance_opportunities: Sequence[Sequence[int]],
+) -> tuple[int, int, int]:
+    """Pair candidates and plants once, prioritizing coverage then stance credit.
+
+    Ask exposes at most three candidate issues, so exhaustive assignment is
+    clearer than independently optimizing several weight matrices.  Reusing a
+    single deterministic matching prevents coverage and conditional stance
+    diagnostics from silently referring to different candidate/plant pairs.
+    """
+
+    best_objective = (-1, -1)
+    best_pairs: tuple[tuple[int, int], ...] | None = None
+    best_result = (0, 0, 0)
+
+    def visit(
+        candidate_index: int,
+        used_plants: frozenset[int],
+        pairs: tuple[tuple[int, int], ...],
+        correct: int,
+        opportunities: int,
+    ) -> None:
+        nonlocal best_objective, best_pairs, best_result
+        if candidate_index == len(eligible):
+            objective = (len(pairs), correct)
+            if objective > best_objective or (
+                objective == best_objective
+                and (best_pairs is None or pairs < best_pairs)
+            ):
+                best_objective = objective
+                best_pairs = pairs
+                best_result = (len(pairs), correct, opportunities)
+            return
+
+        visit(candidate_index + 1, used_plants, pairs, correct, opportunities)
+        for plant_index, is_eligible in enumerate(eligible[candidate_index]):
+            if not is_eligible or plant_index in used_plants:
+                continue
+            visit(
+                candidate_index + 1,
+                used_plants | {plant_index},
+                (*pairs, (candidate_index, plant_index)),
+                correct + int(correct_stances[candidate_index][plant_index]),
+                opportunities + int(stance_opportunities[candidate_index][plant_index]),
+            )
+
+    visit(0, frozenset(), (), 0, 0)
+    return best_result
 
 
 def parse_candidate_questions(
@@ -1031,6 +1644,7 @@ def _parse_questions_list(raw_questions: Any) -> list[dict[str, Any]] | None:
         "quote",
         "type",
         "question",
+        "decision",
         "yes_choice",
         "related_evidence",
         "target_stances",
@@ -1050,6 +1664,9 @@ def _parse_questions_list(raw_questions: Any) -> list[dict[str, Any]] | None:
             return None
         if raw_question["yes_choice"] not in {"anchor", "alternative"}:
             return None
+        decision = _parse_decision_frame(raw_question["decision"])
+        if decision is None:
+            return None
         related = raw_question["related_evidence"]
         if related is not None and (
             not isinstance(related, Mapping)
@@ -1064,7 +1681,10 @@ def _parse_questions_list(raw_questions: Any) -> list[dict[str, Any]] | None:
         if not isinstance(target_stances, Mapping) or not target_stances:
             return None
         if not all(
-            isinstance(faction_id, str) and faction_id and stance in STANCE_TO_VOTE
+            isinstance(faction_id, str)
+            and bool(faction_id.strip())
+            and isinstance(stance, str)
+            and stance in STANCE_TO_VOTE
             for faction_id, stance in target_stances.items()
         ):
             return None
@@ -1074,6 +1694,7 @@ def _parse_questions_list(raw_questions: Any) -> list[dict[str, Any]] | None:
                 "quote": raw_question["quote"],
                 "type": raw_question["type"],
                 "question": raw_question["question"],
+                "decision": decision,
                 "yes_choice": raw_question["yes_choice"],
                 "related_evidence": dict(related)
                 if isinstance(related, Mapping)
@@ -1082,6 +1703,59 @@ def _parse_questions_list(raw_questions: Any) -> list[dict[str, Any]] | None:
             }
         )
     return questions
+
+
+def _parse_decision_frame(raw_decision: Any) -> dict[str, str] | None:
+    """Return a bounded exact decision frame or fail closed."""
+
+    if (
+        not isinstance(raw_decision, Mapping)
+        or set(raw_decision) != DECISION_FRAME_FIELDS
+    ):
+        return None
+    decision: dict[str, str] = {}
+    for field in sorted(DECISION_FRAME_FIELDS):
+        value = raw_decision[field]
+        if not isinstance(value, str) or not value.strip() or len(value) > 1_000:
+            return None
+        decision[field] = value.strip()
+    return decision
+
+
+def _accepted_decision_aliases(
+    plant: Mapping[str, Any], reference: Mapping[str, str]
+) -> dict[str, tuple[str, ...]]:
+    """Return validated per-slot concepts, defaulting to the canonical frame.
+
+    Older local rows may not carry explicit aliases.  The fallback preserves
+    their exact semantics while 0.6 rows can accept authored source-language
+    alternatives without permitting a concept to move into another slot.
+    """
+
+    raw_aliases = plant.get("decision_aliases")
+    if (
+        not isinstance(raw_aliases, Mapping)
+        or set(raw_aliases) != DECISION_FRAME_FIELDS
+    ):
+        return {field: (reference[field],) for field in DECISION_FRAME_FIELDS}
+    aliases: dict[str, tuple[str, ...]] = {}
+    for field in DECISION_FRAME_FIELDS:
+        raw_field_aliases = raw_aliases[field]
+        if (
+            not isinstance(raw_field_aliases, Sequence)
+            or isinstance(raw_field_aliases, str)
+            or not raw_field_aliases
+        ):
+            return {name: (reference[name],) for name in DECISION_FRAME_FIELDS}
+        accepted = tuple(
+            alias.strip()
+            for alias in raw_field_aliases
+            if isinstance(alias, str) and alias.strip()
+        )
+        if len(accepted) != len(raw_field_aliases):
+            return {name: (reference[name],) for name in DECISION_FRAME_FIELDS}
+        aliases[field] = accepted
+    return aliases
 
 
 def question_utility_score(
@@ -1138,13 +1812,17 @@ def _candidate_plant_question_utility(
     candidate_stances = candidate.get("target_stances", {})
     if not isinstance(planted_stances, Mapping) or not planted_stances:
         return 0.0
+    if not isinstance(candidate_stances, Mapping) or set(candidate_stances) != set(
+        planted_stances
+    ):
+        return 0.0
     stance_accuracy = (
         sum(
             candidate_stances.get(faction_id) == stance
             for faction_id, stance in planted_stances.items()
         )
         / len(planted_stances)
-        if isinstance(candidate_stances, Mapping)
+        if candidate_stances
         else 0.0
     )
     attainable_utility = _plant_attainable_question_utility(
@@ -1181,39 +1859,476 @@ def _candidate_plant_grounding(
 ) -> float | None:
     """Match a generated question to one planted issue using visible evidence."""
 
-    if candidate.get("doc_id") != plant.get("doc_id"):
-        return None
-    if plant.get("type") is not None and candidate.get("type") != plant.get("type"):
-        return None
-    if not _related_evidence_matches(candidate, plant):
-        return None
-    candidate_quote = str(candidate.get("quote", ""))
-    planted_quote = str(plant.get("quote", ""))
-    document_text = str(plant.get("document_text", ""))
-    if candidate_quote != planted_quote or candidate_quote not in document_text:
+    if not _candidate_plant_evidence_match(candidate, plant):
         return None
     candidate_question = str(candidate.get("question", ""))
     if not is_yes_no_question(candidate_question):
         return None
-    semantic_score = question_decision_similarity(candidate_question, plant)
+    semantic_score = question_decision_similarity(
+        candidate_question,
+        plant,
+        candidate_decision=candidate.get("decision"),
+        yes_choice=str(candidate.get("yes_choice", "")),
+    )
     if semantic_score <= 0:
         return None
     return semantic_score
 
 
+def _candidate_plant_evidence_match(
+    candidate: Mapping[str, Any],
+    plant: Mapping[str, Any],
+) -> bool:
+    """Match only the exact public issue evidence, before semantic scoring."""
+
+    if candidate.get("doc_id") != plant.get("doc_id"):
+        return False
+    if plant.get("type") is not None and candidate.get("type") != plant.get("type"):
+        return False
+    if not _related_evidence_matches(candidate, plant):
+        return False
+    candidate_quote = str(candidate.get("quote", ""))
+    planted_quote = str(plant.get("quote", ""))
+    document_text = str(plant.get("document_text", ""))
+    return candidate_quote == planted_quote and candidate_quote in document_text
+
+
 def question_decision_similarity(
     question: str,
     plant: Mapping[str, Any],
+    *,
+    candidate_decision: Any = None,
+    yes_choice: str | None = None,
 ) -> float:
-    """Validate question form without consulting hidden lexical targets.
+    """Match a declared decision frame and require the prose to express it.
 
-    Semantic correctness is represented by the exact public-evidence, issue
-    type, relationship, and yes-side fields already checked by the caller.
-    The free-form question is deliberately not compared with hidden wording.
+    The scorer never compares against a single hidden canonical sentence.
+    Instead, it checks five simulator-defined semantic slots against visible
+    evidence and the reference decision concepts, then checks that the
+    submitted yes/no prose contains the declared core and the outcome named by
+    ``yes_choice``. This blocks polarity flips, generic questions, and unrelated
+    evidence-word dumps without introducing a one-sentence answer key.
     """
 
-    del plant
-    return float(is_yes_no_question(question))
+    if not is_yes_no_question(question):
+        return 0.0
+    submitted = _parse_decision_frame(candidate_decision)
+    if submitted is None:
+        return 0.0
+    reference = _parse_decision_frame(plant.get("decision"))
+    if reference is None:
+        return 0.0
+    aliases = _accepted_decision_aliases(plant, reference)
+    if not _decision_frame_matches_reference(
+        submitted,
+        reference,
+        aliases,
+        mandatory_condition_tokens=_mandatory_condition_scope_tokens(plant, reference),
+    ):
+        return 0.0
+    evidence_score = _decision_frame_evidence_score(submitted, plant, aliases)
+    if evidence_score <= 0:
+        return 0.0
+    if not _prose_expresses_decision(question, submitted, yes_choice=yes_choice):
+        return 0.0
+    return evidence_score
+
+
+def _decision_frame_matches_reference(
+    submitted: Mapping[str, str],
+    reference: Mapping[str, str],
+    aliases: Mapping[str, Sequence[str]],
+    *,
+    mandatory_condition_tokens: frozenset[str],
+) -> bool:
+    """Require the submitted frame to recover the simulator's decision concepts.
+
+    Slot prose is not matched verbatim, but actor, action, and condition retain
+    their separate meanings. Bidirectional per-slot coverage blocks swapping or
+    repeating one evidence phrase across every field, while still permitting
+    concise paraphrases through the narrow normalization table.
+    """
+
+    submitted_core_tokens = [
+        _semantic_tokens(submitted[field]) for field in ("actor", "action", "condition")
+    ]
+    if len(set(submitted_core_tokens)) != len(submitted_core_tokens):
+        return False
+    for field in (
+        "actor",
+        "action",
+        "condition",
+        "anchor_outcome",
+        "alternative_outcome",
+    ):
+        reference_threshold = 0.5
+        submitted_threshold = _SUBMITTED_SLOT_PRECISION_THRESHOLD
+        accepted = aliases.get(field, (reference[field],))
+        if not any(
+            _decision_slot_matches_alias(
+                submitted[field],
+                alias,
+                reference_threshold=reference_threshold,
+                submitted_threshold=submitted_threshold,
+            )
+            for alias in accepted
+        ):
+            return False
+        # Regression guard: a generated scope suffix changes the decision.
+        # Whole-slot fuzzy overlap must not let a plausible unscoped condition
+        # erase the suffix shared by the source quote and authored reference.
+        if field == "condition" and not mandatory_condition_tokens <= _semantic_tokens(
+            submitted[field]
+        ):
+            return False
+    return True
+
+
+def _decision_slot_matches_alias(
+    submitted: str,
+    alias: str,
+    *,
+    reference_threshold: float,
+    submitted_threshold: float,
+) -> bool:
+    """Accept omissions and normalized synonyms, but no unauthored concepts."""
+
+    submitted_tokens = _semantic_tokens(submitted)
+    alias_tokens = _semantic_tokens(alias)
+    return (
+        _bidirectional_concept_coverage(
+            submitted_tokens,
+            alias_tokens,
+            reference_threshold=reference_threshold,
+            submitted_threshold=submitted_threshold,
+        )
+        # Regression guard: an otherwise matching slot cannot append a second,
+        # unsupported action such as selling records or firing a driver. Any
+        # legitimate source wording with new concept tokens needs an explicit
+        # authored alias instead of inheriting credit from lexical overlap.
+        and submitted_tokens <= alias_tokens
+        and _polarity_compatible(submitted, alias)
+    )
+
+
+def _mandatory_condition_scope_tokens(
+    plant: Mapping[str, Any], reference: Mapping[str, str]
+) -> frozenset[str]:
+    """Recover a generated scope suffix shared verbatim with visible evidence."""
+
+    if not isinstance(plant.get("decision_aliases"), Mapping):
+        return frozenset()
+    normalized_condition = _normalized_text(reference["condition"])
+    visible_quote_tokens = _semantic_tokens(str(plant.get("quote", "")))
+    for scope in SEMANTIC_SCOPES:
+        if scope is None:
+            continue
+        normalized_scope = _normalized_text(scope)
+        scope_tokens = _semantic_tokens(scope)
+        if (
+            normalized_condition.endswith(normalized_scope)
+            and scope_tokens <= visible_quote_tokens
+        ):
+            return scope_tokens
+    return frozenset()
+
+
+def _bidirectional_concept_coverage(
+    submitted: set[str] | frozenset[str],
+    reference: set[str] | frozenset[str],
+    *,
+    reference_threshold: float,
+    submitted_threshold: float,
+) -> bool:
+    if not submitted or not reference:
+        return False
+    overlap = len(submitted & reference)
+    return (
+        overlap / len(reference) >= reference_threshold
+        and overlap / len(submitted) >= submitted_threshold
+    )
+
+
+def _semantic_tokens(text: str) -> frozenset[str]:
+    return frozenset(
+        _normalize_semantic_token(token)
+        for token in normalized_tokens(text)
+        if token not in _SEMANTIC_STOPWORDS
+        and token not in _YES_NO_AUXILIARY_TOKENS
+        and any(character.isalnum() for character in token)
+    )
+
+
+def _polarity_signature(text: str) -> tuple[str, ...]:
+    """Return explicit meaning-reversing markers, retaining multiplicity."""
+
+    normalized = _normalize_negating_phrases(text)
+    return tuple(
+        "neg" for token in normalized_tokens(normalized) if token in _POLARITY_TOKENS
+    )
+
+
+def _normalize_negating_phrases(text: str) -> str:
+    """Map explicit and lexical negators to one deterministic marker token."""
+
+    normalized = _NEGATION_CONTRACTION_PATTERN.sub(" not ", text)
+    normalized = _FAIL_TO_PATTERN.sub(" not ", normalized)
+    return _NEGATING_VERB_PATTERN.sub(" not ", normalized)
+
+
+def _polarity_compatible(left: str, right: str) -> bool:
+    """Reject a paraphrase that adds, removes, or swaps explicit negation."""
+
+    return _polarity_signature(left) == _polarity_signature(right)
+
+
+def _normalize_semantic_token(token: str) -> str:
+    normalized = _SEMANTIC_EQUIVALENTS.get(token, token)
+    if len(normalized) > 4 and normalized.endswith("ies"):
+        return normalized[:-3] + "y"
+    if (
+        len(normalized) > 4
+        and normalized.endswith("s")
+        and not normalized.endswith(("ss", "us", "is"))
+    ):
+        return normalized[:-1]
+    return normalized
+
+
+def _evidence_support(candidate: str, evidence: str) -> float:
+    candidate_tokens = _semantic_tokens(candidate)
+    evidence_tokens = _semantic_tokens(evidence)
+    if not candidate_tokens or not evidence_tokens:
+        return 0.0
+    return len(candidate_tokens & evidence_tokens) / len(candidate_tokens)
+
+
+def _decision_frame_evidence_score(
+    decision: Mapping[str, str],
+    plant: Mapping[str, Any],
+    aliases: Mapping[str, Sequence[str]],
+) -> float:
+    primary_text = " ".join(
+        (
+            str(plant.get("document_text", "")),
+            str(plant.get("quote", plant.get("anchor_quote", ""))),
+        )
+    )
+    related = plant.get("related_evidence")
+    related_document_text = plant.get("related_document_text")
+    related_text = " ".join(
+        (
+            related_document_text if isinstance(related_document_text, str) else "",
+            str(related.get("quote", "")) if isinstance(related, Mapping) else "",
+        )
+    )
+    # Validate the response's own slot text against source passages.  The
+    # alias table only defines acceptable concepts; using aliases as the
+    # evidence probe would allow a response to append an unsupported negation
+    # while inheriting the canonical alias's source support.
+    all_evidence = " ".join((primary_text, related_text))
+    alternative_evidence = (
+        related_text if _semantic_tokens(related_text) else primary_text
+    )
+    evidence_by_field = {
+        "actor": all_evidence,
+        "action": all_evidence,
+        "condition": all_evidence,
+        "anchor_outcome": primary_text,
+        "alternative_outcome": alternative_evidence,
+    }
+    for field, evidence in evidence_by_field.items():
+        submitted_threshold = _SUBMITTED_SLOT_PRECISION_THRESHOLD
+        matching_aliases = [
+            alias
+            for alias in aliases.get(field, (decision[field],))
+            if _decision_slot_matches_alias(
+                decision[field],
+                alias,
+                reference_threshold=0.5,
+                submitted_threshold=submitted_threshold,
+            )
+        ]
+        alias_support = max(
+            (_evidence_support(alias, evidence) for alias in matching_aliases),
+            default=0.0,
+        )
+        # Some authored concepts describe what the visible policy fails to
+        # specify and therefore have only partial (or no literal) passage
+        # support. Whenever the authored concept is observable, require the
+        # response's own slot text to retain that evidence support rather than
+        # inheriting it from the alias table.
+        if alias_support > 0 and _evidence_support(decision[field], evidence) < min(
+            0.4, alias_support
+        ):
+            return 0.0
+    if _semantic_tokens(decision["anchor_outcome"]) == _semantic_tokens(
+        decision["alternative_outcome"]
+    ):
+        return 0.0
+    return 1.0
+
+
+def _prose_expresses_decision(
+    prose: str,
+    decision: Mapping[str, str],
+    *,
+    yes_choice: str | None,
+) -> bool:
+    marker_matches = list(_ORIENTATION_MARKER_PATTERN.finditer(prose))
+    if len(marker_matches) > 1:
+        return False
+    declared_choice: str | None = None
+    declared_outcome_text = ""
+    stem = prose
+    if marker_matches:
+        marker_match = marker_matches[0]
+        declared_choice = marker_match.group(1).casefold()
+        stem = prose[: marker_match.start()]
+        declared_outcome_text = prose[marker_match.end() :].lstrip(" :")
+
+    if not _decision_stem_expresses_core(stem, decision):
+        return False
+
+    selected_choice = yes_choice if yes_choice in {"anchor", "alternative"} else None
+    if declared_choice is not None:
+        if selected_choice is not None and declared_choice != selected_choice:
+            return False
+        selected_choice = declared_choice
+    if selected_choice is None:
+        return False
+    opposite = "alternative" if selected_choice == "anchor" else "anchor"
+    selected_outcome = decision[f"{selected_choice}_outcome"]
+    opposite_outcome = decision[f"{opposite}_outcome"]
+
+    core_text = " ".join(decision[field] for field in ("actor", "action", "condition"))
+    stem_polarity = _polarity_signature(stem)
+    allowed_stem_polarities = {
+        _polarity_signature(core_text),
+        _polarity_signature(f"{core_text} {selected_outcome}"),
+        _polarity_signature(
+            f"{core_text} {decision['anchor_outcome']} "
+            f"{decision['alternative_outcome']}"
+        ),
+    }
+    if stem_polarity not in allowed_stem_polarities:
+        return False
+
+    outcome_prose = declared_outcome_text if declared_choice is not None else stem
+    outcome_tokens = _semantic_tokens(outcome_prose)
+    selected_tokens = _semantic_tokens(selected_outcome)
+    if not _bidirectional_concept_coverage(
+        outcome_tokens,
+        selected_tokens,
+        reference_threshold=0.5,
+        submitted_threshold=0.4 if declared_choice is not None else 0.2,
+    ):
+        return False
+    # The orientation tail is part of the response's semantic contract, not a
+    # comment channel. Extra outcome concepts must be explicitly represented by
+    # the submitted decision frame instead of riding on a matching phrase.
+    if declared_choice is not None and not outcome_tokens <= selected_tokens:
+        return False
+    if not _polarity_compatible(outcome_prose, selected_outcome):
+        return False
+    return _semantic_similarity(outcome_prose, selected_outcome) > _semantic_similarity(
+        outcome_prose, opposite_outcome
+    )
+
+
+def _semantic_similarity(left: str, right: str) -> float:
+    """Return unordered semantic-token F1 for disambiguating outcome prose."""
+
+    left_tokens = _semantic_tokens(left)
+    right_tokens = _semantic_tokens(right)
+    if not left_tokens or not right_tokens:
+        return 0.0
+    return 2 * len(left_tokens & right_tokens) / (len(left_tokens) + len(right_tokens))
+
+
+def _decision_stem_expresses_core(stem: str, decision: Mapping[str, str]) -> bool:
+    """Require actor, action, and condition in the pre-marker question stem."""
+
+    stem_tokens = _semantic_tokens(stem)
+    if len(stem_tokens) < 3:
+        return False
+    supported_tokens = frozenset().union(
+        *(_semantic_tokens(decision[field]) for field in DECISION_FRAME_FIELDS)
+    )
+    # The structured frame is the response's explicit semantic contract. A
+    # question may omit detail, but it may not append an unsupported action and
+    # inherit credit from its otherwise valid actor/action/condition. Genuine
+    # source-language alternatives belong in the submitted frame and authored
+    # alias table, keeping this check deterministic and auditable.
+    if not stem_tokens - supported_tokens <= _QUESTION_INFERENCE_TOKENS:
+        return False
+    for field in ("actor", "action", "condition"):
+        concept_tokens = _semantic_tokens(decision[field])
+        overlap = len(stem_tokens & concept_tokens)
+        if not concept_tokens or overlap < min(2, len(concept_tokens)):
+            return False
+        if overlap / len(concept_tokens) < 0.4:
+            return False
+    return _stem_core_polarity_is_slot_consistent(stem, decision)
+
+
+def _stem_core_polarity_is_slot_consistent(
+    stem: str, decision: Mapping[str, str]
+) -> bool:
+    """Bind each explicit core negator to its nearest semantic slot.
+
+    Comparing only the total number of negators lets a response move ``not``
+    from a condition to an action while preserving aggregate polarity.  Core
+    fields are already required separately above, so their field-specific
+    tokens provide deterministic anchors for assigning each visible negator.
+    """
+
+    fields = ("actor", "action", "condition")
+    field_tokens = {field: _semantic_tokens(decision[field]) for field in fields}
+    position_tokens = tuple(
+        _normalize_semantic_token(token)
+        for token in normalized_tokens(_normalize_negating_phrases(stem))
+    )
+    field_positions: dict[str, tuple[int, ...]] = {}
+    for field in fields:
+        other_tokens = set().union(
+            *(field_tokens[other] for other in fields if other != field)
+        )
+        distinctive = field_tokens[field] - other_tokens
+        positions = tuple(
+            index for index, token in enumerate(position_tokens) if token in distinctive
+        )
+        if not positions:
+            positions = tuple(
+                index
+                for index, token in enumerate(position_tokens)
+                if token in field_tokens[field]
+            )
+        if not positions:
+            return False
+        field_positions[field] = positions
+
+    assigned = dict.fromkeys(fields, 0)
+    for index, token in enumerate(position_tokens):
+        if token not in _POLARITY_TOKENS:
+            continue
+        distances = {
+            field: min(abs(index - position) for position in positions)
+            for field, positions in field_positions.items()
+        }
+        nearest_distance = min(distances.values())
+        nearest_fields = [
+            field
+            for field, distance in distances.items()
+            if distance == nearest_distance
+        ]
+        if len(nearest_fields) != 1:
+            return False
+        assigned[nearest_fields[0]] += 1
+
+    return all(
+        assigned[field] == len(_polarity_signature(decision[field])) for field in fields
+    )
 
 
 def _stances_for_yes_choice(
@@ -1272,11 +2387,14 @@ async def finding_f1(
 ) -> float:
     """Reward strict finding output by one-to-one planted-item F1."""
 
+    answer_payload = _parse_mapping_payload(answer)
     parsed = parser.parse_answer(completion)
-    candidates = parse_candidate_findings(parsed)
+    candidates = parse_candidate_findings(
+        parsed,
+        question_count=_find_question_count(answer_payload),
+    )
     if candidates is None:
         return 0.0
-    answer_payload = _parse_mapping_payload(answer)
     planted = parse_planted_items(answer_payload.get("findings", []))
     return match_findings(candidates, planted)["f1"]
 
@@ -1357,33 +2475,61 @@ def _scored_findings(
     answer: Mapping[str, Any] | str,
     parser: ElicitJsonParser,
 ) -> dict[str, float | int]:
+    answer_payload = _parse_mapping_payload(answer)
     parsed = parser.parse_answer(completion)
-    candidates = parse_candidate_findings(parsed)
+    candidates = parse_candidate_findings(
+        parsed,
+        question_count=_find_question_count(answer_payload),
+    )
     if candidates is None:
         return {}
-    answer_payload = _parse_mapping_payload(answer)
     planted = parse_planted_items(answer_payload.get("findings", []))
     return match_findings(candidates, planted)
 
 
 def _parse_mapping_payload(payload: Mapping[str, Any] | str) -> Mapping[str, Any]:
-    """Decode a canonical answer/info payload into a mapping for scoring."""
+    """Decode a trusted canonical answer/info payload for scoring.
+
+    The 32 KiB limit protects model completions, not environment-authored
+    answer keys.  Hidden rows still receive the same depth and node checks, so
+    a long source document cannot silently make its own exact answer unscorable.
+    """
 
     try:
-        loaded = _load_bounded_json(payload) if isinstance(payload, str) else payload
+        loaded = _load_trusted_json(payload) if isinstance(payload, str) else payload
         _validate_json_shape(loaded)
     except (RecursionError, TypeError, ValueError):
         return {}
     return loaded if isinstance(loaded, Mapping) else {}
 
 
-def parse_candidate_findings(parsed: Any) -> list[dict[str, Any]] | None:
-    """Validate the exact T1 response schema, returning None on any error."""
+def _find_question_count(answer: Mapping[str, Any]) -> int | None:
+    """Return the declared Find companion cardinality for 0.6 answer keys."""
 
-    if not isinstance(parsed, Mapping) or set(parsed) not in (
-        {"findings"},
-        {"findings", "questions"},
-    ):
+    value = answer.get("question_count")
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        return None
+    return value
+
+
+def parse_candidate_findings(
+    parsed: Any, *, question_count: int | None = None
+) -> list[dict[str, Any]] | None:
+    """Validate the primary T1 response independently of its companion metric.
+
+    A Find completion may omit the weight-zero ``questions`` array.  When it is
+    present, its own metric validates it separately; malformed companion data
+    cannot erase an otherwise valid primary finding score.
+    """
+
+    if not isinstance(parsed, Mapping):
+        return None
+    allowed_roots = (
+        ({"findings"}, {"findings", "questions"})
+        if question_count is not None
+        else ({"findings"},)
+    )
+    if set(parsed) not in allowed_roots:
         return None
     return _parse_findings_list(parsed["findings"])
 
@@ -1399,6 +2545,7 @@ def _parse_findings_list(raw_findings: Any) -> list[dict[str, Any]] | None:
             "quote",
             "type",
             "diagnosis",
+            "decision",
             "related_evidence",
         }:
             return None
@@ -1412,6 +2559,9 @@ def _parse_findings_list(raw_findings: Any) -> list[dict[str, Any]] | None:
         ):
             return None
         if raw_finding["type"] not in FINDING_TYPES:
+            return None
+        decision = _parse_decision_frame(raw_finding["decision"])
+        if decision is None:
             return None
         related = raw_finding["related_evidence"]
         if related is not None and (
@@ -1433,6 +2583,7 @@ def _parse_findings_list(raw_findings: Any) -> list[dict[str, Any]] | None:
         findings.append(
             {
                 **dict(raw_finding),
+                "decision": decision,
                 "related_evidence": dict(related)
                 if isinstance(related, Mapping)
                 else None,
@@ -1445,7 +2596,7 @@ def parse_planted_items(
     planted_items: Sequence[Mapping[str, Any]] | str,
 ) -> list[dict[str, Any]]:
     loaded = (
-        _load_bounded_json(planted_items)
+        _load_trusted_json(planted_items)
         if isinstance(planted_items, str)
         else planted_items
     )
@@ -1455,6 +2606,8 @@ def parse_planted_items(
             "quote": str(item.get("quote", item.get("anchor_quote", ""))),
             "type": str(item["type"]),
             "diagnosis": str(item.get("diagnosis", item.get("canonical_question", ""))),
+            "decision": item.get("decision", item.get("decision_frame")),
+            "decision_aliases": item.get("decision_aliases"),
             "related_evidence": item.get("related_evidence"),
             "related_document_text": item.get("related_document_text"),
             "document_text": str(
@@ -1619,7 +2772,12 @@ def _finding_diagnosis_matches(
         return True
     return (
         is_yes_no_question(diagnosis)
-        and question_decision_similarity(diagnosis, plant) > 0
+        and question_decision_similarity(
+            diagnosis,
+            plant,
+            candidate_decision=candidate.get("decision"),
+        )
+        > 0
     )
 
 
@@ -1793,39 +2951,43 @@ def _maximum_weight_sum(weights: Sequence[Sequence[float]]) -> float:
 
 
 def extract_json_object(text: str, *, preferred_key: str) -> Any:
+    """Parse one complete JSON object; prose, fences, arrays, and wrappers fail."""
+
+    del preferred_key
     if not isinstance(text, str) or len(text) > MAX_COMPLETION_CHARS:
         raise ValueError("completion exceeds the JSON parser size limit")
-    starts = [index for index, character in enumerate(text) if character == "{"]
-    if len(starts) > MAX_JSON_STARTS:
-        raise ValueError("completion contains too many JSON object starts")
-    decoder = json.JSONDecoder()
-    last_decodable: Any = None
-    last_preferred: dict[str, Any] | None = None
-    found_decodable = False
-    for index in starts:
-        try:
-            parsed, _ = decoder.raw_decode(text[index:])
-            _validate_json_shape(parsed)
-        except (json.JSONDecodeError, RecursionError, ValueError):
-            continue
-        found_decodable = True
-        last_decodable = parsed
-        if isinstance(parsed, dict) and isinstance(parsed.get(preferred_key), list):
-            last_preferred = parsed
-    if last_preferred is not None:
-        return last_preferred
-    if found_decodable:
-        return last_decodable
-    raise ValueError("no JSON object found")
+    parsed = _load_bounded_json(text.strip())
+    if not isinstance(parsed, dict):
+        raise ValueError("completion root must be a JSON object")
+    return parsed
 
 
 def _load_bounded_json(text: str) -> Any:
     if len(text) > MAX_COMPLETION_CHARS:
         raise ValueError("JSON payload exceeds the size limit")
     try:
-        loaded = json.loads(text)
-    except (json.JSONDecodeError, RecursionError) as error:
+        loaded = json.loads(
+            text,
+            object_pairs_hook=_reject_duplicate_json_keys,
+            parse_constant=_reject_non_finite_json_constant,
+        )
+    except (json.JSONDecodeError, RecursionError, _DuplicateJsonKeyError) as error:
         raise ValueError("invalid bounded JSON payload") from error
+    _validate_json_shape(loaded)
+    return loaded
+
+
+def _load_trusted_json(text: str) -> Any:
+    """Decode environment-authored JSON without the completion byte ceiling."""
+
+    try:
+        loaded = json.loads(
+            text,
+            object_pairs_hook=_reject_duplicate_json_keys,
+            parse_constant=_reject_non_finite_json_constant,
+        )
+    except (json.JSONDecodeError, RecursionError, _DuplicateJsonKeyError) as error:
+        raise ValueError("invalid trusted JSON payload") from error
     _validate_json_shape(loaded)
     return loaded
 

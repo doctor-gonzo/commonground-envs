@@ -2,6 +2,95 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.6.0 - Unreleased candidate
+
+- Require a source-anchored, authored-concept decision frame on every Elicit
+  Find diagnosis and Ask question: actor, action, condition, primary-rule
+  outcome, and alternative outcome. Replace token-sliced references with
+  hand-authored five-slot frames and require non-verbatim bidirectional concept
+  recovery while preserving the separate actor, action, and condition roles.
+  Find keeps its gold frame and aliases in the bundled key. Ask renders every
+  candidate's canonical frame but keeps accepted aliases and key metadata
+  hidden.
+  Require the yes/no prose to express the same
+  frame and an explicit yes-side orientation, so generic questions, short
+  keyword fragments, evidence-word dumps, and polarity flips do not receive
+  semantic credit. Fail closed when unsupported semantic clauses are appended
+  to either the question stem or its orientation tail while preserving valid
+  source-grounded aliases.
+- Add complete per-slot accepted-concept aliases to every authored decision
+  frame, using role-specific actors and ensuring every accepted actor is
+  prompt-visible in the relevant source evidence. Preserve every generated
+  scope suffix in all accepted condition aliases. Keep aliases confined to
+  actor/action/condition/outcome roles, and stop using candidate question prose
+  as evidence for its own declared frame.
+- Split the former Ask stance metric into end-to-end grounded stance recall,
+  exact-evidence match recall, and evidence-matched stance accuracy. Coverage
+  and accuracy reuse one deterministic assignment, so conditional stance
+  quality remains interpretable and distinct when K=1. Keep the old metric
+  function as a source-compatibility alias, and reject malformed
+  decision objects, unknown issue types, stance values, and faction-key sets
+  without raising.
+- Parse Elicit completions as one strict JSON object rather than recovering a
+  preferred nested or trailing object from prose, arrays, wrappers, or repeated
+  raw keys. Validate
+  huge JSON integers as contextual scenario errors rather than leaking Python
+  overflow exceptions, keep trusted answer keys outside the completion-size
+  bound, accept a findings-only primary Find root while independently scoring an
+  optional requested-cardinality question companion at weight zero, and require
+  explicit Find polarity markers to agree with the outcome their prose actually
+  names.
+- Expose the exact signed synthetic faction value vector in each prompt-visible
+  summary and render unordered Ask candidate profiles with exact canonical
+  decisions and signed trade-off weights. Publish the pass, composition,
+  orientation, decision-value, disagreement, and ranking formulas while keeping
+  evidence keys, issue labels, relationships, stored stances, and utility
+  hidden. Replace answer-count question value with a continuous preference
+  trade-off, make the default Ask budget one question selected from three, and
+  gate normalized top-one margin, exact analytic random selection, runner-up
+  selection, public-profile composition, and top-one selection accuracy.
+- Remove the fixed filler/type layout from the helper-built held-out families.
+  Give each of those families separate primary, contradiction-related, and
+  plant-free documents; add seeded, compositionally generated type-neutral
+  distractors with independently sampled counts; and independently shuffle
+  sentences, titles, and styles. Render authored and neutral sentences from a
+  shared procedural-component distribution so the generator's predicate
+  vocabulary cannot act as a perfect distractor classifier; report the
+  corresponding exclusion attack and planted/distractor rate gap. Require every
+  accepted decision actor to be prompt-visible, classify required actor-support
+  evidence separately from true neutral distractors, preserve it across density
+  and bounded-length views, and add a source-aware sector-team-marker floor.
+  Balance planted and neutral sentence lengths by sampling both one- and
+  two-clause neutral spans, and gate a genuine prompt-only longest-sentence
+  localization attack below 0.10 instead of misclassifying it as source-aware.
+- Keep strict Find F1 and precision-sensitive shaped Find reward. Extend the
+  shortcut floor suite with the removed filler-marker baseline, a
+  document-length/position baseline, and an explicitly labeled source-aware
+  deterministic replay/memorization ceiling distinct from prompt-observable
+  floors. Add component-isolating strict F1 for four named locators so semantic
+  failures cannot mask span leakage; add a combined title/length/position
+  leave-one-template-out balanced classifier; and audit the helper-built
+  five-document families with five-way role and binary relationship-document
+  classifiers, explicit class shares, and chance references.
+- Add Predict prompt modes for `full`, `matrix-only`, `text-only`, and
+  deterministic `shuffled-text` views while preserving task IDs and answers.
+  Make probability parsing fail closed for strings, booleans, non-finite
+  values or totals, unsafe numeric magnitudes, prose/fence wrappers, trailing
+  objects, or repeated raw keys; document the canonical agree/pass/disagree
+  argmax tie order. Add a non-transductive per-snapshot
+  visible-class prior to the probability baseline ladder, emit its raw Brier
+  loss from both environment interfaces, report pooled-loss Brier skill against
+  both uniform and the evaluator-side original-snapshot reference (which is
+  unavailable to text-only agents), and add focused regression
+  coverage for priors, probabilistic neighbors, and smoothing.
+- Extend release-study analysis with clustered intervals for diagnostic
+  metrics, exploratory paired cluster sign-flip tests, and a single global Holm
+  adjustment across model comparisons.
+- Align both environments and both shared packages at 0.6.0. The existing
+  0.5.0 artifacts and evaluation records remain immutable historical evidence;
+  fresh 0.6 model-free tables, exact-artifact model runs, hashes, Hub versions,
+  and public records are required before release.
+
 ## 0.5.0 - 2026-08-30
 
 - Replace heuristic contradiction-passage discovery with explicit authored

@@ -79,7 +79,7 @@ def instance_fingerprint(scenario: dict[str, Any]) -> str:
 
 
 def canonical_prompt_semantics(scenario: dict[str, Any]) -> str:
-    """Hash visible propositions and faction principles without opaque identity."""
+    """Hash visible propositions, faction principles, and Ask profiles."""
 
     documents = sorted(
         (
@@ -98,7 +98,26 @@ def canonical_prompt_semantics(scenario: dict[str, Any]) -> str:
         ),
         key=lambda faction: json.dumps(faction, sort_keys=True, ensure_ascii=False),
     )
-    return _payload_hash({"documents": documents, "factions": factions})
+    candidate_profiles = sorted(
+        (
+            {
+                "decision": {
+                    field: _normalized_text(str(value))
+                    for field, value in plant["decision"].items()
+                },
+                "alternative_tradeoff_weights": plant["value_weights"],
+            }
+            for plant in scenario["planted_items"]
+        ),
+        key=lambda profile: json.dumps(profile, sort_keys=True, ensure_ascii=False),
+    )
+    return _payload_hash(
+        {
+            "documents": documents,
+            "factions": factions,
+            "candidate_profiles": candidate_profiles,
+        }
+    )
 
 
 def policy_issue_semantics(scenario: dict[str, Any]) -> str:
@@ -279,6 +298,20 @@ def prompt_fingerprint(scenario: dict[str, Any]) -> str:
             }
             for faction in scenario["factions"]
         ],
+        # Ask renders candidates in this same canonical order, so layout-only
+        # plant shuffles cannot create a distinct model-visible fingerprint.
+        "candidate_profiles": sorted(
+            (
+                {
+                    "decision": plant["decision"],
+                    "alternative_tradeoff_weights": plant["value_weights"],
+                }
+                for plant in scenario["planted_items"]
+            ),
+            key=lambda profile: json.dumps(
+                profile["decision"], sort_keys=True, ensure_ascii=False
+            ),
+        ),
     }
     return _payload_hash(payload)
 

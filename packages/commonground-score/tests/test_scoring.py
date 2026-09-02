@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from math import isclose, log, nan
+from math import inf, isclose, log, nan
 
+import pytest
 from commonground_score import (
     brier_score,
     brier_skill_score,
@@ -116,6 +117,51 @@ def test_brier_score_nan_probability_mapping_scores_as_uniform() -> None:
             {"0,1": {"agree": nan, "disagree": 0.2, "pass": 0.1}},
             {"0,1": 1},
         ),
+        1 / 3,
+        abs_tol=1e-12,
+    )
+
+
+@pytest.mark.parametrize(
+    "invalid_value",
+    ["0.8", True, None, [], {}, 10**4000, inf],
+    ids=(
+        "numeric-string",
+        "boolean",
+        "null",
+        "array",
+        "object",
+        "huge-integer",
+        "infinity",
+    ),
+)
+def test_brier_score_malformed_probability_values_fail_closed(
+    invalid_value: object,
+) -> None:
+    predictions = {"0,1": {"agree": invalid_value, "disagree": 0.1, "pass": 0.1}}
+
+    assert isclose(
+        brier_score(predictions, {"0,1": 1}),
+        1 / 3,
+        abs_tol=1e-12,
+    )
+
+
+def test_brier_score_rejects_finite_components_with_nonfinite_total() -> None:
+    predictions = {"0,1": {"agree": 1e308, "disagree": 1e308, "pass": 1e308}}
+
+    assert isclose(
+        brier_score(predictions, {"0,1": 1}),
+        1 / 3,
+        abs_tol=1e-12,
+    )
+
+
+def test_brier_score_unexpected_point_prediction_type_fails_closed() -> None:
+    predictions = {"0,1": [1]}
+
+    assert isclose(
+        brier_score(predictions, {"0,1": 1}),  # type: ignore[arg-type]
         1 / 3,
         abs_tol=1e-12,
     )

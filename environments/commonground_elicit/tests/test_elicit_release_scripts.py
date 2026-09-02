@@ -28,8 +28,6 @@ DATA_DIR = Path(__file__).resolve().parents[1] / "commonground_elicit" / "data"
 TRAIN_SPLIT = DATA_DIR / "train_synthetic.jsonl"
 EVAL_SPLIT = DATA_DIR / "eval_synthetic_heldout.jsonl"
 PYPROJECT = Path(__file__).resolve().parents[1] / "pyproject.toml"
-README = Path(__file__).resolve().parents[1] / "README.md"
-DATA_README = DATA_DIR / "README.md"
 
 
 def load_script(module_name: str, filename: str) -> Any:
@@ -96,7 +94,9 @@ def test_every_bundled_contradiction_matches_its_authored_relationship() -> None
             if document["doc_id"] == related["doc_id"]
         )
 
-        assert related["quote"] == authored["related_anchor_quote"]
+        assert related["quote"].startswith(
+            authored["related_anchor_quote"].removesuffix(".")
+        )
         assert related["quote"] in related_document["text"]
         assert related["doc_id"] != contradiction["doc_id"]
         assert related["quote"] not in {
@@ -163,7 +163,10 @@ def test_bundled_splits_are_synthetic_and_template_separated() -> None:
         len({generator.canonical_prompt_semantics(scenario) for scenario in heldout})
         == 100
     )
-    assert len({generator.structural_signature(scenario) for scenario in heldout}) >= 95
+    # Varied two-to-seven-sentence layouts reduce fixed sentence-count signal.
+    # Keep broad independent structure coverage while auditing residual label
+    # and length signal directly in the model-free corpus gates below.
+    assert len({generator.structural_signature(scenario) for scenario in heldout}) >= 90
     assert {len(scenario["factions"]) for scenario in heldout} == {3, 4, 5}
     assert all(
         document["doc_id"].startswith("doc-")
@@ -278,7 +281,9 @@ def test_baseline_generation_depends_only_on_public_projections() -> None:
 
     assert documents == floors.public_documents(altered)
     assert factions == floors.public_factions(altered)
-    assert all(set(document) == {"doc_id", "text"} for document in documents)
+    assert all(
+        set(document) == {"doc_id", "title", "style", "text"} for document in documents
+    )
     assert all(
         set(faction) == {"faction_id", "name", "summary"} for faction in factions
     )
@@ -350,26 +355,32 @@ def test_removed_0_4_principle_parser_recovers_old_stances_but_not_new_prose() -
     documents_by_id = {
         document["doc_id"]: document["text"] for document in scenario["documents"]
     }
-    planted = [
-        {
-            "doc_id": plant["doc_id"],
-            "quote": plant["anchor_quote"],
-            "type": plant["type"],
-            "question": plant["canonical_question"],
-            "yes_choice": plant["canonical_yes_choice"],
-            "related_evidence": plant["related_evidence"],
-            "target_stances": plant["target_stances"],
-            "alternative_stances": plant["alternative_stances"],
-            "decision_value": plant["decision_value"],
-            "document_text": documents_by_id[plant["doc_id"]],
-            "related_document_text": (
-                documents_by_id[plant["related_evidence"]["doc_id"]]
-                if plant["related_evidence"] is not None
-                else None
-            ),
-        }
-        for plant in scenario["planted_items"]
-    ]
+    planted = []
+    for plant in scenario["planted_items"]:
+        decision = floors._canonical_decision_frame(plant, scenario["documents"])
+        yes_choice = plant["canonical_yes_choice"]
+        planted.append(
+            {
+                "doc_id": plant["doc_id"],
+                "quote": plant["anchor_quote"],
+                "type": plant["type"],
+                "question": floors._oriented_decision_question(
+                    plant["canonical_question"], decision, yes_choice
+                ),
+                "decision": decision,
+                "yes_choice": yes_choice,
+                "related_evidence": plant["related_evidence"],
+                "target_stances": plant["target_stances"],
+                "alternative_stances": plant["alternative_stances"],
+                "decision_value": plant["decision_value"],
+                "document_text": documents_by_id[plant["doc_id"]],
+                "related_document_text": (
+                    documents_by_id[plant["related_evidence"]["doc_id"]]
+                    if plant["related_evidence"] is not None
+                    else None
+                ),
+            }
+        )
 
     assert (
         floors.removed_0_4_principle_codebook_questions(
@@ -389,7 +400,9 @@ def test_removed_0_4_principle_parser_recovers_old_stances_but_not_new_prose() -
             ][0]
             for plant in scenario["planted_items"]
         ]
-        faction["summary"] = f"Historical fixture. {' '.join(clauses)}"
+        faction["summary"] = (
+            f"{faction['summary']} Historical fixture. {' '.join(clauses)}"
+        )
 
     questions = floors.removed_0_4_principle_codebook_questions(
         planted,
@@ -432,40 +445,273 @@ def test_removed_0_4_principle_parser_recovers_old_stances_but_not_new_prose() -
     assert source_score == 1.0
 
 
-def test_compute_elicit_floors_reproduces_published_values() -> None:
-    computed = floors.compute_elicit_floors(EVAL_SPLIT)
+def test_compute_elicit_floors_enforces_corpus_quality_gates(
+    tmp_path: Path,
+) -> None:
+    _, eval_path = generator.write_splits(tmp_path)
+    computed = floors.compute_elicit_floors(eval_path)
 
-    assert computed == {
-        "find/random-span": 0.07999999999999997,
-        "find/vague-sounding": 0.19499999999999995,
-        "find/legacy-0.2-codebook": 0.0,
-        "elicit-ask/template-question": 0.07825584279459283,
-        "elicit-ask/randomly-targeted": 0.06941666666666667,
-        "elicit-ask/legacy-0.3-summary-codebook": 0.0,
-        "elicit-ask/legacy-0.4-principle-codebook": 0.0,
-        "elicit-ask/source-template-0.4-principle-codebook": 0.0,
-        "elicit-ask/exact-issue-random-stance": 0.6700602815554378,
-        "elicit-ask/exact-issue-exact-stance": 1.0,
-    }
-    rendered = floors.render_markdown(computed)
-    assert rendered == "\n".join(
-        [
-            "| Comparator class | Task | Comparator | mean reward |",
-            "| --- | --- | --- | ---: |",
-            "| Prompt-observable | find | Random visible spans | 0.080 |",
-            "| Prompt-observable | find | Flag vague-sounding spans | 0.195 |",
-            "| Prompt-observable | find | Legacy 0.2 document-ID/position codebook | 0.000 |",
-            "| Prompt-observable | elicit-ask | Template clarity questions | 0.078 |",
-            "| Prompt-observable | elicit-ask | Randomly targeted questions | 0.069 |",
-            "| Prompt-observable | elicit-ask | Removed 0.3 summary/stance codebook | 0.000 |",
-            "| Component oracle | elicit-ask | Exact issues + removed 0.4 principle-table parser | 0.000 |",
-            "| Source-aware prompt-only | elicit-ask | Public template detector + removed 0.4 principle-table parser | 0.000 |",
-            "| Component oracle | elicit-ask | Exact top-K issues + random stances | 0.670 |",
-            "| Component oracle | elicit-ask | Exact top-K issues + exact stances (ceiling) | 1.000 |",
-        ]
+    assert computed["find/removed-fixed-filler-marker"] == 0.0
+    assert computed["find/removed-fixed-filler-marker-localization-recall"] == 0.0
+    assert computed["find/removed-fixed-filler-marker-type-accuracy"] == 0.0
+    assert (
+        computed["find/removed-fixed-filler-marker-localization-component-oracle-f1"]
+        == 0.0
     )
-    assert rendered in README.read_text(encoding="utf-8")
-    assert rendered in DATA_README.read_text(encoding="utf-8")
+    assert computed["find/layout-position-length"] < 0.05
+    assert computed["find/layout-position-length-localization-recall"] < 0.25
+    assert computed["find/layout-position-length-type-accuracy"] < 0.20
+    assert (
+        computed["find/layout-position-length-localization-component-oracle-f1"] < 0.25
+    )
+    assert computed["find/longest-visible-sentences"] == 0.0
+    # This is a genuine prompt-only attack: it selects the three longest
+    # visible sentences without source, template, or retired-pool knowledge.
+    # Length-balanced compositional distractors must keep its localization and
+    # conditional type signal near zero, not merely its strict semantic F1.
+    assert computed["find/longest-visible-sentences-localization-recall"] < 0.10
+    assert computed["find/longest-visible-sentences-type-accuracy"] < 0.10
+    assert (
+        computed["find/longest-visible-sentences-localization-component-oracle-f1"]
+        < 0.10
+    )
+    assert computed["find/shared-predicate-exclusion"] == 0.0
+    assert computed["find/shared-predicate-exclusion-localization-recall"] == 0.0
+    assert computed["find/shared-predicate-exclusion-type-accuracy"] == 0.0
+    assert computed["find/sector-team-marker-localization-recall"] < 0.05
+    assert computed["find/sector-team-marker-localization-f1"] < 0.05
+    assert computed["find/sector-team-marker-localization-component-oracle-f1"] < 0.05
+    # Selection is one of three candidates, so a random selector with perfect
+    # per-issue content remains a deliberately strong diagnostic but must leave
+    # material headroom below the exact top-one ceiling.
+    assert computed["elicit-ask/random-issue-exact-components"] < 0.90
+    assert computed["elicit-ask/random-issue-top1-selection-accuracy"] == pytest.approx(
+        1 / 3
+    )
+    assert 0.0 < computed["elicit-ask/runner-up-exact-components"] < 1.0
+    assert computed["elicit-ask/runner-up-top1-selection-accuracy"] == 0.0
+    assert computed["elicit-ask/public-profile-composition"] == 1.0
+    assert computed["elicit-ask/public-profile-top1-selection-accuracy"] == 1.0
+    assert computed["elicit-ask/exact-issue-exact-stance"] == 1.0
+    assert computed["elicit-ask/exact-issue-top1-selection-accuracy"] == 1.0
+    assert computed["find/public-source-replay"] == 1.0
+    assert computed["elicit-ask/public-source-replay"] == 1.0
+    assert computed["audit/find-old-fixed-marker-scenario-rate"] == 0.0
+    assert computed["audit/find-shared-predicate-plant-rate"] == 1.0
+    assert computed["audit/find-shared-predicate-distractor-rate"] == 1.0
+    assert computed["audit/find-shared-predicate-exclusive-advantage"] == 0.0
+    assert computed["audit/find-sector-team-plant-rate"] < 0.05
+    assert computed["audit/find-sector-team-distractor-rate"] > 0.0
+    assert computed["audit/find-sector-team-exclusive-advantage"] < 0.10
+    assert computed["audit/elicit-ask-top-k-tie-rate"] == 0.0
+    assert computed["audit/elicit-ask-top-k-gap-min"] > 0.0
+    assert (
+        computed["audit/elicit-ask-top1-normalized-margin-min"]
+        >= floors.MIN_TOP1_NORMALIZED_MARGIN
+    )
+    for feature in (
+        "title",
+        "style",
+        "sentence-position",
+        "sentence-count",
+        "document-length",
+    ):
+        assert computed[f"audit/find-{feature}-majority-label-accuracy"] < 0.45
+    assert computed["audit/find-issue-class-min-proportion"] == pytest.approx(1 / 3)
+    assert computed["audit/find-issue-class-max-proportion"] == pytest.approx(1 / 3)
+    assert computed["audit/find-issue-balanced-chance"] == pytest.approx(1 / 3)
+    assert (
+        computed["audit/find-combined-title-length-position-loto-balanced-accuracy"]
+        < 0.45
+    )
+    assert computed["audit/find-document-role-class-min-proportion"] == pytest.approx(
+        0.20
+    )
+    assert computed["audit/find-document-role-class-max-proportion"] == pytest.approx(
+        0.20
+    )
+    assert computed["audit/find-document-role-balanced-chance"] == pytest.approx(0.20)
+    assert computed["audit/find-document-role-structure-loto-balanced-accuracy"] < 0.30
+    assert computed["audit/find-related-document-positive-rate"] == pytest.approx(0.20)
+    assert computed[
+        "audit/find-related-document-class-min-proportion"
+    ] == pytest.approx(0.20)
+    assert computed[
+        "audit/find-related-document-class-max-proportion"
+    ] == pytest.approx(0.80)
+    assert computed["audit/find-related-document-balanced-chance"] == pytest.approx(
+        0.50
+    )
+    assert (
+        computed["audit/find-related-document-structure-loto-balanced-accuracy"] < 0.60
+    )
+
+    rendered = floors.render_markdown(computed)
+    assert "Removed fixed filler/type marker" in rendered
+    assert "Longest-sentence localization recall" in rendered
+    assert "Exclude current shared procedural predicates" in rendered
+    assert "shared-predicate rate gap" in rendered
+    assert "Sector-team marker localization F1" in rendered
+    assert "locator + exact non-localization components" in rendered
+    assert "sector-team rate gap" in rendered
+    assert "Combined title/length/anchor-position LOTO balanced accuracy" in rendered
+    assert "Helper document-role LOTO balanced accuracy" in rendered
+    assert "Related-document LOTO balanced accuracy" in rendered
+    assert "Source-aware memorization ceiling" in rendered
+    assert "Exact uniform-random issue expectation + exact components" in rendered
+    assert "Exact runner-up issue + exact per-issue components" in rendered
+    assert "Exact grounding + public-profile stance/rank composition" in rendered
+    assert "Minimum normalized top-1 utility margin" in rendered
+    assert "Top-1 boundary tie rate" in rendered
+    readme = (ROOT / "environments" / "commonground_elicit" / "README.md").read_text()
+    assert rendered.strip() in readme
+
+
+def test_localization_component_oracle_preserves_false_positives() -> None:
+    scenario = generator.generate_scenario(8200, generator.HELDOUT_TEMPLATES[0])
+    answer = floors.exact_answer_for_scenario(scenario)
+    exact = answer["findings"][0]
+    exact_tokens = re.findall(r"[^\W_]+", exact["quote"])
+    assert len(exact_tokens) >= 10
+    localized_subspan = " ".join(exact_tokens[:-1])
+    wrong_semantics = {
+        "doc_id": exact["doc_id"],
+        "quote": localized_subspan,
+        "type": next(
+            issue_type
+            for issue_type in floors.FINDING_TYPES
+            if issue_type != exact["type"]
+        ),
+        "diagnosis": "Should an unrelated process be changed?",
+        "decision": floors.visible_decision_frame(
+            exact["quote"], "Should an unrelated process be changed?"
+        ),
+        "related_evidence": None,
+    }
+    planted_spans = {
+        (finding["doc_id"], finding["quote"]) for finding in answer["findings"]
+    }
+    false_doc_id, false_quote = next(
+        (document["doc_id"], sentence)
+        for document in floors.public_documents(scenario)
+        for sentence in floors.split_sentences(document["text"])
+        if (document["doc_id"], sentence) not in planted_spans
+    )
+    false_diagnosis = floors.sentence_question(false_quote)
+    false_positive = {
+        "doc_id": false_doc_id,
+        "quote": false_quote,
+        "type": "ambiguity",
+        "diagnosis": false_diagnosis,
+        "decision": floors.visible_decision_frame(false_quote, false_diagnosis),
+        "related_evidence": None,
+    }
+
+    completed = floors.localization_component_oracle_findings(
+        [wrong_semantics, false_positive], answer["findings"]
+    )
+    scores = floors.match_findings(completed, answer["findings"])
+
+    assert completed[0]["type"] == exact["type"]
+    assert completed[0]["decision"] == exact["decision"]
+    assert completed[0]["quote"] == localized_subspan
+    assert completed[1] == false_positive
+    assert scores["f1"] == scores["localization_f1"] == pytest.approx(0.4)
+
+
+def test_structural_knn_reports_balanced_accuracy_not_majority_accuracy() -> None:
+    rows = [
+        (template, ("same-title",), (0.0, 1.0, 10.0), label)
+        for template in ("template-a", "template-b")
+        for label in ("other", "other", "other", "other", "related")
+    ]
+
+    assert floors._leave_one_template_out_knn_balanced_accuracy(rows) == 0.5
+
+
+def test_structural_knn_holds_out_the_complete_template_family() -> None:
+    rows = [
+        ("template-a", ("title-a",), (0.0,), "ambiguity"),
+        ("template-a", ("title-b",), (0.0,), "gap"),
+        ("template-b", ("title-a",), (0.0,), "gap"),
+        ("template-b", ("title-b",), (0.0,), "ambiguity"),
+    ]
+
+    # Each held-out family reverses the only mapping available in training. An
+    # in-sample nearest-neighbor implementation would score one instead.
+    assert floors._leave_one_template_out_knn_balanced_accuracy(rows) == 0.0
+
+
+def test_helper_document_role_audit_fails_when_neutral_role_is_missing() -> None:
+    helper_template = next(
+        template
+        for template in generator.HELDOUT_TEMPLATES
+        if template.balance_type_neutral_distractors
+    )
+    scenario = generator.generate_scenario(8210, helper_template)
+    occupied_doc_ids = {str(plant["doc_id"]) for plant in scenario["planted_items"]} | {
+        str(plant["related_evidence"]["doc_id"])
+        for plant in scenario["planted_items"]
+        if plant["related_evidence"] is not None
+    }
+    neutral_doc_id = next(
+        str(document["doc_id"])
+        for document in scenario["documents"]
+        if str(document["doc_id"]) not in occupied_doc_ids
+    )
+    scenario["documents"] = [
+        document
+        for document in scenario["documents"]
+        if str(document["doc_id"]) != neutral_doc_id
+    ]
+
+    with pytest.raises(ValueError, match="must render five documents"):
+        floors.compute_corpus_audits([scenario])
+
+
+def test_uniform_selection_expectation_enumerates_every_candidate_exactly() -> None:
+    scenario = generator.generate_scenario(8200, generator.HELDOUT_TEMPLATES[0])
+    answer = floors.exact_answer_for_scenario(scenario)
+    planted = answer["questions"]
+    info = {
+        "panel_polarization": 1.0,
+        "question_count": floors.QUESTION_COUNT,
+        "allow_combined_questions": False,
+    }
+    enumerated = [
+        asyncio.run(
+            floors.question_utility(
+                floors.completion_for(
+                    {"questions": [floors._candidate_question(plant)]}
+                ),
+                answer,
+                info,
+                floors.ElicitJsonParser("questions"),
+            )
+        )
+        for plant in planted
+    ]
+
+    assert floors.exact_uniform_selection_expected_reward(planted) == pytest.approx(
+        sum(enumerated) / len(enumerated)
+    )
+
+
+def test_public_profile_composition_recovers_top_issue_and_stances() -> None:
+    scenario = generator.generate_scenario(8200, generator.HELDOUT_TEMPLATES[0])
+    answer = floors.exact_answer_for_scenario(scenario)
+    composed = floors.public_profile_composition_questions(
+        answer["questions"],
+        floors.public_factions(scenario),
+        question_count=floors.QUESTION_COUNT,
+    )
+    exact = floors.exact_issue_exact_stance_questions(
+        answer["questions"],
+        question_count=floors.QUESTION_COUNT,
+    )
+
+    assert composed == exact
+    assert floors.top1_selection_accuracy(composed, answer["questions"]) == 1.0
 
 
 def _old_decision_terms(plant: dict[str, Any]) -> list[str]:

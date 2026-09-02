@@ -9,13 +9,14 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import math
 import statistics
 import sys
 import tomllib
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +31,8 @@ NATIVE_ARTIFACTS = ("config.toml", "traces.jsonl")
 METRIC_NAMES = (
     "vote_accuracy",
     "brier",
+    "original_snapshot_visible_prior_brier",
+    "brier_skill_vs_original_snapshot_visible_prior",
     "finding_localization_recall",
     "finding_type_accuracy",
     "finding_diagnosis_recall",
@@ -37,10 +40,17 @@ METRIC_NAMES = (
     "finding_f1",
     "question_utility",
     "question_format_valid",
+    "question_top1_selection_accuracy",
     "question_grounding_recall",
+    "question_grounded_stance_recall",
+    "question_evidence_match_recall",
+    "question_evidence_matched_stance_accuracy",
+    # Historical 0.5.x traces used this name for end-to-end grounded recall.
     "question_stance_accuracy",
 )
 ELICIT_TASK_MODES = frozenset({"find", "elicit-ask"})
+PREDICT_PROMPT_MODES = ("full", "matrix-only", "text-only", "shuffled-text")
+PREDICT_ABLATION_SIGNATURE_SCHEMA = "commonground-predict-ablation-v1"
 
 
 class InvalidRunError(ValueError):
@@ -57,6 +67,7 @@ class Summary:
     reward_mean: float
     reward_std: float
     metrics: Mapping[str, tuple[float, float]]
+    prompt_mode: str | None = None
 
 
 @dataclass(frozen=True)
@@ -69,6 +80,11 @@ class CompleteRun:
     task_ids: tuple[int, ...]
     rewards: tuple[float, ...]
     metrics: Mapping[str, tuple[float, ...]]
+    prompt_mode: str | None = None
+    comparison_signature: str | None = None
+    task_answer_digests: tuple[tuple[int, str], ...] = ()
+    raw_reward_scores: Mapping[str, tuple[float, ...]] = field(default_factory=dict)
+    raw_reward_weights: Mapping[str, tuple[float, ...]] = field(default_factory=dict)
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -89,7 +105,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--all-runs",
         action="store_true",
-        help="Include every complete run instead of only the newest env/model pair.",
+        help=(
+            "Include every complete run instead of only the newest "
+            "environment/model/prompt-mode key."
+        ),
     )
     return parser.parse_args(argv)
 
@@ -158,6 +177,7 @@ def load_summaries(root: Path, *, all_runs: bool = False) -> list[Summary]:
             key=lambda run: (
                 run.model.casefold(),
                 run.environment,
+                prompt_mode_sort_key(run.prompt_mode),
                 run.descriptor_timestamp_ns,
                 run.run_id,
             ),
@@ -166,11 +186,11 @@ def load_summaries(root: Path, *, all_runs: bool = False) -> list[Summary]:
 
 
 def newest_runs(runs: Sequence[CompleteRun]) -> list[CompleteRun]:
-    """Select the latest result artifact per environment/model pair."""
+    """Select the latest result artifact per environment/model/prompt-mode key."""
 
-    newest: dict[tuple[str, str], CompleteRun] = {}
+    newest: dict[tuple[str, str, str | None], CompleteRun] = {}
     for run in runs:
-        key = (run.environment, run.model)
+        key = (run.environment, run.model, run.prompt_mode)
         incumbent = newest.get(key)
         if incumbent is None or (
             run.descriptor_timestamp_ns,
@@ -183,7 +203,44 @@ def newest_runs(runs: Sequence[CompleteRun]) -> list[CompleteRun]:
     return list(newest.values())
 
 
+def pooled_brier_skill(
+    brier_values: Sequence[float], reference_values: Sequence[float]
+) -> float:
+    """Return skill from aligned pooled losses, using equal rollout weights."""
+
+    if not brier_values or len(brier_values) != len(reference_values):
+        raise InvalidRunError(
+            "Brier and original-snapshot-prior losses must be non-empty and aligned"
+        )
+    reference_mean = statistics.fmean(reference_values)
+    if reference_mean <= 0.0:
+        raise InvalidRunError(
+            "original-snapshot-prior Brier reference must have positive pooled loss"
+        )
+    return 1.0 - statistics.fmean(brier_values) / reference_mean
+
+
 def summarize_run(run: CompleteRun) -> Summary:
+    metrics = {
+        metric_name: summarize(run.metrics[metric_name])
+        for metric_name in METRIC_NAMES
+        if metric_name in run.metrics
+    }
+    if (
+        "brier" in run.metrics
+        and "original_snapshot_visible_prior_brier" in run.metrics
+    ):
+        brier_values = run.metrics["brier"]
+        reference_values = run.metrics["original_snapshot_visible_prior_brier"]
+        pooled_skill = pooled_brier_skill(brier_values, reference_values)
+        reference_mean = statistics.fmean(reference_values)
+        skill_contributions = tuple(
+            1.0 - value / reference_mean for value in brier_values
+        )
+        metrics["brier_skill_vs_original_snapshot_visible_prior"] = (
+            pooled_skill,
+            statistics.pstdev(skill_contributions),
+        )
     return Summary(
         model=run.model,
         environment=run.environment,
@@ -192,11 +249,8 @@ def summarize_run(run: CompleteRun) -> Summary:
         recovered_rollout_count=run.recovered_rollout_count,
         reward_mean=statistics.fmean(run.rewards),
         reward_std=statistics.pstdev(run.rewards),
-        metrics={
-            metric_name: summarize(run.metrics[metric_name])
-            for metric_name in METRIC_NAMES
-            if metric_name in run.metrics
-        },
+        metrics=metrics,
+        prompt_mode=run.prompt_mode,
     )
 
 
@@ -214,9 +268,9 @@ def load_legacy_run(result_path: Path) -> CompleteRun:
     metadata_path = result_path.with_name("metadata.json")
     metadata = load_json_object(metadata_path)
     base_environment = require_nonempty_string(metadata, "env_id", metadata_path)
+    env_args = metadata.get("env_args")
     legacy_mode: Any = None
     if is_elicit_environment(base_environment):
-        env_args = metadata.get("env_args")
         if not isinstance(env_args, Mapping):
             raise InvalidRunError(
                 f"{metadata_path}: env_args must identify the Elicit task mode"
@@ -225,8 +279,16 @@ def load_legacy_run(result_path: Path) -> CompleteRun:
     environment, task_mode = qualify_elicit_environment(
         base_environment, legacy_mode, metadata_path
     )
+    prompt_mode, prompt_mode_explicit = resolve_predict_prompt_mode(
+        base_environment,
+        env_args,
+        metadata_path,
+    )
+    metric_contract_environment = legacy_metric_contract_environment(
+        base_environment, metadata, metadata_path
+    )
     expected_legacy_signals = expected_legacy_metrics(
-        base_environment, task_mode, metadata_path
+        metric_contract_environment, task_mode, metadata_path
     )
     model = require_nonempty_string(metadata, "model", metadata_path)
     num_examples = require_positive_int(metadata, "num_examples", metadata_path)
@@ -266,6 +328,13 @@ def load_legacy_run(result_path: Path) -> CompleteRun:
             )
         rewards.append(reward)
         require_task_mode(output.get("info"), task_mode, result_path, line_number)
+        require_prompt_mode(
+            output.get("info"),
+            prompt_mode,
+            required=prompt_mode_explicit,
+            path=result_path,
+            line_number=line_number,
+        )
 
         raw_metrics = output.get("metrics")
         if not isinstance(raw_metrics, Mapping):
@@ -313,6 +382,7 @@ def load_legacy_run(result_path: Path) -> CompleteRun:
         task_ids=tuple(task_ids),
         rewards=tuple(rewards),
         metrics={name: tuple(values) for name, values in metric_values.items()},
+        prompt_mode=prompt_mode,
     )
 
 
@@ -329,6 +399,11 @@ def load_native_run(result_path: Path) -> CompleteRun:
     environment, task_mode = qualify_elicit_environment(
         base_environment, native_mode, config_path
     )
+    prompt_mode, prompt_mode_explicit = resolve_predict_prompt_mode(
+        base_environment,
+        taskset,
+        config_path,
+    )
     validate_native_baseline_profile(
         config,
         base_environment=base_environment,
@@ -339,6 +414,23 @@ def load_native_run(result_path: Path) -> CompleteRun:
     expected_reward_signals, expected_metric_signals = expected_native_signals(
         base_environment, task_mode, config_path
     )
+    declared_predict_ablation = prompt_mode_explicit
+    ablation_config_provenance: dict[str, Any] | None = None
+    if declared_predict_ablation:
+        if expected_reward_signals != ("probability_reward",):
+            raise InvalidRunError(
+                f"{config_path}: declared Predict ablations require the "
+                "probability_reward contract"
+            )
+        ablation_config_provenance = require_predict_ablation_config_provenance(
+            config,
+            base_environment=base_environment,
+            taskset=taskset,
+            model=model,
+            num_tasks=num_tasks,
+            num_rollouts=num_rollouts,
+            config_path=config_path,
+        )
     expected_count = num_tasks * num_rollouts
 
     episodes = load_json_lines(result_path)
@@ -354,9 +446,13 @@ def load_native_run(result_path: Path) -> CompleteRun:
     trace_ids: set[str] = set()
     run_ids: set[str] = set()
     rewards: list[float] = []
+    raw_reward_scores: dict[str, list[float]] = {}
+    raw_reward_weights: dict[str, list[float]] = {}
     metric_values: dict[str, list[float]] = {}
     expected_reward_keys: tuple[str, ...] | None = None
     expected_metric_keys: tuple[str, ...] | None = None
+    task_answer_digests: dict[int, str] = {}
+    trace_agent_provenance: dict[str, Any] | None = None
     recovered_rollout_count = 0
 
     for line_number, episode in enumerate(episodes, start=1):
@@ -368,6 +464,26 @@ def load_native_run(result_path: Path) -> CompleteRun:
             line_number=line_number,
             episode_ids=episode_ids,
         )
+        if declared_predict_ablation:
+            if ablation_config_provenance is None:  # pragma: no cover - invariant
+                raise InvalidRunError(
+                    f"{result_path}: declared Predict ablation lacks config provenance"
+                )
+            current_trace_provenance = require_predict_ablation_trace_provenance(
+                trace,
+                expected_model=model,
+                expected_client=ablation_config_provenance["client"],
+                expected_sampling=ablation_config_provenance["sampling"],
+                result_path=result_path,
+                line_number=line_number,
+            )
+            if trace_agent_provenance is None:
+                trace_agent_provenance = current_trace_provenance
+            elif current_trace_provenance != trace_agent_provenance:
+                raise InvalidRunError(
+                    f"{result_path}:{line_number}: declared Predict ablation "
+                    "trace agent provenance is inconsistent"
+                )
         episode_errors = episode.get("errors")
         trace_errors = trace.get("errors")
         if not isinstance(episode_errors, list) or not isinstance(trace_errors, list):
@@ -438,7 +554,27 @@ def load_native_run(result_path: Path) -> CompleteRun:
             )
         counts_by_example[example_id] = counts_by_example.get(example_id, 0) + 1
         task_ids.append(example_id)
+        answer_digest = task_answer_digest(
+            task_data,
+            required=declared_predict_ablation,
+            path=result_path,
+            line_number=line_number,
+        )
+        if answer_digest is not None:
+            previous_digest = task_answer_digests.setdefault(example_id, answer_digest)
+            if previous_digest != answer_digest:
+                raise InvalidRunError(
+                    f"{result_path}:{line_number}: task {example_id} has inconsistent "
+                    "answers across rollouts"
+                )
         require_task_mode(task_data.get("info"), task_mode, result_path, line_number)
+        require_prompt_mode(
+            task_data.get("info"),
+            prompt_mode,
+            required=prompt_mode_explicit,
+            path=result_path,
+            line_number=line_number,
+        )
 
         raw_rewards = trace.get("rewards")
         if not isinstance(raw_rewards, Mapping) or not raw_rewards:
@@ -496,6 +632,17 @@ def load_native_run(result_path: Path) -> CompleteRun:
             score = require_number(reward, "score", result_path, line_number)
             weight = require_number(reward, "weight", result_path, line_number)
             validate_metric_domain(reward_name, score, result_path, line_number)
+            raw_reward_scores.setdefault(reward_name, []).append(score)
+            raw_reward_weights.setdefault(reward_name, []).append(weight)
+            if (
+                declared_predict_ablation
+                and reward_name == "probability_reward"
+                and weight != 1.0
+            ):
+                raise InvalidRunError(
+                    f"{result_path}:{line_number}: declared Predict ablations require "
+                    "probability_reward weight 1.0"
+                )
             weighted = score * weight
             if not math.isfinite(weighted):
                 raise InvalidRunError(
@@ -524,6 +671,43 @@ def load_native_run(result_path: Path) -> CompleteRun:
         rollouts_per_example=num_rollouts,
         result_path=result_path,
     )
+    comparison_signature: str | None = None
+    if declared_predict_ablation:
+        if ablation_config_provenance is None:  # pragma: no cover - invariant
+            raise InvalidRunError(
+                f"{result_path}: declared Predict ablation lacks config provenance"
+            )
+        if trace_agent_provenance is None:  # pragma: no cover - positive run size
+            raise InvalidRunError(
+                f"{result_path}: declared Predict ablation has no trace provenance"
+            )
+        task_roster = [
+            {
+                "task_id": task_id,
+                "rollouts": counts_by_example[task_id],
+                "answer_sha256": task_answer_digests[task_id],
+            }
+            for task_id in sorted(counts_by_example)
+        ]
+        # Regression guard: the outcome scores are intentionally excluded, while
+        # every model-facing setting and the immutable answer roster stay paired.
+        comparison_signature = stable_json_digest(
+            {
+                **ablation_config_provenance,
+                "trace_agent": trace_agent_provenance,
+                "tasks": task_roster,
+                # Preserve execution order as an additional release-provenance
+                # invariant. Pairwise statistics still align observations by
+                # task ID, but a reordered run is not evidence that prompt_mode
+                # was the only changed factor.
+                "task_sequence": task_ids,
+                "reward_contract": {
+                    "name": "probability_reward",
+                    "weight": 1.0,
+                },
+            },
+            f"{result_path}: Predict ablation comparison provenance",
+        )
     return CompleteRun(
         model=model,
         environment=environment,
@@ -533,6 +717,15 @@ def load_native_run(result_path: Path) -> CompleteRun:
         task_ids=tuple(task_ids),
         rewards=tuple(rewards),
         metrics={name: tuple(values) for name, values in metric_values.items()},
+        prompt_mode=prompt_mode,
+        comparison_signature=comparison_signature,
+        task_answer_digests=tuple(sorted(task_answer_digests.items())),
+        raw_reward_scores={
+            name: tuple(values) for name, values in raw_reward_scores.items()
+        },
+        raw_reward_weights={
+            name: tuple(values) for name, values in raw_reward_weights.items()
+        },
     )
 
 
@@ -648,6 +841,227 @@ def native_trace_from_episode(
     return trace
 
 
+def require_predict_ablation_config_provenance(
+    config: Mapping[str, Any],
+    *,
+    base_environment: str,
+    taskset: Mapping[str, Any] | None,
+    model: str,
+    num_tasks: int,
+    num_rollouts: int,
+    config_path: Path,
+) -> dict[str, Any]:
+    """Return the resolved model-facing config for a declared Predict ablation."""
+
+    if taskset is None:  # pragma: no cover - baseline validation already rejects this
+        raise InvalidRunError(
+            f"{config_path}: declared Predict ablations require a native taskset"
+        )
+    client = config.get("client")
+    if not isinstance(client, Mapping) or not client:
+        raise InvalidRunError(
+            f"{config_path}: declared Predict ablations require resolved client "
+            "provenance"
+        )
+    identity_values: list[str] = []
+    for key in ("provider", "base_url"):
+        if key not in client:
+            continue
+        value = client[key]
+        if not isinstance(value, str) or not value.strip() or value != value.strip():
+            raise InvalidRunError(
+                f"{config_path}: declared Predict ablation client {key} must be "
+                "non-empty canonical text"
+            )
+        identity_values.append(value)
+    if not identity_values:
+        raise InvalidRunError(
+            f"{config_path}: declared Predict ablation client identity is incomplete"
+        )
+    sampling = config.get("sampling")
+    if not isinstance(sampling, Mapping):
+        raise InvalidRunError(
+            f"{config_path}: declared Predict ablations require resolved sampling "
+            "settings"
+        )
+    max_concurrent = require_positive_int(config, "max_concurrent", config_path)
+
+    concurrency: dict[str, Any] = {"max_concurrent": max_concurrent}
+    env = config.get("env")
+    if isinstance(env, Mapping):
+        if "max_concurrent_agents" in env:
+            concurrency["env.max_concurrent_agents"] = env["max_concurrent_agents"]
+        interception = env.get("interception")
+        if isinstance(interception, Mapping) and "multiplex" in interception:
+            concurrency["env.interception.multiplex"] = interception["multiplex"]
+    serve = config.get("serve")
+    if isinstance(serve, Mapping):
+        if "max_concurrent" in serve:
+            concurrency["serve.max_concurrent"] = serve["max_concurrent"]
+        pool = serve.get("pool")
+        if isinstance(pool, Mapping):
+            for key in ("max_workers", "multiplex"):
+                if key in pool:
+                    concurrency[f"serve.pool.{key}"] = pool[key]
+
+    # prompt_mode is the treatment. Keeping it out of this payload is what lets
+    # the four otherwise-identical native artifacts share one stable signature.
+    taskset_without_prompt_mode = {
+        key: value for key, value in taskset.items() if key != "prompt_mode"
+    }
+    return {
+        "schema": PREDICT_ABLATION_SIGNATURE_SCHEMA,
+        "environment": base_environment,
+        "model": model,
+        "client": dict(client),
+        "sampling": dict(sampling),
+        "concurrency": concurrency,
+        "num_tasks": num_tasks,
+        "num_rollouts": num_rollouts,
+        "shuffle": config.get("shuffle"),
+        "taskset": taskset_without_prompt_mode,
+    }
+
+
+def require_predict_ablation_trace_provenance(
+    trace: Mapping[str, Any],
+    *,
+    expected_model: str,
+    expected_client: Mapping[str, Any],
+    expected_sampling: Mapping[str, Any],
+    result_path: Path,
+    line_number: int,
+) -> dict[str, Any]:
+    """Validate the effective agent identity recorded in an ablation trace."""
+
+    agent = trace.get("agent")
+    agent_config = agent.get("config") if isinstance(agent, Mapping) else None
+    if not isinstance(agent_config, Mapping):  # pragma: no cover - checked upstream
+        raise InvalidRunError(
+            f"{result_path}:{line_number}: trace agent config must be an object"
+        )
+    if agent_config.get("model") != expected_model:
+        raise InvalidRunError(
+            f"{result_path}:{line_number}: declared Predict ablation trace must "
+            "record the resolved model"
+        )
+    client = agent_config.get("client")
+    if not isinstance(client, Mapping) or dict(client) != dict(expected_client):
+        raise InvalidRunError(
+            f"{result_path}:{line_number}: declared Predict ablation trace client "
+            "does not match saved config"
+        )
+    sampling = agent_config.get("sampling")
+    if not isinstance(sampling, Mapping) or dict(sampling) != dict(expected_sampling):
+        raise InvalidRunError(
+            f"{result_path}:{line_number}: declared Predict ablation trace sampling "
+            "does not match saved config"
+        )
+    calls = trace.get("calls")
+    if not isinstance(calls, list) or len(calls) != 1:
+        raise InvalidRunError(
+            f"{result_path}:{line_number}: declared Predict ablation trace must "
+            "record exactly one model call"
+        )
+    call = calls[0]
+    if not isinstance(call, Mapping) or call.get("error") is not None:
+        raise InvalidRunError(
+            f"{result_path}:{line_number}: declared Predict ablation model call "
+            "must be a successful object"
+        )
+    if call.get("model") != expected_model:
+        raise InvalidRunError(
+            f"{result_path}:{line_number}: declared Predict ablation call model "
+            "does not match saved config"
+        )
+    call_sampling = call.get("sampling")
+    if not isinstance(call_sampling, Mapping) or dict(call_sampling) != dict(
+        expected_sampling
+    ):
+        raise InvalidRunError(
+            f"{result_path}:{line_number}: declared Predict ablation call sampling "
+            "does not match saved config"
+        )
+    endpoint = call.get("endpoint")
+    if (
+        not isinstance(endpoint, str)
+        or not endpoint.strip()
+        or endpoint != endpoint.strip()
+    ):
+        raise InvalidRunError(
+            f"{result_path}:{line_number}: declared Predict ablation call endpoint "
+            "must be non-empty canonical text"
+        )
+    call_identity: dict[str, str] = {}
+    for key in ("provider", "base_url"):
+        if key not in call:
+            continue
+        value = call[key]
+        if not isinstance(value, str) or not value.strip() or value != value.strip():
+            raise InvalidRunError(
+                f"{result_path}:{line_number}: declared Predict ablation call {key} "
+                "must be non-empty canonical text"
+            )
+        expected_value = expected_client.get(key)
+        if expected_value is not None and value != expected_value:
+            raise InvalidRunError(
+                f"{result_path}:{line_number}: declared Predict ablation call {key} "
+                "does not match saved client config"
+            )
+        call_identity[key] = value
+    return {
+        "model": expected_model,
+        "client": dict(client),
+        "sampling": dict(sampling),
+        "call": {
+            "model": expected_model,
+            "sampling": dict(call_sampling),
+            "endpoint": endpoint,
+            **call_identity,
+        },
+    }
+
+
+def task_answer_digest(
+    task_data: Mapping[str, Any],
+    *,
+    required: bool,
+    path: Path,
+    line_number: int,
+) -> str | None:
+    """Hash one saved task answer without retaining its potentially sensitive text."""
+
+    if "answer" not in task_data:
+        if required:
+            raise InvalidRunError(
+                f"{path}:{line_number}: declared Predict ablation trace is missing "
+                "the task answer"
+            )
+        return None
+    answer = task_data["answer"]
+    if required and not isinstance(answer, Mapping):
+        raise InvalidRunError(
+            f"{path}:{line_number}: declared Predict ablation answer must be an object"
+        )
+    return stable_json_digest(answer, f"{path}:{line_number}: task answer")
+
+
+def stable_json_digest(value: Any, location: str) -> str:
+    """Hash a canonical JSON value for stable cross-artifact comparison."""
+
+    try:
+        canonical = json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+    except (TypeError, ValueError) as error:
+        raise InvalidRunError(f"{location} is not canonical JSON: {error}") from error
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 def validate_rollout_distribution(
     counts_by_example: Mapping[int, int],
     *,
@@ -695,12 +1109,61 @@ def uses_historical_predict_reward(environment: str) -> bool:
     return bool(separator and version.startswith(("0.1.", "0.2.", "0.3.")))
 
 
+def uses_snapshot_prior_skill(environment: str) -> bool:
+    """Return whether Predict emits the original-snapshot reference loss."""
+
+    taskset_id = environment.rsplit("+", 1)[-1]
+    _, separator, version = taskset_id.partition("@")
+    return not separator or not version.startswith(
+        ("0.1.", "0.2.", "0.3.", "0.4.", "0.5.")
+    )
+
+
+def legacy_metric_contract_environment(
+    environment: str, metadata: Mapping[str, Any], path: Path
+) -> str:
+    """Resolve an unpinned legacy ID against its recorded package version.
+
+    Old ``vf-eval`` artifacts usually saved an unpinned ``env_id`` while
+    recording the installed environment version under ``version_info``.  The
+    version must drive metric-contract validation so immutable pre-0.6 runs do
+    not get reinterpreted as current runs merely because their ID was unpinned.
+    """
+
+    taskset_id = environment.rsplit("+", 1)[-1]
+    if "@" in taskset_id:
+        return environment
+    version_info = metadata.get("version_info")
+    if version_info is None:
+        return environment
+    if not isinstance(version_info, Mapping):
+        raise InvalidRunError(f"{path}: version_info must be an object")
+    env_version = version_info.get("env_version")
+    if env_version is None:
+        return environment
+    if not isinstance(env_version, str) or not env_version.strip():
+        raise InvalidRunError(
+            f"{path}: version_info.env_version must be a non-empty string"
+        )
+    return f"{environment}@{env_version.strip()}"
+
+
 def uses_structured_elicit_diagnostics(environment: str) -> bool:
     """Return whether Elicit uses the expanded 0.5 diagnostic contract."""
 
     taskset_id = environment.rsplit("+", 1)[-1]
     _, separator, version = taskset_id.partition("@")
     return not separator or not version.startswith(("0.1.", "0.2.", "0.3.", "0.4."))
+
+
+def uses_grounded_stance_diagnostics(environment: str) -> bool:
+    """Return whether Elicit exposes distinct end-to-end and conditional metrics."""
+
+    taskset_id = environment.rsplit("+", 1)[-1]
+    _, separator, version = taskset_id.partition("@")
+    return not separator or not version.startswith(
+        ("0.1.", "0.2.", "0.3.", "0.4.", "0.5.")
+    )
 
 
 def is_elicit_environment(environment: str) -> bool:
@@ -755,7 +1218,11 @@ def validate_native_baseline_profile(
             "planted_density": 1.0,
             "distractor_density": 1.0,
             "panel_polarization": 1.0,
-            "question_count": 2,
+            # 0.6 makes the default selection budget one of three issues; older
+            # immutable studies used two of three and remain readable.
+            "question_count": (
+                1 if uses_grounded_stance_diagnostics(base_environment) else 2
+            ),
             "task_mode": task_mode,
         }
         drift = {
@@ -776,7 +1243,12 @@ def expected_native_signals(
     if package_name == "commonground-predict":
         if uses_historical_predict_reward(environment):
             return ("vote_accuracy",), ("brier",)
-        return ("probability_reward",), ("brier", "vote_accuracy")
+        metrics = (
+            ("brier", "original_snapshot_visible_prior_brier", "vote_accuracy")
+            if uses_snapshot_prior_skill(environment)
+            else ("brier", "vote_accuracy")
+        )
+        return ("probability_reward",), metrics
     if package_name == "commonground-elicit" and task_mode == "find":
         if uses_structured_elicit_diagnostics(environment):
             return ("finding_f1",), (
@@ -793,6 +1265,15 @@ def expected_native_signals(
         )
     if package_name == "commonground-elicit" and task_mode == "elicit-ask":
         if uses_structured_elicit_diagnostics(environment):
+            if uses_grounded_stance_diagnostics(environment):
+                return ("question_utility",), (
+                    "question_evidence_match_recall",
+                    "question_evidence_matched_stance_accuracy",
+                    "question_format_valid",
+                    "question_grounded_stance_recall",
+                    "question_grounding_recall",
+                    "question_top1_selection_accuracy",
+                )
             return ("question_utility",), (
                 "question_format_valid",
                 "question_grounding_recall",
@@ -807,7 +1288,11 @@ def expected_legacy_metrics(
 ) -> tuple[str, ...]:
     package_name = environment_package_name(environment)
     if package_name == "commonground-predict":
-        return ("vote_accuracy", "brier")
+        return (
+            ("vote_accuracy", "brier", "original_snapshot_visible_prior_brier")
+            if uses_snapshot_prior_skill(environment)
+            else ("vote_accuracy", "brier")
+        )
     if package_name == "commonground-elicit" and task_mode == "find":
         # Historical 0.2.x legacy runs did not emit the diagnostic metrics
         # added to the native 0.3.0 task contract.
@@ -820,6 +1305,11 @@ def expected_legacy_metrics(
 def validate_metric_domain(
     name: str, value: float, path: Path, line_number: int
 ) -> None:
+    if name == "brier_skill_vs_original_snapshot_visible_prior":
+        # Skill is unbounded below when the original-snapshot reference is very
+        # accurate. A zero pooled reference is rejected during derivation, so
+        # finiteness is the remaining per-value fail-closed domain check.
+        return
     upper = 1.0
     if not 0.0 <= value <= upper:
         raise InvalidRunError(
@@ -851,6 +1341,64 @@ def require_task_mode(
         raise InvalidRunError(
             f"{path}:{line_number}: trace task mode does not match run config"
         )
+
+
+def resolve_predict_prompt_mode(
+    environment: str,
+    raw_args: Any,
+    path: Path,
+) -> tuple[str | None, bool]:
+    """Resolve Predict's prompt view while keeping historical runs readable."""
+
+    if environment_package_name(environment) != "commonground-predict":
+        return None, False
+    if raw_args is None:
+        return "full", False
+    if not isinstance(raw_args, Mapping):
+        raise InvalidRunError(
+            f"{path}: Predict environment arguments must be an object"
+        )
+    explicit = "prompt_mode" in raw_args
+    prompt_mode = raw_args.get("prompt_mode", "full")
+    if prompt_mode not in PREDICT_PROMPT_MODES:
+        raise InvalidRunError(
+            f"{path}: Predict prompt mode must be one of {list(PREDICT_PROMPT_MODES)}"
+        )
+    return str(prompt_mode), explicit
+
+
+def require_prompt_mode(
+    raw_info: Any,
+    expected_mode: str | None,
+    *,
+    required: bool,
+    path: Path,
+    line_number: int,
+) -> None:
+    if expected_mode is None:
+        return
+    if not isinstance(raw_info, Mapping):
+        if not required:
+            return
+        raise InvalidRunError(
+            f"{path}:{line_number}: trace prompt mode does not match run config"
+        )
+    raw_mode = raw_info.get("prompt_mode")
+    if raw_mode is None and not required:
+        return
+    if raw_mode != expected_mode:
+        raise InvalidRunError(
+            f"{path}:{line_number}: trace prompt mode does not match run config"
+        )
+
+
+def prompt_mode_sort_key(prompt_mode: str | None) -> tuple[int, str]:
+    if prompt_mode is None:
+        return (-1, "")
+    try:
+        return (PREDICT_PROMPT_MODES.index(prompt_mode), prompt_mode)
+    except ValueError:
+        return (len(PREDICT_PROMPT_MODES), prompt_mode)
 
 
 def load_json_object(path: Path) -> dict[str, Any]:
@@ -973,13 +1521,14 @@ def render_markdown(summaries: Sequence[Summary]) -> str:
     headers = [
         "Model",
         "Environment",
+        "Prompt mode",
         "Run ID",
         "Rollouts",
         "Recovered rollouts",
         "Reward (mean ± std)",
     ]
     headers.extend(f"{name} (mean ± std)" for name in METRIC_NAMES)
-    alignments = ["---", "---", "---", "---:", "---:", "---:"]
+    alignments = ["---", "---", "---", "---", "---:", "---:", "---:"]
     alignments.extend("---:" for _ in METRIC_NAMES)
     lines = [
         "| " + " | ".join(headers) + " |",
@@ -989,6 +1538,7 @@ def render_markdown(summaries: Sequence[Summary]) -> str:
         row = [
             summary.model,
             summary.environment,
+            summary.prompt_mode or "—",
             summary.run_id,
             str(summary.rollout_count),
             str(summary.recovered_rollout_count),
@@ -1007,6 +1557,7 @@ def write_csv(path: Path, summaries: Sequence[Summary]) -> None:
     fieldnames = [
         "model",
         "environment",
+        "prompt_mode",
         "run_id",
         "rollouts",
         "recovered_rollouts",
@@ -1023,6 +1574,7 @@ def write_csv(path: Path, summaries: Sequence[Summary]) -> None:
             row: dict[str, str | int | float] = {
                 "model": summary.model,
                 "environment": summary.environment,
+                "prompt_mode": summary.prompt_mode or "",
                 "run_id": summary.run_id,
                 "rollouts": summary.rollout_count,
                 "recovered_rollouts": summary.recovered_rollout_count,

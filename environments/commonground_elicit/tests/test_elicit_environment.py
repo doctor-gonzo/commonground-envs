@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 from pathlib import Path
 from typing import Any
 
 import pytest
+import tiktoken
 import verifiers as legacy_vf
 import verifiers.v1 as vf1
 from commonground_elicit import (
@@ -26,6 +28,7 @@ from commonground_elicit import (
 from commonground_elicit.environment import (
     BUNDLED_EVAL_PATH,
     BUNDLED_TRAIN_PATH,
+    _best_question_assignment,
     _maximum_weight_sum,
     _safe_truncation_index,
     build_document_view,
@@ -33,7 +36,18 @@ from commonground_elicit.environment import (
     normalized_quote_overlap,
     scenario_to_row,
 )
-from commonground_scenarios import HELDOUT_TEMPLATES, generate_scenario
+from commonground_scenarios import (
+    HELDOUT_TEMPLATES,
+    generate_scenario,
+    validate_scenario,
+)
+from commonground_scenarios.generator import ACTOR_SUPPORT_REASON, orient_stances
+from commonground_scenarios.templates import VALUE_DIMENSIONS
+from commonground_scenarios.validation import (
+    PASS_THRESHOLD,
+    YES_NO_AUXILIARIES,
+    preference_tradeoff_value,
+)
 from verifiers.types import State
 from verifiers.v1.harnesses.null import NullHarness
 from verifiers.v1.utils.loaders import (
@@ -48,6 +62,7 @@ QUESTION_RESPONSE_FIELDS = (
     "quote",
     "type",
     "question",
+    "decision",
     "yes_choice",
     "related_evidence",
     "target_stances",
@@ -57,6 +72,7 @@ FINDING_RESPONSE_FIELDS = (
     "quote",
     "type",
     "diagnosis",
+    "decision",
     "related_evidence",
 )
 
@@ -138,7 +154,10 @@ def test_optional_shaped_find_reward_preserves_strict_f1_as_metric() -> None:
     partial_finding = dict(exact["findings"][0])
     partial_finding["type"] = "gap" if partial_finding["type"] != "gap" else "ambiguity"
     partial_finding["related_evidence"] = None
-    response = {"findings": [partial_finding]}
+    response = {
+        "findings": [partial_finding],
+        "questions": exact["questions"],
+    }
 
     strict_state = score_row(strict_env, row, response)
     shaped_state = score_row(shaped_env, row, response)
@@ -280,7 +299,7 @@ def test_all_built_rows_use_only_canonical_server_columns(task: str) -> None:
             assert "task" not in info
             assert info["task_label"] == task
             assert info["panel_polarization"] == 1.0
-            assert info["question_count"] == 2
+            assert info["question_count"] == 1
             assert info["allow_combined_questions"] is (task == "find")
 
 
@@ -358,9 +377,7 @@ def test_rubric_scores_exact_answer_at_one() -> None:
     assert state["metrics"]["question_utility"] > 0.0
 
 
-def test_find_task_companion_question_metric_is_reachable_without_affecting_reward() -> (
-    None
-):
+def test_find_primary_reward_is_independent_of_optional_companion_questions() -> None:
     env = load_environment()
     row = dict(env.get_eval_dataset()[0])
     exact = correct_response_from_row(row)
@@ -369,13 +386,15 @@ def test_find_task_companion_question_metric_is_reachable_without_affecting_rewa
     combined_state = score_row(env, row, exact)
     findings_only_state = score_row(env, row, without_questions)
 
+    assert combined_state["reward"] == 1.0
+    assert findings_only_state["reward"] == 1.0
+    assert findings_only_state["metrics"]["finding_f1"] == 1.0
     assert combined_state["metrics"]["question_utility"] > 0.0
     assert findings_only_state["metrics"]["question_utility"] == 0.0
-    assert combined_state["reward"] == findings_only_state["reward"] == 1.0
 
 
 @pytest.mark.parametrize("questions", ["invalid", []])
-def test_invalid_or_wrong_k_companion_questions_do_not_zero_t1(
+def test_invalid_or_wrong_k_companion_questions_do_not_erase_find_reward(
     questions: object,
 ) -> None:
     env = load_environment()
@@ -396,6 +415,19 @@ def test_invalid_or_wrong_k_companion_questions_do_not_zero_t1(
     assert state["metrics"]["question_utility"] == 0.0
 
 
+def test_extra_well_formed_companion_question_only_fails_companion_metric() -> None:
+    env = load_environment()
+    row = dict(env.get_eval_dataset()[0])
+    response = correct_response_from_row(row)
+    response["questions"].append(dict(response["questions"][0]))
+
+    state = score_row(env, row, response)
+
+    assert state["reward"] == 1.0
+    assert state["metrics"]["finding_f1"] == 1.0
+    assert state["metrics"]["question_utility"] == 0.0
+
+
 def test_ask_task_builds_same_env_id_with_task_specific_prompt() -> None:
     env = load_environment(task="elicit-ask")
     row = dict(env.get_eval_dataset()[0])
@@ -404,10 +436,10 @@ def test_ask_task_builds_same_env_id_with_task_specific_prompt() -> None:
 
     assert env.env_id == "commonground-elicit"
     assert env.env_args["task"] == "elicit-ask"
-    assert "Select and raise exactly 2 clarifying questions" in prompt
+    assert "Select and raise exactly 1 clarifying question" in prompt
     assert "agree means yes" in prompt
     assert "copy the exact supporting passage" in prompt.casefold()
-    assert "not compared with hidden canonical vocabulary" in prompt.casefold()
+    assert "generic questions receive no semantic credit" in prompt.casefold()
     assert "Stakeholder factions:" in prompt
     for plant in planted:
         assert plant["question"] not in prompt
@@ -427,8 +459,11 @@ def test_ask_task_exact_planted_response_is_positive_and_deterministic() -> None
     assert first["reward"] == second["reward"]
     assert first["metrics"]["question_utility"] == first["reward"]
     assert first["metrics"]["question_format_valid"] == 1.0
+    assert first["metrics"]["question_top1_selection_accuracy"] == 1.0
     assert first["metrics"]["question_grounding_recall"] == 1.0
-    assert first["metrics"]["question_stance_accuracy"] == 1.0
+    assert first["metrics"]["question_grounded_stance_recall"] == 1.0
+    assert first["metrics"]["question_evidence_match_recall"] == 1.0
+    assert first["metrics"]["question_evidence_matched_stance_accuracy"] == 1.0
 
 
 def test_ask_diagnostics_separate_format_grounding_and_stance_failures() -> None:
@@ -443,16 +478,79 @@ def test_ask_diagnostics_separate_format_grounding_and_stance_failures() -> None
     wrong_stance["questions"][0]["target_stances"][faction_id] = (
         "disagree" if original_stance == "agree" else "agree"
     )
+    semantic_error = json.loads(json.dumps(exact))
+    semantic_error["questions"][0]["decision"]["actor"] = "an unrelated committee"
 
     malformed = score_row(env, row, {"questions": "invalid"})
     ungrounded = score_row(env, row, wrong_grounding)
     stance_error = score_row(env, row, wrong_stance)
+    semantic_failure = score_row(env, row, semantic_error)
 
     assert malformed["metrics"]["question_format_valid"] == 0.0
+    assert malformed["metrics"]["question_top1_selection_accuracy"] == 0.0
     assert ungrounded["metrics"]["question_format_valid"] == 1.0
     assert ungrounded["metrics"]["question_grounding_recall"] == 0.0
+    assert ungrounded["metrics"]["question_evidence_match_recall"] == 0.0
     assert stance_error["metrics"]["question_grounding_recall"] == 1.0
-    assert 0.0 <= stance_error["metrics"]["question_stance_accuracy"] < 1.0
+    assert 0.0 <= stance_error["metrics"]["question_grounded_stance_recall"] < 1.0
+    assert (
+        0.0
+        <= stance_error["metrics"]["question_evidence_matched_stance_accuracy"]
+        < 1.0
+    )
+    assert semantic_failure["metrics"]["question_grounding_recall"] == 0.0
+    assert semantic_failure["metrics"]["question_grounded_stance_recall"] == 0.0
+    assert semantic_failure["metrics"]["question_evidence_match_recall"] == 1.0
+    assert (
+        semantic_failure["metrics"]["question_evidence_matched_stance_accuracy"] == 1.0
+    )
+
+
+def test_ask_top1_selection_metric_separates_runner_up_from_component_quality() -> None:
+    env = load_environment(task="elicit-ask", question_count=1)
+    row = dict(env.get_eval_dataset()[0])
+    plants = planted_questions_from_row(row)
+    runner_up = {"questions": [candidate_for_plant(plants[1])]}
+
+    state = score_row(env, row, runner_up)
+
+    assert 0.0 < state["reward"] < 1.0
+    assert state["metrics"]["question_top1_selection_accuracy"] == 0.0
+    assert state["metrics"]["question_evidence_match_recall"] == 1.0
+    assert state["metrics"]["question_evidence_matched_stance_accuracy"] == 1.0
+
+
+@pytest.mark.parametrize("malformed_stance", [None, [], {}, True, 1, 1.0])
+def test_malformed_stance_values_fail_closed_without_raising(
+    malformed_stance: Any,
+) -> None:
+    env = load_environment(task="elicit-ask", question_count=1)
+    row = dict(env.get_eval_dataset()[0])
+    response = correct_response_from_row(row)
+    faction_id = next(iter(response["questions"][0]["target_stances"]))
+    response["questions"][0]["target_stances"][faction_id] = malformed_stance
+
+    state = score_row(env, row, response)
+
+    assert state["reward"] == 0.0
+    assert state["metrics"]["question_format_valid"] == 0.0
+
+
+@pytest.mark.parametrize("malformed_field", [None, [], {}, True, 1, 1.0])
+@pytest.mark.parametrize("task", ["find", "elicit-ask"])
+def test_malformed_decision_fields_fail_closed_without_raising(
+    malformed_field: Any,
+    task: str,
+) -> None:
+    env = load_environment(task=task, question_count=1)
+    row = dict(env.get_eval_dataset()[0])
+    response = correct_response_from_row(row)
+    response_key = "findings" if task == "find" else "questions"
+    response[response_key][0]["decision"]["actor"] = malformed_field
+
+    state = score_row(env, row, response)
+
+    assert state["reward"] == 0.0
 
 
 def test_ask_task_env_args_round_trip_preserves_task_and_rows() -> None:
@@ -473,11 +571,31 @@ def test_question_count_knob_changes_prompt_info_and_response_size() -> None:
     response = correct_response_from_row(row)
 
     assert (
-        "Select and raise exactly 1 clarifying questions" in row["prompt"][0]["content"]
+        "Select and raise exactly 1 clarifying question" in row["prompt"][0]["content"]
     )
     assert info["question_count"] == 1
     assert len(response["questions"]) == 1
     assert score_row(env, row, response)["reward"] > 0
+
+
+def test_exact_extended_responses_fit_the_frozen_generation_budget() -> None:
+    """Keep the expanded 0.6 schema well below the 2,048-token study cap."""
+
+    encoding = tiktoken.get_encoding("cl100k_base")
+    token_counts: list[int] = []
+    for task in ("find", "elicit-ask"):
+        env = load_environment(task=task, question_count=1)
+        for row in env.get_eval_dataset():
+            compact = json.dumps(
+                correct_response_from_row(dict(row)),
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+            )
+            token_counts.append(len(encoding.encode(compact)))
+
+    assert token_counts
+    assert max(token_counts) <= 1_024
 
 
 def test_ask_task_rejects_k_larger_than_available_plants() -> None:
@@ -503,7 +621,7 @@ def test_panel_polarization_changes_selection_weights_without_changing_exact_max
     assert half_score == pytest.approx(full_score) == 1.0
 
 
-def test_free_question_wording_does_not_override_structured_grounding() -> None:
+def test_generic_question_cannot_claim_structured_decision_grounding() -> None:
     env = load_environment(task="elicit-ask", question_count=1)
     row = dict(env.get_eval_dataset()[0])
     plant = planted_questions_from_row(row)[0]
@@ -534,12 +652,24 @@ def test_free_question_wording_does_not_override_structured_grounding() -> None:
         question_count=1,
     )
 
-    assert targeted_score == paraphrase_score == generic_score == 1.0
+    assert targeted_score == paraphrase_score == 1.0
+    assert generic_score == 0.0
 
 
 def test_precise_distractor_quote_cannot_receive_planted_question_credit() -> None:
     scenario = generate_scenario(8200, HELDOUT_TEMPLATES[0])
-    plant = scenario["planted_items"][0]
+    # Use a document with one plant so docs_length cannot first remove a
+    # different, ineligible plant and shift the appended distractor before the
+    # requested cut. This keeps the regression focused on partial-anchor
+    # truncation rather than on multi-plant document filtering.
+    plant = next(
+        candidate
+        for candidate in scenario["planted_items"]
+        if sum(
+            item["doc_id"] == candidate["doc_id"] for item in scenario["planted_items"]
+        )
+        == 1
+    )
     document = next(
         document
         for document in scenario["documents"]
@@ -567,7 +697,12 @@ def test_precise_distractor_quote_cannot_receive_planted_question_credit() -> No
         question_count=1,
         task="elicit-ask",
     )
-    planted_question = planted_questions_from_row(row)[0]
+    planted_question = next(
+        question
+        for question in planted_questions_from_row(row)
+        if question["doc_id"] == plant["doc_id"]
+        and question["quote"] == plant["anchor_quote"]
+    )
     distractor_candidate = candidate_for_plant(planted_question, quote=distractor_quote)
 
     assert (
@@ -601,7 +736,12 @@ def test_precise_distractor_quote_cannot_receive_planted_question_credit() -> No
         question_count=1,
         task="elicit-ask",
     )
-    truncated_plant = planted_questions_from_row(truncated_row)[0]
+    truncated_plant = next(
+        question
+        for question in planted_questions_from_row(truncated_row)
+        if question["doc_id"] == plant["doc_id"]
+        and question["quote"] == plant["anchor_quote"]
+    )
 
     assert visible_prefix not in truncated_plant["document_text"]
     assert (
@@ -622,7 +762,10 @@ def test_find_task_caps_companion_k_to_visible_plants() -> None:
     info = json.loads(row["info"])
 
     assert info["question_count"] == 1
-    assert "Return exactly 1 question objects" in row["prompt"][0]["content"]
+    assert (
+        "may also include exactly 1 optional question object"
+        in row["prompt"][0]["content"]
+    )
     assert len(answer["questions"]) == 1
     state = score_row(env, row, correct_response_from_row(row))
     assert state["reward"] == 1.0
@@ -661,7 +804,7 @@ def test_question_must_be_yes_no(
         "May a synonym-rich reformulation govern this case?",
     ],
 )
-def test_structured_grounding_does_not_depend_on_question_vocabulary(
+def test_generic_question_vocabulary_cannot_replace_decision_semantics(
     question: str,
 ) -> None:
     env = load_environment(task="elicit-ask", question_count=1)
@@ -674,11 +817,11 @@ def test_structured_grounding_does_not_depend_on_question_vocabulary(
             panel_polarization=1.0,
             question_count=1,
         )
-        == 1.0
+        == 0.0
     )
 
 
-def test_unlisted_question_grounded_in_visible_evidence_receives_credit() -> None:
+def test_quote_only_question_without_decision_frame_semantics_scores_zero() -> None:
     env = load_environment(task="elicit-ask", question_count=1)
     plant = planted_questions_from_row(dict(env.get_eval_dataset()[0]))[0]
     question = f"Should {' '.join(plant['quote'].split()[:4])} be clarified?"
@@ -691,41 +834,143 @@ def test_unlisted_question_grounded_in_visible_evidence_receives_credit() -> Non
         question_count=1,
     )
 
-    assert score > 0.0
+    assert score == 0.0
 
 
-def test_hidden_canonical_wording_does_not_change_question_score() -> None:
-    env = load_environment(task="elicit-ask", question_count=1)
-    plant = planted_questions_from_row(dict(env.get_eval_dataset()[0]))[0]
-    candidate = candidate_for_plant(
-        plant,
-        question=plant["question"],
-    )
-    rewritten_oracle = {
-        **plant,
-        "question": "Is unrelated hidden wording allowed?",
-        "question_aliases": ["Does unrelated hidden wording apply?"],
+@pytest.mark.parametrize("issue_type", ["ambiguity", "contradiction", "gap"])
+def test_independently_authored_decision_paraphrases_score_for_ask_and_find(
+    issue_type: str,
+) -> None:
+    """Natural paraphrases must work without copying the hidden frame strings."""
+
+    plant = semantic_contract_plant(issue_type)
+    candidate = semantic_contract_candidate(issue_type, plant)
+    finding_candidate = {
+        "doc_id": candidate["doc_id"],
+        "quote": candidate["quote"],
+        "type": candidate["type"],
+        "diagnosis": candidate["question"],
+        "decision": candidate["decision"],
+        "related_evidence": candidate["related_evidence"],
     }
 
-    original = question_utility_score(
-        [candidate], [plant], panel_polarization=1.0, question_count=1
+    assert candidate["decision"] != plant["decision"]
+    assert candidate["question"] not in {
+        plant["question"],
+        *plant["question_aliases"],
+    }
+    assert (
+        question_utility_score(
+            [candidate],
+            [plant],
+            panel_polarization=1.0,
+            question_count=1,
+        )
+        == 1.0
     )
-    rewritten = question_utility_score(
-        [candidate], [rewritten_oracle], panel_polarization=1.0, question_count=1
+    assert match_findings([finding_candidate], [plant])["f1"] == 1.0
+
+
+@pytest.mark.parametrize("auxiliary", sorted(YES_NO_AUXILIARIES))
+def test_semantic_credit_is_invariant_to_accepted_yes_no_auxiliary(
+    auxiliary: str,
+) -> None:
+    """Surface-form auxiliaries must not become hidden semantic keywords."""
+
+    plant = semantic_contract_plant("ambiguity")
+    candidate = semantic_contract_candidate("ambiguity", plant)
+    _, remainder = candidate["question"].split(maxsplit=1)
+    candidate["question"] = f"{auxiliary} {remainder}"
+
+    assert (
+        question_utility_score(
+            [candidate],
+            [plant],
+            panel_polarization=1.0,
+            question_count=1,
+        )
+        == 1.0
     )
 
-    assert original == rewritten == 1.0
+
+@pytest.mark.parametrize("malformation", ["repeat-actor", "swap-actor-action"])
+def test_decision_core_slots_cannot_be_repeated_or_swapped(
+    malformation: str,
+) -> None:
+    plant = semantic_contract_plant("ambiguity")
+    candidate = semantic_contract_candidate("ambiguity", plant)
+    malformed = json.loads(json.dumps(candidate))
+
+    if malformation == "repeat-actor":
+        repeated = malformed["decision"]["actor"]
+        malformed["decision"]["action"] = repeated
+        malformed["decision"]["condition"] = repeated
+    else:
+        malformed["decision"]["actor"], malformed["decision"]["action"] = (
+            malformed["decision"]["action"],
+            malformed["decision"]["actor"],
+        )
+
+    assert (
+        question_utility_score(
+            [malformed],
+            [plant],
+            panel_polarization=1.0,
+            question_count=1,
+        )
+        == 0.0
+    )
 
 
-def test_baseline_style_paraphrase_regression_is_scorable() -> None:
+def test_evidence_word_dump_cannot_satisfy_decision_slots() -> None:
+    plant = semantic_contract_plant("contradiction")
+    candidate = semantic_contract_candidate("contradiction", plant)
+    evidence_dump = (
+        "duty coordinator assigned dispatcher transfer delayed load after hours "
+        "available route alone unavailable"
+    )
+    dumped = {
+        **candidate,
+        "question": f"Should {evidence_dump}?",
+        "decision": {
+            "actor": evidence_dump,
+            "action": evidence_dump,
+            "condition": evidence_dump,
+            "anchor_outcome": evidence_dump,
+            "alternative_outcome": f"{evidence_dump} alternate",
+        },
+    }
+
+    assert (
+        question_utility_score(
+            [dumped],
+            [plant],
+            panel_polarization=1.0,
+            question_count=1,
+        )
+        == 0.0
+    )
+
+
+def test_baseline_style_paraphrase_without_unsupported_clause_is_scorable() -> None:
     plant = {
         "doc_id": "listing-rules",
         "quote": "Trust reviewers may remove a misleading listing immediately.",
         "type": "ambiguity",
-        "question": "Should immediate trust removal override review?",
+        "question": (
+            "Should trust reviewers remove a listing immediately "
+            "(yes selects the alternative outcome: immediate trust removal)?"
+        ),
         "question_aliases": [],
         "yes_choice": "alternative",
         "related_evidence": None,
+        "decision": {
+            "actor": "trust reviewers",
+            "action": "remove listing",
+            "condition": "immediately",
+            "anchor_outcome": "remove misleading listing",
+            "alternative_outcome": "immediate trust removal",
+        },
         "alternative_stances": {
             "buyers": "agree",
             "creators": "disagree",
@@ -743,10 +988,7 @@ def test_baseline_style_paraphrase_regression_is_scorable() -> None:
     }
     candidate = candidate_for_plant(
         plant,
-        question=(
-            "Is immediate removal by trust reviewers allowed before a creator "
-            "can appeal?"
-        ),
+        question=("Is immediate removal of a listing by trust reviewers allowed?"),
         target_stances={
             "buyers": "pass",
             "creators": "disagree",
@@ -767,6 +1009,18 @@ def test_baseline_style_paraphrase_regression_is_scorable() -> None:
             panel_polarization=1.0,
             question_count=1,
         )
+    )
+
+    unsupported = copy.deepcopy(candidate)
+    unsupported["question"] = (
+        "Is immediate removal of a listing by trust reviewers allowed before "
+        "a creator can appeal?"
+    )
+    assert (
+        question_utility_score(
+            [unsupported], [plant], panel_polarization=1.0, question_count=1
+        )
+        == 0.0
     )
 
 
@@ -806,43 +1060,213 @@ def test_stance_accuracy_adds_monotonic_partial_credit() -> None:
     assert exact_score > partial_score > grounding_only_score > 0.0
 
 
-def test_declared_question_polarity_reverses_expected_stance_labels() -> None:
-    env = load_environment(task="elicit-ask", question_count=1)
-    plant = planted_questions_from_row(dict(env.get_eval_dataset()[0]))[0]
+def test_fully_consistent_question_polarity_reversal_preserves_full_credit() -> None:
+    plant = semantic_contract_plant("ambiguity")
     inverse = {"agree": "disagree", "disagree": "agree", "pass": "pass"}
-    flipped_choice = "anchor" if plant["yes_choice"] == "alternative" else "alternative"
+    assert plant["yes_choice"] == "anchor"
+    flipped_choice = "alternative"
     flipped_stances = {
         faction_id: inverse[stance]
         for faction_id, stance in plant["target_stances"].items()
     }
+    canonical = semantic_contract_candidate("ambiguity", plant)
+    reversed_question = (
+        "Should dispatchers define observable unsafe conditions before pausing "
+        "a route (yes selects the alternative outcome: define observable unsafe "
+        "conditions before a route pause)?"
+    )
+    fully_reversed = candidate_for_plant(
+        plant,
+        question=reversed_question,
+        decision=canonical["decision"],
+        yes_choice=flipped_choice,
+        target_stances=flipped_stances,
+    )
+    metadata_only_flip = candidate_for_plant(
+        plant,
+        question=canonical["question"],
+        decision=canonical["decision"],
+        yes_choice=flipped_choice,
+        target_stances=flipped_stances,
+    )
 
     canonical_score = question_utility_score(
-        [candidate_for_plant(plant)],
+        [canonical],
         [plant],
         panel_polarization=1.0,
         question_count=1,
     )
     counterfactual_score = question_utility_score(
-        [
-            candidate_for_plant(
-                plant,
-                yes_choice=flipped_choice,
-                target_stances=flipped_stances,
-            )
-        ],
+        [fully_reversed],
         [plant],
         panel_polarization=1.0,
         question_count=1,
     )
     mislabeled_score = question_utility_score(
-        [candidate_for_plant(plant, yes_choice=flipped_choice)],
+        [metadata_only_flip],
         [plant],
         panel_polarization=1.0,
         question_count=1,
     )
 
+    # Outcome fields retain their evidence roles. Orientation changes through
+    # question prose, yes_choice, and the correspondingly inverted stances.
+    assert fully_reversed["decision"] == canonical["decision"]
     assert canonical_score == counterfactual_score == 1.0
-    assert mislabeled_score < canonical_score
+    assert mislabeled_score == 0.0
+
+
+def test_added_negation_cannot_preserve_question_or_decision_credit() -> None:
+    plant = semantic_contract_plant("ambiguity")
+    exact = semantic_contract_candidate("ambiguity", plant)
+    negated_question = json.loads(json.dumps(exact))
+    negated_question["question"] = (
+        "Should route dispatchers not pause unsafe routes when travel conditions "
+        "may be unsafe (yes selects the anchor outcome: pause unsafe routes)?"
+    )
+    contracted_question = json.loads(json.dumps(exact))
+    contracted_question["question"] = (
+        "Should route dispatchers ensure the route doesn't pause when travel "
+        "conditions may be unsafe (yes selects the anchor outcome: pause unsafe "
+        "routes)?"
+    )
+    negated_decision = json.loads(json.dumps(exact))
+    negated_decision["decision"]["anchor_outcome"] = "do not pause unsafe routes"
+    negated_decision["question"] = (
+        "Should route dispatchers not pause unsafe routes when travel conditions "
+        "may be unsafe (yes selects the anchor outcome: do not pause unsafe routes)?"
+    )
+
+    assert (
+        question_utility_score(
+            [exact], [plant], panel_polarization=1.0, question_count=1
+        )
+        == 1.0
+    )
+    for candidate in (negated_question, contracted_question, negated_decision):
+        assert (
+            question_utility_score(
+                [candidate], [plant], panel_polarization=1.0, question_count=1
+            )
+            == 0.0
+        )
+
+
+@pytest.mark.parametrize(
+    "negating_action",
+    [
+        "avoid transfer of a delayed load",
+        "refuse to transfer a delayed load",
+        "decline to transfer a delayed load",
+        "fail to transfer a delayed load",
+    ],
+)
+def test_lexically_negated_action_cannot_preserve_credit(
+    negating_action: str,
+) -> None:
+    plant = semantic_contract_plant("contradiction")
+    exact = semantic_contract_candidate("contradiction", plant)
+    question_only = copy.deepcopy(exact)
+    question_only["question"] = (
+        f"Should the on-duty coordinator {negating_action} after hours while the "
+        "assigned dispatcher is unavailable (yes selects the anchor outcome: "
+        "the coordinator transfers the delayed load to an available route)?"
+    )
+    frame_only = copy.deepcopy(exact)
+    frame_only["decision"]["action"] = negating_action
+    negated_question_and_frame = copy.deepcopy(question_only)
+    negated_question_and_frame["decision"]["action"] = negating_action
+
+    for candidate in (question_only, frame_only, negated_question_and_frame):
+        assert (
+            question_utility_score(
+                [candidate], [plant], panel_polarization=1.0, question_count=1
+            )
+            == 0.0
+        )
+
+
+@pytest.mark.parametrize(
+    "unsupported_action",
+    [
+        "transfer a delayed load and fire the driver",
+        "transfer a delayed load and sell records",
+        "transfer a delayed load or ignore the report",
+        "transfer a delayed load and poison the water",
+    ],
+)
+def test_unsupported_appended_action_semantics_cannot_preserve_credit(
+    unsupported_action: str,
+) -> None:
+    plant = semantic_contract_plant("contradiction")
+    exact = semantic_contract_candidate("contradiction", plant)
+    frame_append = copy.deepcopy(exact)
+    frame_append["decision"]["action"] = unsupported_action
+    stem_append = copy.deepcopy(exact)
+    stem, marker, tail = stem_append["question"].partition(" (yes selects")
+    stem_append["question"] = (
+        f"{stem} and {unsupported_action}{marker and ' (yes selects'}{tail}"
+    )
+    tail_append = copy.deepcopy(exact)
+    tail_append["question"] = tail_append["question"].replace(
+        ")?", f" and {unsupported_action})?"
+    )
+
+    assert (
+        question_utility_score(
+            [exact], [plant], panel_polarization=1.0, question_count=1
+        )
+        == 1.0
+    )
+    for candidate in (frame_append, stem_append, tail_append):
+        assert (
+            question_utility_score(
+                [candidate], [plant], panel_polarization=1.0, question_count=1
+            )
+            == 0.0
+        )
+
+
+def test_orientation_marker_tail_must_name_its_labeled_outcome() -> None:
+    plant = semantic_contract_plant("ambiguity")
+    candidate = semantic_contract_candidate("ambiguity", plant)
+    candidate["question"] = (
+        "Should route dispatchers pause unsafe routes when travel conditions may "
+        "be unsafe (yes selects the anchor outcome: define observable unsafe "
+        "conditions before a route pause)?"
+    )
+
+    assert (
+        question_utility_score(
+            [candidate], [plant], panel_polarization=1.0, question_count=1
+        )
+        == 0.0
+    )
+
+
+def test_marker_payload_cannot_supply_a_missing_core_condition() -> None:
+    plant = semantic_contract_plant("ambiguity")
+    candidate = semantic_contract_candidate("ambiguity", plant)
+    candidate["question"] = (
+        "Should route dispatchers pause unsafe routes (yes selects the anchor "
+        "outcome: pause unsafe routes when travel conditions may be unsafe)?"
+    )
+    finding = {
+        "doc_id": candidate["doc_id"],
+        "quote": candidate["quote"],
+        "type": candidate["type"],
+        "diagnosis": candidate["question"],
+        "decision": candidate["decision"],
+        "related_evidence": candidate["related_evidence"],
+    }
+
+    assert (
+        question_utility_score(
+            [candidate], [plant], panel_polarization=1.0, question_count=1
+        )
+        == 0.0
+    )
+    assert match_findings([finding], [plant])["f1"] == 0.0
 
 
 @pytest.mark.parametrize(
@@ -876,8 +1300,16 @@ def test_exact_quote_preserves_semantic_operators() -> None:
         "quote": "Approval requires threshold >= 5.",
         "question": "Should approval require a threshold >= 5?",
         "question_aliases": [],
+        "yes_choice": "anchor",
         "target_stances": stances,
         "document_text": "Approval requires threshold >= 5.",
+        "decision": {
+            "actor": "approval",
+            "action": "require threshold",
+            "condition": "threshold 5",
+            "anchor_outcome": "approval requires threshold 5",
+            "alternative_outcome": "approval without threshold",
+        },
     }
 
     assert (
@@ -956,7 +1388,7 @@ def test_distinct_grounded_questions_use_global_one_to_one_assignment() -> None:
     assert score > 0.0
 
 
-def test_question_vocabulary_is_not_a_hidden_semantic_gate() -> None:
+def test_question_must_express_its_structured_decision_frame() -> None:
     env = load_environment(task="elicit-ask", question_count=1)
     plant = planted_questions_from_row(dict(env.get_eval_dataset()[0]))[0]
     no_token = candidate_for_plant(plant, question="Should this policy apply?")
@@ -970,10 +1402,203 @@ def test_question_vocabulary_is_not_a_hidden_semantic_gate() -> None:
         for candidate in (no_token, one_noun, grounded)
     ]
 
-    assert scores == [1.0, 1.0, 1.0]
+    assert scores[0] == 0.0
+    assert scores[1] < scores[2]
+    assert scores[2] == 1.0
 
 
-def test_short_exact_anchor_is_scorable_through_structured_fields() -> None:
+def test_source_observable_decision_aliases_receive_full_semantic_credit() -> None:
+    template = next(
+        candidate
+        for candidate in HELDOUT_TEMPLATES
+        if candidate.template_id == "community-clinic-scheduling"
+    )
+    row = scenario_to_row(
+        generate_scenario(8214, template),
+        docs_count=None,
+        docs_length=None,
+        planted_density=1.0,
+        distractor_density=1.0,
+        panel_polarization=1.0,
+        question_count=1,
+        task="elicit-ask",
+    )
+    plant = next(
+        item for item in planted_questions_from_row(row) if item["type"] == "ambiguity"
+    )
+    decision = dict(plant["decision"])
+    decision.update(
+        {
+            "actor": "community health scheduling team",
+            "action": (
+                "decide which conditions make a patient eligible for an early "
+                "appointment"
+            ),
+            "condition": (
+                "conditions make a patient eligible for an early appointment "
+                "when the affected person cannot provide the usual record"
+            ),
+        }
+    )
+    candidate = candidate_for_plant(
+        plant,
+        question=(
+            "Should the community health scheduling team decide which conditions "
+            "make a patient eligible for an early appointment when the affected "
+            "person cannot provide the usual record (yes selects the alternative "
+            "outcome: schedulers define which conditions qualify for an early "
+            "appointment)?"
+        ),
+        decision=decision,
+    )
+
+    assert (
+        question_utility_score(
+            [candidate], [plant], panel_polarization=1.0, question_count=1
+        )
+        == 1.0
+    )
+
+    unscoped = copy.deepcopy(candidate)
+    unscoped["decision"]["condition"] = (
+        "conditions make a patient eligible for an early appointment"
+    )
+    assert (
+        question_utility_score(
+            [unscoped], [plant], panel_polarization=1.0, question_count=1
+        )
+        == 0.0
+    )
+
+    moved_negation = copy.deepcopy(candidate)
+    moved_negation["question"] = (
+        "Should the community health scheduling team not decide which conditions "
+        "make a patient eligible for an early appointment when the affected "
+        "person can provide the usual record (yes selects the alternative "
+        "outcome: schedulers define which conditions qualify for an early "
+        "appointment)?"
+    )
+    assert (
+        question_utility_score(
+            [moved_negation], [plant], panel_polarization=1.0, question_count=1
+        )
+        == 0.0
+    )
+
+
+def test_disaster_shelter_source_action_alias_receives_full_semantic_credit() -> None:
+    template = next(
+        candidate
+        for candidate in HELDOUT_TEMPLATES
+        if candidate.template_id == "disaster-shelter-intake"
+    )
+    row = scenario_to_row(
+        generate_scenario(8247, template),
+        docs_count=None,
+        docs_length=None,
+        planted_density=1.0,
+        distractor_density=1.0,
+        panel_polarization=1.0,
+        question_count=1,
+        task="elicit-ask",
+    )
+    plant = next(
+        item for item in planted_questions_from_row(row) if item["type"] == "ambiguity"
+    )
+    decision = dict(plant["decision"])
+    decision["action"] = "prioritize vulnerable residents for available shelter beds"
+    selected = str(plant["yes_choice"])
+    candidate = candidate_for_plant(
+        plant,
+        question=(
+            f"Should {decision['actor']} {decision['action']} when "
+            f"{decision['condition']} (yes selects the {selected} outcome: "
+            f"{decision[f'{selected}_outcome']})?"
+        ),
+        decision=decision,
+    )
+
+    assert decision["action"] in plant["decision_aliases"]["action"]
+    assert (
+        question_utility_score(
+            [candidate], [plant], panel_polarization=1.0, question_count=1
+        )
+        == 1.0
+    )
+
+
+def test_visible_organization_team_alias_receives_full_semantic_credit() -> None:
+    template = next(
+        candidate
+        for candidate in HELDOUT_TEMPLATES
+        if candidate.template_id == "cooperative-housing-maintenance"
+    )
+    row = scenario_to_row(
+        generate_scenario(8215, template),
+        docs_count=None,
+        docs_length=None,
+        planted_density=1.0,
+        distractor_density=1.0,
+        panel_polarization=1.0,
+        question_count=1,
+        task="elicit-ask",
+    )
+    plant = next(
+        item for item in planted_questions_from_row(row) if item["type"] == "ambiguity"
+    )
+    canonical = candidate_for_plant(plant)
+    visible_actor = copy.deepcopy(canonical)
+    visible_actor["decision"]["actor"] = "the cooperative housing maintenance team"
+    visible_actor["question"] = visible_actor["question"].replace(
+        "maintenance coordinators",
+        "the cooperative housing maintenance team",
+    )
+
+    assert (
+        question_utility_score(
+            [canonical], [plant], panel_polarization=1.0, question_count=1
+        )
+        == question_utility_score(
+            [visible_actor], [plant], panel_polarization=1.0, question_count=1
+        )
+        == 1.0
+    )
+
+
+def test_candidate_question_cannot_supply_its_own_missing_evidence() -> None:
+    plant = semantic_contract_plant("ambiguity")
+    plant["document_text"] = "Priority patients are offered an early appointment."
+    plant["decision"] = {
+        "actor": "clinic schedulers",
+        "action": "determine early appointment eligibility",
+        "condition": "a patient's condition may warrant priority scheduling",
+        "anchor_outcome": "priority patients are offered an early appointment",
+        "alternative_outcome": (
+            "schedulers define which conditions qualify for an early appointment"
+        ),
+    }
+    candidate_decision = dict(plant["decision"])
+    candidate_decision["actor"] = "a self-declared eligibility committee"
+    candidate = candidate_for_plant(
+        plant,
+        question=(
+            "Should a self-declared eligibility committee determine early appointment "
+            "eligibility when a patient's condition may warrant priority scheduling "
+            "(yes selects the anchor outcome: priority patients are offered an early "
+            "appointment)?"
+        ),
+        decision=candidate_decision,
+    )
+
+    assert (
+        question_utility_score(
+            [candidate], [plant], panel_polarization=1.0, question_count=1
+        )
+        == 0.0
+    )
+
+
+def test_generic_yes_no_prose_is_not_a_semantic_answer() -> None:
     plant = {
         "doc_id": "policy",
         "quote": "Is it?",
@@ -981,6 +1606,13 @@ def test_short_exact_anchor_is_scorable_through_structured_fields() -> None:
         "question_aliases": [],
         "target_stances": {"operations": "agree", "risk": "disagree"},
         "document_text": "Is it?",
+        "decision": {
+            "actor": "policy owner",
+            "action": "apply the rule",
+            "condition": "during an exception",
+            "anchor_outcome": "preserve the rule",
+            "alternative_outcome": "allow the exception",
+        },
     }
 
     assert (
@@ -990,7 +1622,66 @@ def test_short_exact_anchor_is_scorable_through_structured_fields() -> None:
             panel_polarization=1.0,
             question_count=1,
         )
+        == 0.0
+    )
+
+
+def test_unrelated_evidence_supported_decision_frame_scores_zero() -> None:
+    plant = {
+        "doc_id": "route-policy",
+        "quote": "Dispatchers must pause routes when ice makes travel unsafe.",
+        "type": "ambiguity",
+        "question": (
+            "Should dispatchers pause routes when ice makes travel unsafe "
+            "(yes selects the anchor outcome: pause unsafe routes)?"
+        ),
+        "question_aliases": [],
+        "decision": {
+            "actor": "dispatchers",
+            "action": "pause routes",
+            "condition": "ice unsafe travel",
+            "anchor_outcome": "pause unsafe routes",
+            "alternative_outcome": "allow route operation",
+        },
+        "yes_choice": "anchor",
+        "target_stances": {"operations": "agree", "risk": "disagree"},
+        "alternative_stances": {"operations": "disagree", "risk": "agree"},
+        "decision_value": 1.0,
+        "related_evidence": None,
+        "document_text": (
+            "Dispatchers must pause routes when ice makes travel unsafe. "
+            "A clarified exception may allow route operation. "
+            "Auditors record monthly logs after each review. "
+            "Managers may skip logs during maintenance."
+        ),
+    }
+    exact = candidate_for_plant(plant)
+    unrelated = {
+        **exact,
+        "question": (
+            "Should auditors record monthly logs after review "
+            "(yes selects the anchor outcome: record monthly logs)?"
+        ),
+        "decision": {
+            "actor": "auditors",
+            "action": "record logs",
+            "condition": "monthly review",
+            "anchor_outcome": "record monthly logs",
+            "alternative_outcome": "skip logs maintenance",
+        },
+    }
+
+    assert (
+        question_utility_score(
+            [exact], [plant], panel_polarization=1.0, question_count=1
+        )
         == 1.0
+    )
+    assert (
+        question_utility_score(
+            [unrelated], [plant], panel_polarization=1.0, question_count=1
+        )
+        == 0.0
     )
 
 
@@ -1003,17 +1694,47 @@ def test_ask_task_rejects_find_task_combined_root() -> None:
     assert score_row(env, row, combined)["reward"] == 0.0
 
 
-def test_ask_parser_extracts_nested_task_object_like_predict() -> None:
+def test_ask_parser_rejects_nested_task_object_wrapper() -> None:
     env = load_environment(task="elicit-ask", question_count=1)
     row = dict(env.get_eval_dataset()[0])
     answer = correct_response_from_row(row)
     wrapped = {"findings": [], "wrapper": answer}
 
-    assert score_row(env, row, wrapped)["reward"] > 0.0
+    assert score_row(env, row, wrapped)["reward"] == 0.0
+
+
+def test_ask_parser_rejects_duplicate_root_keys_without_overwriting() -> None:
+    env = load_environment(task="elicit-ask", question_count=1)
+    row = dict(env.get_eval_dataset()[0])
+    answer = correct_response_from_row(row)
+    content = (
+        '{"questions":[],"questions":'
+        + json.dumps(answer["questions"], sort_keys=True)
+        + "}"
+    )
+    completion = [{"role": "assistant", "content": content}]
+
+    score = asyncio.run(
+        question_utility(
+            completion,
+            row["answer"],
+            row["info"],
+            parser=ElicitJsonParser("questions"),
+        )
+    )
+
+    assert score == 0.0
+
+
+@pytest.mark.parametrize("constant", ["NaN", "Infinity", "-Infinity"])
+def test_elicit_parser_rejects_nonstandard_json_constants(constant: str) -> None:
+    parser = ElicitJsonParser("questions")
+
+    assert parser.parse(f'{{"questions":{constant}}}') == {}
 
 
 @pytest.mark.parametrize("wrapper", ["array", "unmatched-prose-brace"])
-def test_ask_parser_recovers_wrapped_task_objects_like_predict(wrapper: str) -> None:
+def test_ask_parser_rejects_wrapped_task_objects(wrapper: str) -> None:
     env = load_environment(task="elicit-ask", question_count=1)
     row = dict(env.get_eval_dataset()[0])
     answer = correct_response_from_row(row)
@@ -1033,7 +1754,7 @@ def test_ask_parser_recovers_wrapped_task_objects_like_predict(wrapper: str) -> 
         )
     )
 
-    assert score > 0.0
+    assert score == 0.0
 
 
 def test_configured_are_question_is_valid_and_scorable(tmp_path: Path) -> None:
@@ -1076,6 +1797,22 @@ def test_maximum_weight_question_assignment_is_global() -> None:
     assert _maximum_weight_sum([[0.5], [0.8]]) == pytest.approx(0.8)
 
 
+def test_question_diagnostic_assignment_reuses_one_coverage_first_pairing() -> None:
+    assert _best_question_assignment(
+        [[True, True], [True, False]],
+        [[1, 4], [4, 0]],
+        [[4, 4], [4, 0]],
+    ) == (2, 8, 8)
+
+    # A conditional metric must first explain both localized questions rather
+    # than silently switch to a one-item assignment with better stance credit.
+    assert _best_question_assignment(
+        [[True, False], [True, True]],
+        [[0, 0], [4, 0]],
+        [[4, 0], [4, 4]],
+    ) == (2, 0, 8)
+
+
 def test_panel_disagreement_uses_specific_planted_stance_vector() -> None:
     assert panel_disagreement({"a": "agree", "b": "agree", "c": "agree"}) == 0.0
     assert panel_disagreement(
@@ -1102,6 +1839,7 @@ def test_false_positive_strictly_reduces_precision_and_f1() -> None:
             "quote": "This is a rule.",
             "type": "ambiguity",
             "diagnosis": "Should this rule apply?",
+            "decision": answer["findings"][0]["decision"],
             "related_evidence": None,
         }
     )
@@ -1121,6 +1859,7 @@ def test_type_hedging_same_span_under_three_types_is_rejected() -> None:
             "quote": planted["quote"],
             "type": finding_type,
             "diagnosis": planted["diagnosis"],
+            "decision": planted["decision"],
             "related_evidence": (
                 planted["related_evidence"] if finding_type == "contradiction" else None
             ),
@@ -1173,7 +1912,7 @@ def test_contradiction_rejects_broad_second_document_evidence() -> None:
     assert state["metrics"]["finding_type_accuracy"] == 1.0
 
 
-def test_find_diagnosis_wording_is_not_compared_with_hidden_vocabulary() -> None:
+def test_find_diagnosis_must_express_its_structured_decision_frame() -> None:
     env = load_environment()
     row = dict(env.get_eval_dataset()[0])
     response = correct_response_from_row(row)
@@ -1182,9 +1921,51 @@ def test_find_diagnosis_wording_is_not_compared_with_hidden_vocabulary() -> None
 
     state = score_row(env, row, response)
 
-    assert state["reward"] == 1.0
+    assert 0.0 <= state["reward"] < 1.0
     assert state["metrics"]["finding_localization_recall"] == 1.0
     assert state["metrics"]["finding_type_accuracy"] == 1.0
+
+
+def test_find_diagnosis_rejects_an_outcome_marker_with_the_other_outcome_text() -> None:
+    env = load_environment()
+    row = dict(env.get_eval_dataset()[0])
+    response = correct_response_from_row(row)
+    for finding in response["findings"]:
+        if "yes selects the anchor outcome" in finding["diagnosis"]:
+            finding["diagnosis"] = finding["diagnosis"].replace(
+                "yes selects the anchor outcome",
+                "yes selects the alternative outcome",
+            )
+        else:
+            finding["diagnosis"] = finding["diagnosis"].replace(
+                "yes selects the alternative outcome",
+                "yes selects the anchor outcome",
+            )
+
+    assert score_row(env, row, response)["reward"] == 0.0
+
+
+def test_find_diagnosis_allows_a_consistent_reversed_orientation() -> None:
+    env = load_environment()
+    row = dict(env.get_eval_dataset()[0])
+    response = correct_response_from_row(row)
+    for finding in response["findings"]:
+        decision = finding["decision"]
+        original_choice = (
+            "anchor"
+            if "yes selects the anchor outcome" in finding["diagnosis"]
+            else "alternative"
+        )
+        reversed_choice = "alternative" if original_choice == "anchor" else "anchor"
+        finding["diagnosis"] = (
+            f"Should {decision['actor']} {decision['action']} when "
+            f"{decision['condition']}, choosing between "
+            f"{decision['anchor_outcome']} and {decision['alternative_outcome']} "
+            f"(yes selects the {reversed_choice} outcome: "
+            f"{decision[f'{reversed_choice}_outcome']})?"
+        )
+
+    assert score_row(env, row, response)["reward"] == 1.0
 
 
 def test_ask_rewards_top_k_selection_over_lower_value_issue() -> None:
@@ -1202,6 +1983,280 @@ def test_ask_rewards_top_k_selection_over_lower_value_issue() -> None:
 
     assert top_score == 1.0
     assert 0.0 < lower_score < top_score
+
+
+def test_default_k1_target_changes_when_visible_faction_values_change() -> None:
+    """The single-question budget must rank the panel's actual value trade-off."""
+
+    access_issue = semantic_contract_plant("ambiguity")
+    safety_issue = semantic_contract_plant("gap")
+    access_issue["value_weights"] = value_vector(access=1.0)
+    safety_issue["value_weights"] = value_vector(safety=1.0)
+    access_panel = visible_value_panel(access=1.0, safety=0.0)
+    safety_panel = visible_value_panel(access=0.0, safety=1.0)
+
+    first_panel_plants = apply_visible_value_panel(
+        [access_issue, safety_issue], access_panel
+    )
+    second_panel_plants = apply_visible_value_panel(
+        [access_issue, safety_issue], safety_panel
+    )
+
+    first_access_score = question_utility_score(
+        [semantic_contract_candidate("ambiguity", first_panel_plants[0])],
+        first_panel_plants,
+        panel_polarization=1.0,
+        question_count=1,
+    )
+    first_safety_score = question_utility_score(
+        [semantic_contract_candidate("gap", first_panel_plants[1])],
+        first_panel_plants,
+        panel_polarization=1.0,
+        question_count=1,
+    )
+    second_access_score = question_utility_score(
+        [semantic_contract_candidate("ambiguity", second_panel_plants[0])],
+        second_panel_plants,
+        panel_polarization=1.0,
+        question_count=1,
+    )
+    second_safety_score = question_utility_score(
+        [semantic_contract_candidate("gap", second_panel_plants[1])],
+        second_panel_plants,
+        panel_polarization=1.0,
+        question_count=1,
+    )
+
+    assert first_access_score == 1.0
+    assert first_safety_score == 0.0
+    assert second_access_score == 0.0
+    assert second_safety_score == 1.0
+
+
+def test_ask_renders_every_target_determining_weight_counterfactual() -> None:
+    """Accepted stance changes must be visible in Ask but not leak into Find."""
+
+    scenario = generate_scenario(8214, HELDOUT_TEMPLATES[0])
+    original_ask = scenario_to_row(
+        scenario,
+        docs_count=None,
+        docs_length=None,
+        planted_density=1.0,
+        distractor_density=1.0,
+        panel_polarization=1.0,
+        question_count=1,
+        task="elicit-ask",
+    )["prompt"][0]["content"]
+    original_find = scenario_to_row(
+        scenario,
+        docs_count=None,
+        docs_length=None,
+        planted_density=1.0,
+        distractor_density=1.0,
+        panel_polarization=1.0,
+        question_count=1,
+        task="find",
+    )["prompt"][0]["content"]
+
+    assert (
+        "alternative_preference = sum(faction_value[d] * "
+        "alternative_tradeoff_weight[d]) / "
+        "sum(abs(alternative_tradeoff_weight[d]))" in original_ask
+    )
+    assert "Scores >= +0.25 favor the alternative" in original_ask
+    assert "Rank candidates by utility = decision_value *" in original_ask
+    assert "panel_polarization=1 and pass_threshold=0.25" in original_ask
+
+    section = original_ask.split(
+        "Candidate decision profiles (unordered; one per possible issue):\n", 1
+    )[1].split("\n\nDocuments:", 1)[0]
+    profiles = json.loads(section)
+    assert len(profiles) == 3
+    assert all(
+        set(profile) == {"decision", "alternative_tradeoff_weights"}
+        and set(profile["decision"])
+        == {
+            "actor",
+            "action",
+            "condition",
+            "anchor_outcome",
+            "alternative_outcome",
+        }
+        and set(profile["alternative_tradeoff_weights"]) == set(VALUE_DIMENSIONS)
+        for profile in profiles
+    )
+
+    for plant_index, original_plant in enumerate(scenario["planted_items"]):
+        mutated = copy.deepcopy(scenario)
+        plant = mutated["planted_items"][plant_index]
+        weights = {
+            dimension: -float(original_plant["value_weights"][dimension])
+            for dimension in VALUE_DIMENSIONS
+        }
+        plant["value_weights"] = weights
+        scale = sum(abs(weight) for weight in weights.values())
+        alternative_stances: dict[str, str] = {}
+        for faction in mutated["factions"]:
+            preference = (
+                sum(
+                    float(faction["values"][dimension]) * weights[dimension]
+                    for dimension in VALUE_DIMENSIONS
+                )
+                / scale
+            )
+            alternative_stances[str(faction["faction_id"])] = (
+                "agree"
+                if preference >= PASS_THRESHOLD
+                else "disagree"
+                if preference <= -PASS_THRESHOLD
+                else "pass"
+            )
+        plant["alternative_stances"] = alternative_stances
+        plant["target_stances"] = orient_stances(
+            alternative_stances,
+            yes_choice=str(plant["canonical_yes_choice"]),
+        )
+        plant["decision_value"] = preference_tradeoff_value(
+            mutated["factions"], weights
+        )
+        assert plant["target_stances"] != original_plant["target_stances"]
+        validate_scenario(mutated)
+
+        mutated_ask = scenario_to_row(
+            mutated,
+            docs_count=None,
+            docs_length=None,
+            planted_density=1.0,
+            distractor_density=1.0,
+            panel_polarization=1.0,
+            question_count=1,
+            task="elicit-ask",
+        )["prompt"][0]["content"]
+        mutated_find = scenario_to_row(
+            mutated,
+            docs_count=None,
+            docs_length=None,
+            planted_density=1.0,
+            distractor_density=1.0,
+            panel_polarization=1.0,
+            question_count=1,
+            task="find",
+        )["prompt"][0]["content"]
+
+        assert mutated_ask != original_ask
+        assert mutated_find == original_find
+
+
+def test_prompt_visible_weight_swap_changes_the_default_top1_target() -> None:
+    """Ask ranking must follow the displayed trade-off, not a hidden target."""
+
+    scenario = generate_scenario(8214, HELDOUT_TEMPLATES[0])
+
+    def rank(plants: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return sorted(
+            plants,
+            key=lambda plant: (
+                -float(plant["decision_value"])
+                * panel_disagreement(plant["target_stances"]),
+                str(plant["doc_id"]),
+                str(plant["anchor_quote"]),
+            ),
+        )
+
+    original_rank = rank(scenario["planted_items"])
+    original_top_decision = dict(original_rank[0]["decision"])
+    mutated = copy.deepcopy(scenario)
+    mutated_by_id = {plant["plant_id"]: plant for plant in mutated["planted_items"]}
+    top = mutated_by_id[original_rank[0]["plant_id"]]
+    bottom = mutated_by_id[original_rank[-1]["plant_id"]]
+    top["value_weights"], bottom["value_weights"] = (
+        bottom["value_weights"],
+        top["value_weights"],
+    )
+
+    for plant in (top, bottom):
+        weights = {
+            dimension: float(plant["value_weights"][dimension])
+            for dimension in VALUE_DIMENSIONS
+        }
+        scale = sum(abs(weight) for weight in weights.values())
+        alternative_stances: dict[str, str] = {}
+        for faction in mutated["factions"]:
+            preference = (
+                sum(
+                    float(faction["values"][dimension]) * weights[dimension]
+                    for dimension in VALUE_DIMENSIONS
+                )
+                / scale
+            )
+            alternative_stances[str(faction["faction_id"])] = (
+                "agree"
+                if preference >= PASS_THRESHOLD
+                else "disagree"
+                if preference <= -PASS_THRESHOLD
+                else "pass"
+            )
+        plant["alternative_stances"] = alternative_stances
+        plant["target_stances"] = orient_stances(
+            alternative_stances,
+            yes_choice=str(plant["canonical_yes_choice"]),
+        )
+        plant["decision_value"] = preference_tradeoff_value(
+            mutated["factions"],
+            weights,
+        )
+
+    validate_scenario(mutated)
+    mutated_rank = rank(mutated["planted_items"])
+    assert mutated_rank[0]["decision"] != original_top_decision
+
+    original_ask = scenario_to_row(
+        scenario,
+        docs_count=None,
+        docs_length=None,
+        planted_density=1.0,
+        distractor_density=1.0,
+        panel_polarization=1.0,
+        question_count=1,
+        task="elicit-ask",
+    )
+    mutated_ask = scenario_to_row(
+        mutated,
+        docs_count=None,
+        docs_length=None,
+        planted_density=1.0,
+        distractor_density=1.0,
+        panel_polarization=1.0,
+        question_count=1,
+        task="elicit-ask",
+    )
+    original_find = scenario_to_row(
+        scenario,
+        docs_count=None,
+        docs_length=None,
+        planted_density=1.0,
+        distractor_density=1.0,
+        panel_polarization=1.0,
+        question_count=1,
+        task="find",
+    )
+    mutated_find = scenario_to_row(
+        mutated,
+        docs_count=None,
+        docs_length=None,
+        planted_density=1.0,
+        distractor_density=1.0,
+        panel_polarization=1.0,
+        question_count=1,
+        task="find",
+    )
+
+    assert original_ask["prompt"] != mutated_ask["prompt"]
+    assert (
+        json.loads(original_ask["answer"])["questions"][0]["decision"]
+        != (json.loads(mutated_ask["answer"])["questions"][0]["decision"])
+    )
+    assert original_find["prompt"] == mutated_find["prompt"]
 
 
 def test_paraphrased_quote_cannot_claim_verbatim_document_evidence() -> None:
@@ -1532,24 +2587,24 @@ def test_quote_overlap_normalizes_unicode_case_and_punctuation() -> None:
     assert overlap == 1.0
 
 
-def test_parser_handles_fenced_json() -> None:
+def test_parser_rejects_fenced_json() -> None:
     parser = ElicitJsonParser()
 
     parsed = parser.parse(
         '```json\n{"findings":[{"doc_id":"p","quote":"q","type":"gap"}]}\n```'
     )
 
-    assert parsed["findings"][0]["type"] == "gap"
+    assert parsed == {}
 
 
-def test_parser_prefers_last_object_with_findings() -> None:
+def test_parser_rejects_multiple_objects_with_findings() -> None:
     parser = ElicitJsonParser()
 
     parsed = parser.parse(
         '{"findings":[]} then {"findings":[{"doc_id":"p","quote":"q","type":"gap"}]}'
     )
 
-    assert len(parsed["findings"]) == 1
+    assert parsed == {}
 
 
 @pytest.mark.parametrize(
@@ -1568,14 +2623,27 @@ def test_parser_fails_closed_on_oversized_or_adversarial_nesting(
     assert parser.parse(content) == {}
 
 
-def test_ask_parser_prefers_last_object_with_questions() -> None:
+def test_large_trusted_answer_key_does_not_inherit_completion_size_limit() -> None:
+    env = load_environment()
+    row = dict(env.get_eval_dataset()[0])
+    response = correct_response_from_row(row)
+    answer = json.loads(row["answer"])
+    answer["trusted_audit_note"] = "x" * 40_000
+    row["answer"] = json.dumps(answer, sort_keys=True)
+
+    assert len(row["answer"]) > 32_768
+    assert len(json.dumps(response, sort_keys=True)) < 32_768
+    assert score_row(env, row, response)["reward"] == 1.0
+
+
+def test_ask_parser_rejects_multiple_objects_with_questions() -> None:
     parser = ElicitJsonParser("questions")
 
     parsed = parser.parse(
         '{"questions":[]} then {"questions":[{"doc_id":"p","quote":"q","question":"why?","target_stances":{"a":"agree"}}]}'
     )
 
-    assert len(parsed["questions"]) == 1
+    assert parsed == {}
 
 
 @pytest.mark.parametrize(
@@ -1792,7 +2860,56 @@ def test_distractor_density_removes_hidden_near_miss_passages() -> None:
 
     for distractor in scenario["distractors"]:
         assert distractor["anchor_quote"] in all_text
-        assert distractor["anchor_quote"] not in no_distractor_text
+        if distractor["reason"] == ACTOR_SUPPORT_REASON:
+            assert distractor["anchor_quote"] in no_distractor_text
+        else:
+            assert distractor["anchor_quote"] not in no_distractor_text
+
+
+@pytest.mark.parametrize("distractor_density", [0.0, 0.5, 1.0])
+@pytest.mark.parametrize("docs_length", [None, 400, 800, 1_200])
+def test_every_retained_plant_actor_alias_is_visible_across_release_views(
+    distractor_density: float,
+    docs_length: int | None,
+) -> None:
+    """Density/truncation controls cannot create hidden semantic answer keys."""
+
+    retained = 0
+    for template_index, template in enumerate(HELDOUT_TEMPLATES):
+        for repetition in range(5):
+            scenario = generate_scenario(
+                8200 + template_index * 5 + repetition,
+                template,
+            )
+            documents, visible_plants = build_document_view(
+                scenario,
+                docs_count=None,
+                docs_length=docs_length,
+                planted_density=1.0,
+                distractor_density=distractor_density,
+            )
+            text_by_doc = {
+                document["doc_id"]: document["text"].casefold()
+                for document in documents
+            }
+            visible_ids = {plant["plant_id"] for plant in visible_plants}
+            retained += len(visible_plants)
+            for plant in visible_plants:
+                assert all(
+                    alias.casefold() in text_by_doc[plant["doc_id"]]
+                    for alias in plant["decision_aliases"]["actor"]
+                )
+            for plant in scenario["planted_items"]:
+                if (
+                    plant["doc_id"] in text_by_doc
+                    and plant["plant_id"] not in visible_ids
+                ):
+                    assert (
+                        plant["anchor_quote"].casefold()
+                        not in text_by_doc[plant["doc_id"]]
+                    )
+
+    assert retained > 0
 
 
 @pytest.mark.parametrize(
@@ -1865,14 +2982,31 @@ def candidate_for_plant(
     *,
     question: str | None = None,
     quote: str | None = None,
+    decision: dict[str, str] | None = None,
     yes_choice: str | None = None,
     target_stances: dict[str, str] | None = None,
 ) -> dict[str, Any]:
+    default_decision = plant.get(
+        "decision",
+        {
+            "actor": plant["question"],
+            "action": plant["question"],
+            "condition": plant["question"],
+            "anchor_outcome": plant.get("quote", "preserve the rule"),
+            "alternative_outcome": (
+                plant.get("related_evidence", {}).get("quote", "")
+                if isinstance(plant.get("related_evidence"), dict)
+                else ""
+            )
+            or plant["question"],
+        },
+    )
     return {
         "doc_id": plant["doc_id"],
         "quote": plant["quote"] if quote is None else quote,
         "type": plant.get("type", "ambiguity"),
         "question": plant["question"] if question is None else question,
+        "decision": dict(default_decision if decision is None else decision),
         "yes_choice": plant.get("yes_choice", "alternative")
         if yes_choice is None
         else yes_choice,
@@ -1881,3 +3015,300 @@ def candidate_for_plant(
             plant["target_stances"] if target_stances is None else target_stances
         ),
     }
+
+
+def semantic_contract_plant(issue_type: str) -> dict[str, Any]:
+    """Return a compact authored oracle for decision-semantics regressions."""
+
+    stances = {
+        "operations": "agree",
+        "safety": "agree",
+        "access": "disagree",
+    }
+    inverse = {"agree": "disagree", "disagree": "agree", "pass": "pass"}
+    alternative_stances = {
+        faction_id: inverse[stance] for faction_id, stance in stances.items()
+    }
+    if issue_type == "ambiguity":
+        quote = "Dispatchers pause a route whenever conditions may be unsafe."
+        question = (
+            "Should dispatchers pause a route when conditions may be unsafe "
+            "(yes selects the anchor outcome: pause the route when conditions "
+            "are unsafe)?"
+        )
+        return {
+            "doc_id": "route-policy",
+            "quote": quote,
+            "type": issue_type,
+            "question": question,
+            "diagnosis": question,
+            "question_aliases": [],
+            "decision": {
+                "actor": "dispatchers",
+                "action": "pause a route",
+                "condition": "conditions may be unsafe",
+                "anchor_outcome": "pause the route when conditions are unsafe",
+                "alternative_outcome": (
+                    "define observable conditions before pausing the route"
+                ),
+            },
+            "decision_aliases": {
+                "actor": ["dispatchers", "route dispatchers"],
+                "action": ["pause a route", "pause unsafe routes"],
+                "condition": [
+                    "conditions may be unsafe",
+                    "travel conditions may be unsafe",
+                ],
+                "anchor_outcome": [
+                    "pause the route when conditions are unsafe",
+                    "pause unsafe routes",
+                ],
+                "alternative_outcome": [
+                    "define observable conditions before pausing the route",
+                    "define observable unsafe conditions before a route pause",
+                ],
+            },
+            "yes_choice": "anchor",
+            "related_evidence": None,
+            "target_stances": stances,
+            "alternative_stances": alternative_stances,
+            "decision_value": 1.0,
+            "document_text": (
+                f"{quote} The guide does not define observable unsafe conditions "
+                "before a route pause."
+            ),
+        }
+    if issue_type == "contradiction":
+        quote = (
+            "The duty coordinator may transfer a delayed load to any available "
+            "route after hours."
+        )
+        related_quote = (
+            "Only the assigned dispatcher may transfer the delayed load after hours."
+        )
+        question = (
+            "Should the duty coordinator transfer a delayed load after hours "
+            "(yes selects the anchor outcome: the duty coordinator transfers the "
+            "load to an available route)?"
+        )
+        return {
+            "doc_id": "after-hours-guide",
+            "quote": quote,
+            "type": issue_type,
+            "question": question,
+            "diagnosis": question,
+            "question_aliases": [],
+            "decision": {
+                "actor": "duty coordinator",
+                "action": "transfer a delayed load",
+                "condition": "after hours when the assigned dispatcher is unavailable",
+                "anchor_outcome": (
+                    "the duty coordinator transfers the delayed load to an "
+                    "available route"
+                ),
+                "alternative_outcome": (
+                    "only the assigned dispatcher transfers the delayed load"
+                ),
+            },
+            "decision_aliases": {
+                "actor": ["duty coordinator", "on-duty coordinator"],
+                "action": ["transfer a delayed load", "transfer delayed loads"],
+                "condition": [
+                    "after hours when the assigned dispatcher is unavailable",
+                    "after hours while the assigned dispatcher is unavailable",
+                ],
+                "anchor_outcome": [
+                    "the duty coordinator transfers the delayed load to an available route",
+                    "the coordinator transfers the delayed load to an available route",
+                ],
+                "alternative_outcome": [
+                    "only the assigned dispatcher transfers the delayed load",
+                    "the assigned dispatcher alone transfers the delayed load",
+                ],
+            },
+            "yes_choice": "anchor",
+            "related_evidence": {
+                "doc_id": "dispatcher-rule",
+                "quote": related_quote,
+            },
+            "target_stances": stances,
+            "alternative_stances": alternative_stances,
+            "decision_value": 1.0,
+            "document_text": quote,
+            "related_document_text": related_quote,
+        }
+    if issue_type == "gap":
+        quote = "Staff mail every resident notice to the verified address on file."
+        question = (
+            "Should staff use a non-digital delivery channel when a resident has "
+            "no verified address (yes selects the alternative outcome: use a "
+            "non-digital delivery channel without a verified address)?"
+        )
+        return {
+            "doc_id": "notice-policy",
+            "quote": quote,
+            "type": issue_type,
+            "question": question,
+            "diagnosis": question,
+            "question_aliases": [],
+            "decision": {
+                "actor": "staff",
+                "action": "deliver resident notices",
+                "condition": "a resident has no verified address",
+                "anchor_outcome": "mail notices to the verified address on file",
+                "alternative_outcome": (
+                    "deliver a notice through a non-digital channel without a "
+                    "verified address"
+                ),
+            },
+            "decision_aliases": {
+                "actor": ["staff", "notice staff"],
+                "action": ["deliver resident notices"],
+                "condition": [
+                    "a resident has no verified address",
+                    "a resident lacks a verified address",
+                ],
+                "anchor_outcome": ["mail notices to the verified address on file"],
+                "alternative_outcome": [
+                    "deliver a notice through a non-digital channel without a verified address",
+                    "use a non-digital delivery channel without a verified address",
+                ],
+            },
+            "yes_choice": "alternative",
+            "related_evidence": None,
+            "target_stances": stances,
+            "alternative_stances": stances,
+            "decision_value": 1.0,
+            "document_text": (
+                f"{quote} Staff deliver resident notices through the documented "
+                "channel. No procedure states whether staff may use a non-digital "
+                "delivery channel without a verified address."
+            ),
+        }
+    raise ValueError(f"unsupported issue type: {issue_type}")
+
+
+def semantic_contract_candidate(
+    issue_type: str,
+    plant: dict[str, Any],
+) -> dict[str, Any]:
+    """Author a natural answer independently from ``plant['decision']``."""
+
+    if issue_type == "ambiguity":
+        decision = {
+            "actor": "the route dispatchers",
+            "action": "pause unsafe routes",
+            "condition": "whenever travel conditions may be unsafe",
+            "anchor_outcome": "pause unsafe routes",
+            "alternative_outcome": (
+                "define observable unsafe conditions before a route pause"
+            ),
+        }
+        question = (
+            "Should route dispatchers pause unsafe routes unless observable unsafe "
+            "conditions are defined (yes selects the anchor outcome: pause unsafe "
+            "routes)?"
+        )
+    elif issue_type == "contradiction":
+        decision = {
+            "actor": "the on-duty coordinator",
+            "action": "transfer delayed loads",
+            "condition": "after hours while the assigned dispatcher is unavailable",
+            "anchor_outcome": (
+                "the coordinator transfers the delayed load to an available route"
+            ),
+            "alternative_outcome": (
+                "the assigned dispatcher alone transfers the delayed load"
+            ),
+        }
+        question = (
+            "Should the on-duty coordinator transfer delayed loads after hours "
+            "rather than wait for the assigned dispatcher (yes selects the anchor "
+            "outcome: the coordinator transfers the delayed load to an available "
+            "route)?"
+        )
+    elif issue_type == "gap":
+        decision = {
+            "actor": "notice staff",
+            "action": "deliver resident notices",
+            "condition": "when a resident lacks a verified address",
+            "anchor_outcome": "mail notices to the verified address on file",
+            "alternative_outcome": (
+                "use a non-digital delivery channel without a verified address"
+            ),
+        }
+        question = (
+            "Should notice staff use a non-digital delivery channel for a resident "
+            "who lacks a verified address (yes selects the alternative outcome: "
+            "use a non-digital delivery channel without a verified address)?"
+        )
+    else:
+        raise ValueError(f"unsupported issue type: {issue_type}")
+    return candidate_for_plant(plant, question=question, decision=decision)
+
+
+def value_vector(**overrides: float) -> dict[str, float]:
+    """Build a complete panel value vector for a ranking regression."""
+
+    unknown = set(overrides) - set(VALUE_DIMENSIONS)
+    if unknown:
+        raise ValueError(f"unknown value dimensions: {sorted(unknown)}")
+    return {
+        dimension: float(overrides.get(dimension, 0.0))
+        for dimension in VALUE_DIMENSIONS
+    }
+
+
+def visible_value_panel(*, access: float, safety: float) -> list[dict[str, Any]]:
+    """Render one symmetric panel whose public values emphasize one dimension."""
+
+    factions: list[dict[str, Any]] = []
+    for index, sign in enumerate((1.0, -1.0, 0.8, -0.8)):
+        values = value_vector(access=sign * access, safety=sign * safety)
+        exact_profile = ", ".join(
+            f"{dimension}={values[dimension]:+.2f}" for dimension in VALUE_DIMENSIONS
+        )
+        factions.append(
+            {
+                "faction_id": f"panel-{index}",
+                "values": values,
+                "summary": f"Value profile used for this panel: {exact_profile}.",
+            }
+        )
+    return factions
+
+
+def apply_visible_value_panel(
+    plants: list[dict[str, Any]],
+    factions: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Recompute the hidden labels that deterministically follow public values."""
+
+    updated = json.loads(json.dumps(plants))
+    for plant in updated:
+        weights = plant["value_weights"]
+        scale = sum(abs(float(weights[dimension])) for dimension in VALUE_DIMENSIONS)
+        alternative_stances: dict[str, str] = {}
+        for faction in factions:
+            preference = (
+                sum(
+                    float(faction["values"][dimension]) * float(weights[dimension])
+                    for dimension in VALUE_DIMENSIONS
+                )
+                / scale
+            )
+            stance = (
+                "agree"
+                if preference >= PASS_THRESHOLD
+                else "disagree"
+                if preference <= -PASS_THRESHOLD
+                else "pass"
+            )
+            alternative_stances[faction["faction_id"]] = stance
+        plant["alternative_stances"] = alternative_stances
+        plant["target_stances"] = orient_stances(
+            alternative_stances,
+            yes_choice=plant["yes_choice"],
+        )
+        plant["decision_value"] = preference_tradeoff_value(factions, weights)
+    return updated

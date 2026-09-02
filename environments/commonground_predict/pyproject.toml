@@ -1,6 +1,6 @@
 [project]
 name = "commonground-predict"
-version = "0.5.0"
+version = "0.6.0"
 description = "Probabilistic masked-vote prediction over synthetic stakeholder panels."
 authors = [{ name = "Common Ground contributors" }]
 license = "Apache-2.0 AND MPL-2.0"
@@ -24,8 +24,8 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
-    "commonground-scenarios==0.5.0",
-    "commonground-score==0.5.0",
+    "commonground-scenarios==0.6.0",
+    "commonground-score==0.6.0",
     "datasets>=5.0.1,<6.0.0",
     "verifiers==0.3.0",
 ]

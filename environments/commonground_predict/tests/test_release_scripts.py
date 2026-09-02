@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from verifiers.v1.configs.cli.eval import EvalConfig
 
 ROOT = Path(__file__).resolve().parents[3]
 REPOSITORY_SCRIPTS = (
@@ -33,6 +34,7 @@ SYNTHETIC_SPLIT = DATA_DIR / "eval_synthetic.jsonl"
 TRAIN_SPLIT = DATA_DIR / "train_synthetic.jsonl"
 PYPROJECT = Path(__file__).resolve().parents[1] / "pyproject.toml"
 README = Path(__file__).resolve().parents[1] / "README.md"
+PREDICT_ABLATION_CONFIG = ROOT / "configs" / "eval" / "predict-ablation.toml"
 
 
 def load_module(module_name: str, path: Path) -> Any:
@@ -82,6 +84,23 @@ def test_hub_pyproject_contract() -> None:
     # PI's Hub action installs the pushed env directory in isolation, where
     # workspace sources make the otherwise portable package uninstallable.
     assert "sources" not in document.get("tool", {}).get("uv", {})
+
+
+def test_predict_ablation_config_uses_canonical_eval_contract() -> None:
+    document = tomllib.loads(PREDICT_ABLATION_CONFIG.read_text(encoding="utf-8"))
+
+    assert document["num_tasks"] == 100
+    assert document["num_rollouts"] == 5
+    assert document["shuffle"] is False
+    assert document["push"] is False
+    assert document["env"]["taskset"] == {
+        "id": "commonground-predict",
+        "split": "eval",
+        "prompt_mode": "full",
+    }
+    config = EvalConfig.model_validate(document)
+    assert config.env.taskset.id == "commonground-predict"
+    assert config.env.taskset.prompt_mode == "full"  # type: ignore[attr-defined]
 
 
 def test_statement_bank_is_enterprise_ai_policy() -> None:
@@ -143,6 +162,13 @@ def test_bundled_train_split_matches_seeded_policy_generator() -> None:
     assert TRAIN_SPLIT.read_bytes() == expected
 
 
+def test_readme_records_exact_candidate_split_hashes() -> None:
+    readme = README.read_text(encoding="utf-8")
+
+    for split in (TRAIN_SPLIT, SYNTHETIC_SPLIT):
+        assert hashlib.sha256(split.read_bytes()).hexdigest() in readme
+
+
 def render_generated_split(
     *,
     generator: Any,
@@ -163,12 +189,32 @@ def render_generated_split(
 def test_compute_floors_reproduces_rethemed_synthetic_values() -> None:
     floors = compute_floors(SYNTHETIC_SPLIT, masked_vote_count=8, seed="42")
 
-    assert floors == {
+    snapshot_reference_brier = floors["snapshot-visible-prior"]["brier"]
+    assert snapshot_reference_brier > 0
+    for metrics in floors.values():
+        assert metrics[
+            "brier_skill_vs_original_snapshot_visible_prior"
+        ] == pytest.approx(1.0 - metrics["brier"] / snapshot_reference_brier)
+    floors_without_snapshot_skill = {
+        name: {
+            metric: value
+            for metric, value in metrics.items()
+            if metric != "brier_skill_vs_original_snapshot_visible_prior"
+        }
+        for name, metrics in floors.items()
+    }
+    assert floors_without_snapshot_skill == {
         "uniform-probability": {
             "vote_accuracy": 0.59,
             "probability_reward": 0.6666666666666659,
             "brier": 0.3333333333333329,
             "brier_skill_vs_uniform": 0.0,
+        },
+        "snapshot-visible-prior": {
+            "vote_accuracy": 0.5875,
+            "probability_reward": 0.7245207541099122,
+            "brier": 0.2754792458900878,
+            "brier_skill_vs_uniform": 0.1735622623297369,
         },
         "global-visible-prior": {
             "vote_accuracy": 0.59,
@@ -246,21 +292,22 @@ def test_compute_floors_reproduces_rethemed_synthetic_values() -> None:
     rendered = render_markdown(floors)
     assert rendered == "\n".join(
         [
-            "| Comparator class | Comparator | probability reward | vote_accuracy | normalized Brier | Brier skill vs uniform |",
-            "| --- | --- | ---: | ---: | ---: | ---: |",
-            "| No-input | Uniform probability | 0.667 | 0.590 | 0.333 | 0.000 |",
-            "| Evaluation-corpus visible (transductive) | Global visible class prior | 0.717 | 0.590 | 0.283 | 0.150 |",
-            "| Train-split no-text | Global empirical class prior | 0.669 | 0.166 | 0.331 | 0.008 |",
-            "| Train-split text-only | Bag-of-words vote probabilities | 0.401 | 0.244 | 0.599 | -0.796 |",
-            "| No-input | Always agree | 0.590 | 0.590 | 0.410 | -0.230 |",
-            "| Prompt-observable matrix-only | Per-statement visible majority | 0.581 | 0.581 | 0.419 | -0.256 |",
-            "| Prompt-observable matrix-only | Per-statement visible class frequencies | 0.760 | 0.581 | 0.240 | 0.279 |",
-            "| Prompt-observable matrix-only | Nearest participant (1-NN) | 0.819 | 0.819 | 0.181 | 0.456 |",
-            "| Prompt-observable matrix-only | Five-neighbor vote | 0.891 | 0.891 | 0.109 | 0.674 |",
-            "| Prompt-observable matrix-only | Five-neighbor vote frequencies | 0.889 | 0.891 | 0.111 | 0.666 |",
-            "| Prompt-observable matrix-only | Distance-weighted 5-NN with smoothing | 0.881 | 0.900 | 0.119 | 0.643 |",
-            "| Held-out-label diagnostic | Per-snapshot best constant | 0.631 | 0.631 | 0.369 | -0.106 |",
-            "| Generator diagnostic | Latent cluster-pattern replay | 0.916 | 0.916 | 0.084 | 0.749 |",
+            "| Comparator class | Comparator | probability reward | vote_accuracy | normalized Brier | Brier skill vs uniform | Brier skill vs snapshot prior |",
+            "| --- | --- | ---: | ---: | ---: | ---: | ---: |",
+            "| No-input | Uniform probability | 0.667 | 0.590 | 0.333 | 0.000 | -0.210 |",
+            "| Prompt-observable matrix-only | Per-snapshot visible class prior | 0.725 | 0.588 | 0.275 | 0.174 | 0.000 |",
+            "| Evaluation-corpus visible (transductive) | Global visible class prior | 0.717 | 0.590 | 0.283 | 0.150 | -0.028 |",
+            "| Train-split no-text | Global empirical class prior | 0.669 | 0.166 | 0.331 | 0.008 | -0.200 |",
+            "| Train-split text-only | Bag-of-words vote probabilities | 0.401 | 0.244 | 0.599 | -0.796 | -1.174 |",
+            "| No-input | Always agree | 0.590 | 0.590 | 0.410 | -0.230 | -0.488 |",
+            "| Prompt-observable matrix-only | Per-statement visible majority | 0.581 | 0.581 | 0.419 | -0.256 | -0.520 |",
+            "| Prompt-observable matrix-only | Per-statement visible class frequencies | 0.760 | 0.581 | 0.240 | 0.279 | 0.128 |",
+            "| Prompt-observable matrix-only | Nearest participant (1-NN) | 0.819 | 0.819 | 0.181 | 0.456 | 0.342 |",
+            "| Prompt-observable matrix-only | Five-neighbor vote | 0.891 | 0.891 | 0.109 | 0.674 | 0.605 |",
+            "| Prompt-observable matrix-only | Five-neighbor vote frequencies | 0.889 | 0.891 | 0.111 | 0.666 | 0.596 |",
+            "| Prompt-observable matrix-only | Distance-weighted 5-NN with smoothing | 0.881 | 0.900 | 0.119 | 0.643 | 0.568 |",
+            "| Held-out-label diagnostic | Per-snapshot best constant | 0.631 | 0.631 | 0.369 | -0.106 | -0.339 |",
+            "| Generator diagnostic | Latent cluster-pattern replay | 0.916 | 0.916 | 0.084 | 0.749 | 0.696 |",
         ]
     )
     assert rendered in README.read_text(encoding="utf-8")

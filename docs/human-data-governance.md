@@ -2,11 +2,11 @@
 
 ## Current release boundary
 
-Versions 0.2.x of commonground-predict and commonground-elicit bundle synthetic
-data only. The open packages contain their evaluation answers and are intended
-for reproducible development and training, not contamination-resistant
-leaderboards. No file may be described or published as a human-data split merely
-because it passes automated validation.
+Every dataset bundled with the environments is synthetic, including the public
+0.5.0 release and the 0.6.0 candidate. The open packages contain their
+evaluation answers and are intended for reproducible development and training,
+not contamination-resistant leaderboards. No file may be described or
+published as a human-data split merely because it passes automated validation.
 
 ## Required export contract
 
@@ -74,4 +74,4 @@ snapshot.
 The scenario package delegates human_feedback validation to the same strict
 snapshot validator. A scenario carrying human feedback therefore has the same
 contract as predict intake. This socket is reserved for future reviewed data;
-the 0.2.x elicit corpus does not use it.
+the bundled Elicit corpora do not use it.

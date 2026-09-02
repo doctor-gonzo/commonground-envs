@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-from math import isclose
+from itertools import permutations
+from math import inf, isclose, nan
 from pathlib import Path
 from typing import Any
 
@@ -28,7 +29,11 @@ from commonground_predict.environment import (
     PredictionTask,
     apply_masked_vote_count,
     brier,
+    coerce_probability_vote,
+    original_snapshot_visible_prior_brier_loss,
     probability_reward,
+    render_prompt,
+    snapshot_visible_class_prior,
     vote_accuracy,
 )
 from verifiers.types import State
@@ -61,6 +66,12 @@ def test_legacy_hosted_eval_loader_returns_full_environment() -> None:
     state = score_legacy_row(env, row, answer)
     assert state["reward"] == 1.0
     assert state["metrics"]["vote_accuracy"] == 1.0
+    assert state["metrics"]["original_snapshot_visible_prior_brier"] == pytest.approx(
+        original_snapshot_visible_prior_brier_loss(
+            answer,
+            json.loads(row["info"])["snapshot_visible_prior"],
+        )
+    )
     assert "held_out" not in json.loads(row["snapshot"])
 
 
@@ -126,6 +137,93 @@ def test_named_eval_split_rows_are_byte_identical_to_default() -> None:
     )
 
 
+def test_full_prompt_mode_is_the_default_and_preserves_task_identity() -> None:
+    default_task = next(iter(load_environment()))
+    explicit_task = next(iter(load_environment(prompt_mode="full")))
+
+    assert default_task.data.prompt == explicit_task.data.prompt
+    assert default_task.data.idx == explicit_task.data.idx
+    assert default_task.data.name == explicit_task.data.name
+    assert default_task.data.answer == explicit_task.data.answer
+    assert default_task.data.snapshot == explicit_task.data.snapshot
+    assert explicit_task.data.info["prompt_mode"] == "full"
+
+
+@pytest.mark.parametrize(
+    "prompt_mode",
+    ["full", "matrix-only", "text-only", "shuffled-text"],
+)
+def test_prompt_modes_are_threaded_through_native_and_legacy_loaders(
+    prompt_mode: str,
+) -> None:
+    native = load_environment(prompt_mode=prompt_mode)  # type: ignore[arg-type]
+    legacy = load_legacy_environment(prompt_mode=prompt_mode)  # type: ignore[arg-type]
+    native_task = next(iter(native))
+    legacy_row = dict(legacy.get_eval_dataset()[0])
+
+    assert legacy.env_args["prompt_mode"] == prompt_mode
+    assert native_task.data.info["prompt_mode"] == prompt_mode
+    assert legacy_row["prompt"][0]["content"] == native_task.data.prompt
+    assert json.loads(legacy_row["answer"]) == native_task.data.answer
+    assert legacy_row["example_id"] == native_task.data.idx
+    assert native_task.data.name == native_task.data.snapshot["session_id"]
+
+
+def test_prompt_ablation_views_are_deterministic_and_keep_answers_fixed(
+    tmp_path: Path,
+) -> None:
+    snapshot = orientation_snapshot()
+    data_path = write_snapshot_jsonl(tmp_path, snapshot)
+    tasks = {
+        mode: next(
+            iter(
+                load_environment(
+                    data_path=data_path,
+                    prompt_mode=mode,
+                )
+            )
+        )
+        for mode in ("full", "matrix-only", "text-only", "shuffled-text")
+    }
+    reference = tasks["full"].data
+
+    for mode, task in tasks.items():
+        assert task.data.idx == reference.idx
+        assert task.data.name == reference.name
+        assert task.data.answer == reference.answer
+        assert task.data.snapshot == reference.snapshot
+        assert task.data.info["prompt_mode"] == mode
+
+    full_prompt = reference.prompt
+    matrix_only_prompt = tasks["matrix-only"].data.prompt
+    text_only_prompt = tasks["text-only"].data.prompt
+    shuffled_prompt = tasks["shuffled-text"].data.prompt
+
+    assert "Statement A" in full_prompt
+    assert "Statement A" not in matrix_only_prompt
+    assert "[policy text withheld for matrix-only ablation]" in matrix_only_prompt
+    assert "Visible vote matrix:" not in text_only_prompt
+    assert "p00:" not in text_only_prompt
+    assert "Statement A" in text_only_prompt
+    assert render_prompt(snapshot, prompt_mode="shuffled-text") == shuffled_prompt
+    shuffled_texts = prompt_statement_texts(shuffled_prompt)
+    full_texts = prompt_statement_texts(full_prompt)
+    assert all(
+        shuffled_text != full_text
+        for shuffled_text, full_text in zip(
+            shuffled_texts,
+            full_texts,
+            strict=True,
+        )
+    )
+    assert sorted(shuffled_texts) == sorted(full_texts)
+
+
+def test_prompt_mode_rejects_unknown_values() -> None:
+    with pytest.raises(ValueError, match="prompt_mode"):
+        load_environment(prompt_mode="unknown")  # type: ignore[arg-type]
+
+
 def test_explicit_data_path_takes_precedence_over_split() -> None:
     env = load_environment(data_path=BUNDLED_EVAL_PATH, split="train")
 
@@ -154,9 +252,14 @@ def test_server_state_path_binds_answer_for_correct_and_incorrect() -> None:
     assert correct_state["reward"] == 1.0
     assert correct_state["rewards"]["probability_reward"] == 1.0
     assert correct_state["metrics"]["vote_accuracy"] == 1.0
+    assert correct_state["metrics"]["original_snapshot_visible_prior_brier"] > 0.0
     assert incorrect_state["reward"] == 0.0
     assert incorrect_state["rewards"]["probability_reward"] == 0.0
     assert incorrect_state["metrics"]["vote_accuracy"] == 0.0
+    assert (
+        incorrect_state["metrics"]["original_snapshot_visible_prior_brier"]
+        == correct_state["metrics"]["original_snapshot_visible_prior_brier"]
+    )
     assert correct_state["task"]["answer"] == answer
     assert "held_out" not in correct_state["task"]["snapshot"]
 
@@ -215,6 +318,7 @@ def test_load_environment_builds_ce_demo_split_from_env(monkeypatch: Any) -> Non
     assert state["reward"] == 1.0
     assert state["rewards"]["probability_reward"] == 1.0
     assert state["metrics"]["vote_accuracy"] == 1.0
+    assert state["metrics"]["original_snapshot_visible_prior_brier"] > 0.0
 
 
 def test_load_environment_rejects_unmasked_ce_demo_by_default() -> None:
@@ -357,30 +461,30 @@ def test_custom_human_path_enforces_shared_governance_metadata(
     assert "redistribution_rights_approved must be true" in message
 
 
-def test_parser_handles_fenced_json() -> None:
+def test_parser_rejects_fenced_json() -> None:
     parser = PredictionJsonParser()
 
     parsed = parser.parse('```json\n{"predictions":{"0,1":1,"2,3":0}}\n```\n')
 
-    assert parsed == {"predictions": {"0,1": 1, "2,3": 0}}
+    assert parsed == {}
 
 
-def test_parser_prefers_last_object_with_predictions() -> None:
+def test_parser_rejects_prose_wrapped_object() -> None:
     parser = PredictionJsonParser()
 
     parsed = parser.parse(
         'I considered {} first. Final answer: {"predictions":{"0,1":1}}'
     )
 
-    assert parsed == {"predictions": {"0,1": 1}}
+    assert parsed == {}
 
 
-def test_parser_falls_back_to_last_decodable_object() -> None:
+def test_parser_rejects_multiple_json_objects() -> None:
     parser = PredictionJsonParser()
 
     parsed = parser.parse('{"draft":true} then {"final":true}')
 
-    assert parsed == {"final": True}
+    assert parsed == {}
 
 
 def test_parser_rejects_excessive_json_nesting_without_crashing() -> None:
@@ -436,6 +540,7 @@ def test_rubric_scores_perfect_completion_at_one() -> None:
     assert state["rewards"]["probability_reward"] == 1.0
     assert state["metrics"]["vote_accuracy"] == 1.0
     assert state["metrics"]["brier"] == 0.0
+    assert state["metrics"]["original_snapshot_visible_prior_brier"] > 0.0
 
 
 def test_rubric_scores_all_wrong_completion_at_zero() -> None:
@@ -452,6 +557,21 @@ def test_rubric_scores_all_wrong_completion_at_zero() -> None:
     assert state["rewards"]["probability_reward"] == 0.0
     assert state["metrics"]["vote_accuracy"] == 0.0
     assert state["metrics"]["brier"] == 1.0
+    assert state["metrics"]["original_snapshot_visible_prior_brier"] > 0.0
+
+
+def test_snapshot_visible_prior_brier_matches_reference_forecast_loss() -> None:
+    env = load_environment()
+    row = task_rows(env)[0]
+    held_out = row["answer"]
+    prior = row["info"]["snapshot_visible_prior"]
+    reference_predictions = {cell_id: prior for cell_id in held_out}
+
+    assert prior == snapshot_visible_class_prior(row["snapshot"])
+    state = score_row(env, row, reference_predictions)
+    assert state["metrics"]["brier"] == pytest.approx(
+        state["metrics"]["original_snapshot_visible_prior_brier"]
+    )
 
 
 def test_hard_label_response_is_rejected_by_probability_contract() -> None:
@@ -476,6 +596,7 @@ def test_hard_label_response_is_rejected_by_probability_contract() -> None:
     assert trace.reward == 0.0
     assert trace.metrics["vote_accuracy"] == 0.0
     assert trace.metrics["brier"] == 1.0
+    assert trace.metrics["original_snapshot_visible_prior_brier"] > 0.0
 
 
 def test_brier_scores_correct_probability_vector() -> None:
@@ -501,6 +622,43 @@ def test_brier_invalid_probability_mapping_fails_the_response_contract() -> None
     score = score_brier_prediction({"agree": 0.8, "disagree": -0.1, "pass": 0.3})
 
     assert score == 1.0
+
+
+@pytest.mark.parametrize(
+    "invalid_value",
+    ["0.8", True, None, [], {}, 10**4000, nan, inf],
+    ids=(
+        "numeric-string",
+        "boolean",
+        "null",
+        "array",
+        "object",
+        "huge-integer",
+        "nan",
+        "infinity",
+    ),
+)
+def test_probability_contract_rejects_malformed_numeric_values(
+    invalid_value: object,
+) -> None:
+    prediction = {"agree": invalid_value, "disagree": 0.1, "pass": 0.1}
+
+    assert score_probability_predictions({"0,1": prediction}, {"0,1": 1}) == 0.0
+    assert score_brier_prediction(prediction) == 1.0
+
+
+def test_probability_contract_rejects_finite_components_with_nonfinite_total() -> None:
+    prediction = {"agree": 1e308, "disagree": 1e308, "pass": 1e308}
+
+    assert score_probability_predictions({"0,1": prediction}, {"0,1": 1}) == 0.0
+    assert score_brier_prediction(prediction) == 1.0
+
+
+def test_probability_argmax_ties_use_canonical_order_not_mapping_order() -> None:
+    for label_order in permutations(("agree", "disagree", "pass")):
+        prediction = {label: 1.0 for label in label_order}
+
+        assert coerce_probability_vote(prediction) == 1
 
 
 def test_primary_reward_prefers_better_calibration_with_same_argmax() -> None:
@@ -538,6 +696,66 @@ def test_primary_reward_requires_exact_prediction_key_set(
     answer = {"0,1": 1, "1,2": -1}
 
     assert score_probability_predictions(predictions, answer) == 0.0
+
+
+@pytest.mark.parametrize(
+    "completion_text",
+    [
+        (
+            '{"predictions":{"0,1":{"agree":0,"disagree":1,"pass":0}},'
+            '"predictions":{"0,1":{"agree":1,"disagree":0,"pass":0}}}'
+        ),
+        (
+            '{"predictions":{"0,1":{"agree":0,"disagree":1,"pass":0},'
+            '"0,1":{"agree":1,"disagree":0,"pass":0}}}'
+        ),
+        ('{"predictions":{"0,1":{"agree":0,"agree":1,"disagree":0,"pass":0}}}'),
+    ],
+    ids=("duplicate-root-key", "duplicate-cell-key", "duplicate-class-key"),
+)
+def test_probability_contract_rejects_duplicate_raw_json_keys(
+    completion_text: str,
+) -> None:
+    completion = [{"role": "assistant", "content": completion_text}]
+    parser = PredictionJsonParser()
+
+    assert asyncio.run(probability_reward(completion, {"0,1": 1}, parser)) == 0.0
+    assert asyncio.run(brier(completion, {"0,1": 1}, parser)) == 1.0
+
+
+def test_probability_contract_rejects_extra_top_level_keys() -> None:
+    completion = [
+        {
+            "role": "assistant",
+            "content": (
+                '{"predictions":{"0,1":{"agree":1,"disagree":0,"pass":0}},'
+                '"unscored_metadata":true}'
+            ),
+        }
+    ]
+    parser = PredictionJsonParser()
+
+    assert asyncio.run(probability_reward(completion, {"0,1": 1}, parser)) == 0.0
+    assert asyncio.run(brier(completion, {"0,1": 1}, parser)) == 1.0
+
+
+@pytest.mark.parametrize("constant", ["NaN", "Infinity", "-Infinity"])
+def test_probability_contract_rejects_nonstandard_json_constants(
+    constant: str,
+) -> None:
+    completion = [
+        {
+            "role": "assistant",
+            "content": (
+                '{"predictions":{"0,1":{"agree":'
+                f'{constant},"disagree":0,"pass":0}}}}'
+            ),
+        }
+    ]
+    parser = PredictionJsonParser()
+
+    assert asyncio.run(probability_reward(completion, {"0,1": 1}, parser)) == 0.0
+    assert asyncio.run(brier(completion, {"0,1": 1}, parser)) == 1.0
 
 
 def test_masked_vote_count_knob_changes_held_out_count() -> None:
@@ -669,7 +887,7 @@ def score_legacy_row(
     return state
 
 
-def score_brier_prediction(prediction: dict[Any, float]) -> float:
+def score_brier_prediction(prediction: dict[Any, Any]) -> float:
     completion = [
         {
             "role": "assistant",
@@ -706,6 +924,13 @@ def probability_predictions(predictions: dict[str, Any]) -> dict[str, Any]:
             for candidate in ("agree", "disagree", "pass")
         }
     return converted
+
+
+def prompt_statement_texts(prompt: str) -> list[str]:
+    """Extract the indexed statement text block from a rendered prompt."""
+
+    statement_block = prompt.split("Statements:\n", 1)[1].split("\n\n", 1)[0]
+    return [line.split(": ", 1)[1] for line in statement_block.splitlines()]
 
 
 def assert_env_rows_have_no_masks(env: CommonGroundPredictTaskset) -> None:
