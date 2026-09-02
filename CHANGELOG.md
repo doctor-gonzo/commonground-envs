@@ -15,12 +15,18 @@ All notable changes to this project are documented in this file.
   prompt views, plus a compact probability-native baseline suite.
 - Replace inferred contradiction relationships with explicit authored opposing
   passages that survive deterministic document-ID remapping.
+- Make the Find contract evidence-first: remove its five-slot decision object
+  and hidden alias tables, score diagnosis only for valid yes/no form, and
+  accept a contradiction's authored passage pair in either direction.
+- Keep authored policy sentences intact instead of blending generated clauses
+  into scored anchors. Remove actor-support filler, balance neutral context
+  separately, and use every procedural predicate at most once per scenario.
 - Generate faction descriptions from general issue-independent value vectors;
   render their numeric inputs with round-trip precision, and compose stances
   from those values and explicit issue trade-offs.
-- Represent Elicit decisions with five structured slots and explicit yes-side
-  orientation. Ask copies one prompt-visible canonical profile; Find accepts
-  only explicitly authored aliases in the corresponding slot.
+- Represent Ask decisions with five structured slots and explicit yes-side
+  orientation. Ask copies one prompt-visible canonical profile; Find does not
+  submit those fields.
 - Treat Ask question and Find diagnosis prose as yes/no presentation fields,
   removing the fuzzy lexical semantic scorer, canonical question aliases, and
   orientation markers from the answer contract.
@@ -45,9 +51,8 @@ All notable changes to this project are documented in this file.
   holdout schedules, attempt-ledger machinery, and documentation for deleted
   release paths.
 - Document the remaining scientific limits: one public synthetic generator,
-  public answers, a first-clause localization shortcut, one public trade-off
-  vector winning Ask in 90 of 100 evaluation rows, no demonstrated training
-  transfer, and no live-human export.
+  public answers, one public trade-off vector winning Ask in 90 of 100
+  evaluation rows, no demonstrated training transfer, and no live-human export.
 - Correct the Elicit dataset card to state that scenarios contain three to five
   documents, and stage a small optional usefulness pilot before any complete
   exact-artifact model study.

@@ -42,9 +42,13 @@ The local command must pass:
 - alternative reversal swaps agree/disagree and preserves pass;
 - exact-plus-false-positive shaped Find reward is below exact concise reward;
 - opaque IDs remain exact;
-- Ask copies only the public canonical profile; Find uses only authored
-  per-slot aliases;
+- Ask copies only the public canonical profile; Find has no decision frame or
+  alias table;
 - question/diagnosis prose is checked only for yes/no form;
+- complete authored Find answers reach reward 1.0;
+- contradiction evidence pairs score identically in either direction;
+- authored policy sentences remain intact and neutral procedural predicates do
+  not repeat within a scenario;
 - exact instance, policy-semantic, and TF-IDF split checks pass;
 - all packaged tasksets contain 100 train and 100 eval rows.
 
@@ -88,7 +92,7 @@ Proceed to the complete study only if:
 - rewards are finite and not uniformly zero or one;
 - Predict beats uniform probability reward (`0.667`) and the prompt-view runs
   are aligned to the same task IDs and answers;
-- Elicit component metrics distinguish format, grounding, decision-frame, and
+- Elicit component metrics distinguish format, grounding, type/relation, and
   stance failures rather than collapsing every failure into one opaque zero;
 - a manual review of at least ten non-perfect Find/Ask traces finds genuine
   reasoning or reference-contract errors, not only malformed output;
@@ -158,7 +162,6 @@ Not supported without additional evidence:
 - broad policy-domain generalization;
 - beneficial RL training or private-generator transfer.
 
-Interpret fixed-corpus Elicit results with two disclosed shortcuts in mind:
-first-clause procedural placement can simplify Find localization, and the same
-public trade-off vector identifies the Ask winner in 90 of 100 evaluation rows.
-Neither shortcut supplies the complete scored response.
+Interpret fixed-corpus Elicit results with the disclosed Ask shortcut in mind:
+the same public trade-off vector identifies the Ask winner in 90 of 100
+evaluation rows. It does not supply the complete scored response.

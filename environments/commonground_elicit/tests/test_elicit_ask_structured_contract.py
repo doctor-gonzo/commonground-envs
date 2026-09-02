@@ -28,15 +28,6 @@ def _plant(*, contradiction: bool = False) -> dict[str, Any]:
             "anchor_outcome": "keep urgent file requests pending",
             "alternative_outcome": "release urgent file requests",
         },
-        # Deliberately malicious aliases prove that Ask never consults this
-        # prompt-hidden compatibility surface.
-        "decision_aliases": {
-            "actor": ["an unrelated actor"],
-            "action": ["sell customer records"],
-            "condition": ["whenever convenient"],
-            "anchor_outcome": ["discard every request"],
-            "alternative_outcome": ["publish every request"],
-        },
         "yes_choice": "alternative",
         "target_stances": dict(alternative_stances),
         "alternative_stances": dict(alternative_stances),
@@ -141,27 +132,6 @@ def test_ask_requires_composed_alternative_stances() -> None:
     del plant["alternative_stances"]
 
     assert _score(candidate, plant) == 0.0
-
-
-def test_ask_never_reads_hidden_decision_aliases(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    plant = _plant()
-    exact = _candidate(plant)
-
-    def forbidden_alias_access(*_args: Any, **_kwargs: Any) -> Any:
-        raise AssertionError("Ask accessed hidden decision aliases")
-
-    monkeypatch.setattr(
-        environment, "_accepted_decision_aliases", forbidden_alias_access
-    )
-
-    assert _score(exact, plant) == 1.0
-    alias_only = copy.deepcopy(exact)
-    alias_only["decision"] = {
-        field: aliases[0] for field, aliases in plant["decision_aliases"].items()
-    }
-    assert _score(alias_only, plant) == 0.0
 
 
 def test_ask_contract_normalizes_only_unicode_case_and_whitespace() -> None:

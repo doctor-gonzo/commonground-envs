@@ -114,118 +114,6 @@ _COMPOSED_DISTRACTOR_REASON = (
     "Seeded compositional administrative context with no ambiguity, conflict, "
     "or uncovered decision."
 )
-ACTOR_SUPPORT_REASON = (
-    "Seeded actor-support context required by an authored candidate decision."
-)
-_DECISION_ALIAS_FIELDS = (
-    "actor",
-    "action",
-    "condition",
-    "anchor_outcome",
-    "alternative_outcome",
-)
-# These aliases are authored from phrases that occur in the visible scenario,
-# not learned from model answers.  Most frames need only their canonical form;
-# an override records a genuine source-language alternative when the authored
-# reference uses a narrower role or a more abstract action label.
-_DECISION_ALIAS_OVERRIDES: Mapping[tuple[str, str], Mapping[str, tuple[str, ...]]] = {
-    ("community-clinic-scheduling", "scope-threshold"): {
-        "actor": ("community health scheduling team",),
-        "action": (
-            "decide which conditions make a patient eligible for an early appointment",
-            "offer priority patients an early appointment",
-        ),
-        "condition": (
-            "conditions make a patient eligible for an early appointment",
-            "a patient qualifies as priority",
-        ),
-    },
-    ("customer-support-handbook", "credit-threshold"): {
-        "actor": ("customer support",),
-        "alternative_outcome": ("set a goodwill credit",),
-    },
-    ("customer-support-handbook", "refund-window-conflict"): {
-        "actor": ("customer support",),
-    },
-    ("customer-support-handbook", "owner-unavailable-gap"): {
-        "actor": ("customer support",),
-        "alternative_outcome": ("recover account access",),
-    },
-    ("learning-platform-operations", "substantive-feedback"): {
-        "action": ("provide substantive feedback",),
-        "alternative_outcome": ("define substantive feedback",),
-    },
-    ("learning-platform-operations", "live-access-gap"): {
-        "alternative_outcome": ("grant an accessibility request",),
-    },
-    ("civic-assistant-guidance", "no-address-gap"): {
-        "actor": ("case workers",),
-    },
-    ("creator-marketplace-playbook", "dashboard-access-gap"): {
-        "actor": ("creators",),
-    },
-    ("creator-marketplace-playbook", "timely-response"): {
-        "alternative_outcome": ("set a timely response",),
-    },
-    ("library-digitization-rules", "scope-threshold"): {
-        "action": (
-            "apply appropriate access restrictions to culturally sensitive materials",
-        ),
-        "alternative_outcome": ("set access restrictions for sensitive materials",),
-    },
-    ("library-digitization-rules", "uncovered-exception"): {
-        "alternative_outcome": ("accept a takedown request",),
-    },
-    ("cooperative-housing-maintenance", "uncovered-exception"): {
-        "alternative_outcome": ("provide repair notices another way",),
-    },
-    ("cooperative-housing-maintenance", "scope-threshold"): {
-        "actor": ("the cooperative housing maintenance team",),
-        "action": ("handle urgent repairs promptly",),
-    },
-    ("food-bank-distribution", "scope-threshold"): {
-        "action": ("give additional staple items to households with high need",),
-        "alternative_outcome": ("assign additional staples",),
-    },
-    ("renewable-microgrid-operations", "scope-threshold"): {
-        "action": ("maintain an adequate battery reserve overnight",),
-    },
-    ("museum-loan-handling", "scope-threshold"): {
-        "action": (
-            "send significantly damaged loans to immediate conservation review",
-        ),
-    },
-    ("museum-loan-handling", "uncovered-exception"): {
-        "action": ("return the borrowed object",),
-    },
-    ("open-source-grant-program", "scope-threshold"): {
-        "action": (
-            "give priority review to projects with substantial community benefit",
-        ),
-    },
-    ("agricultural-water-allocation", "scope-threshold"): {
-        "action": ("reduce irrigation allocations",),
-    },
-    ("disaster-shelter-intake", "scope-threshold"): {
-        "action": ("prioritize vulnerable residents for available shelter beds",),
-    },
-    ("translation-quality-service", "scope-threshold"): {
-        "action": ("send sensitive content to a senior language review",),
-        "alternative_outcome": ("require senior language review",),
-    },
-    ("research-computing-queue", "scope-threshold"): {
-        "action": ("expedite queue placement for high-impact computing runs",),
-    },
-    ("regional-archives-access", "scope-threshold"): {
-        "action": ("apply suitable reading-room restrictions to sensitive files",),
-    },
-    ("rural-broadband-outages", "scope-threshold"): {
-        "action": ("accelerate field response to widespread outages",),
-    },
-    ("water-quality-laboratory", "scope-threshold"): {
-        "alternative_outcome": ("require additional laboratory review",),
-    },
-}
 
 
 def generate_scenario(
@@ -263,20 +151,6 @@ def generate_scenario(
     semantic_scope = SEMANTIC_SCOPES[seed % len(SEMANTIC_SCOPES)]
     if semantic_scope is not None:
         _apply_semantic_scope(documents, planted_items, semantic_scope)
-    for planted in planted_items:
-        planted["decision_aliases"] = _authored_decision_aliases(
-            template,
-            str(planted["plant_id"]),
-            planted["decision"],
-            semantic_scope=semantic_scope,
-        )
-    _blend_authored_and_procedural_language(
-        rng,
-        documents,
-        planted_items,
-        distractors,
-        sector=template.sector,
-    )
     if template.balance_type_neutral_distractors:
         _balance_type_neutral_distractors(
             rng,
@@ -384,39 +258,6 @@ def _authored_decision_frame(template_id: str, plant_id: str) -> dict[str, str]:
     if base is not None:
         return dict(base)
     return dict(decision_frame_for(template_id, plant_id))
-
-
-def _authored_decision_aliases(
-    template: DomainTemplate,
-    plant_id: str,
-    decision: Mapping[str, str],
-    *,
-    semantic_scope: str | None,
-) -> dict[str, list[str]]:
-    """Return complete, per-slot accepted concepts for one authored frame.
-
-    Every slot includes its canonical authored form.  Narrow overrides add
-    source-observable alternatives without allowing words to migrate between
-    actor, action, condition, or outcome slots.
-    """
-
-    overrides = _DECISION_ALIAS_OVERRIDES.get((template.template_id, plant_id), {})
-    actor_aliases = list(overrides.get("actor", ()))
-
-    aliases: dict[str, list[str]] = {}
-    for field in _DECISION_ALIAS_FIELDS:
-        field_overrides = (
-            actor_aliases if field == "actor" else list(overrides.get(field, ()))
-        )
-        if field == "condition" and semantic_scope is not None:
-            # Regression guard: scope changes define different decisions. An
-            # unscoped convenience alias must never bypass the generated scope.
-            field_overrides = [
-                alias if alias.endswith(semantic_scope) else f"{alias} {semantic_scope}"
-                for alias in field_overrides
-            ]
-        aliases[field] = list(dict.fromkeys((str(decision[field]), *field_overrides)))
-    return aliases
 
 
 def _stance_for(prior: float) -> str:
@@ -549,91 +390,6 @@ def _balanced_random_choices(
     return selected[:count]
 
 
-def _blend_authored_and_procedural_language(
-    rng: random.Random,
-    documents: list[dict[str, str]],
-    planted_items: list[dict[str, Any]],
-    distractors: list[dict[str, str]],
-    *,
-    sector: str,
-) -> None:
-    """Give authored and neutral sentences the same procedural components.
-
-    A generator-only predicate vocabulary is itself a perfect source marker:
-    an attacker can remove every sentence containing those predicates and keep
-    only authored issue candidates.  Each original sentence therefore receives
-    one clause from the same seeded component distribution used for additional
-    distractors.  References are remapped exactly, preserving the policy rule
-    while making procedural vocabulary non-exclusive to either class.
-    """
-
-    used: set[str] = set()
-    remapped: dict[tuple[str, str], str] = {}
-    for document in documents:
-        sentences = [
-            sentence
-            for sentence in re.split(r"(?<=[.!?])\s+", document["text"])
-            if sentence
-        ]
-        blended: list[str] = []
-        for sentence in sentences:
-            clause = _compose_shared_procedural_clause(
-                rng,
-                sector=sector,
-                used=used,
-            )
-            used.add(clause)
-            blended_sentence = (
-                f"{sentence.removesuffix('.')}; {clause[0].lower()}{clause[1:]}"
-            )
-            remapped[(document["doc_id"], sentence)] = blended_sentence
-            blended.append(blended_sentence)
-        document["text"] = " ".join(blended)
-
-    for planted in planted_items:
-        planted["anchor_quote"] = remapped[(planted["doc_id"], planted["anchor_quote"])]
-        if "related_anchor_quote" in planted:
-            planted["related_anchor_quote"] = remapped[
-                (planted["related_plant_doc_id"], planted["related_anchor_quote"])
-            ]
-    for distractor in distractors:
-        distractor["anchor_quote"] = remapped[
-            (distractor["doc_id"], distractor["anchor_quote"])
-        ]
-
-    # Regression guard: every accepted actor alias is a scored semantic key.
-    # Classify generated support separately so view controls may retain it while
-    # still removing genuinely optional neutral distractors.
-    documents_by_id = {str(document["doc_id"]): document for document in documents}
-    for plant in planted_items:
-        document = documents_by_id[str(plant["doc_id"])]
-        for actor in plant["decision_aliases"]["actor"]:
-            actor_is_independently_supported = str(actor).casefold() in str(
-                plant["anchor_quote"]
-            ).casefold() or any(
-                distractor["reason"] == ACTOR_SUPPORT_REASON
-                and distractor["doc_id"] == plant["doc_id"]
-                and str(actor).casefold() in str(distractor["anchor_quote"]).casefold()
-                for distractor in distractors
-            )
-            if actor_is_independently_supported:
-                continue
-            support = _compose_neutral_distractor(
-                rng,
-                sector=sector,
-                used=used,
-                required_actor=str(actor),
-            )
-            document["text"] = " ".join((document["text"].strip(), support))
-            distractors.append(
-                {
-                    "doc_id": document["doc_id"],
-                    "anchor_quote": support,
-                    "reason": ACTOR_SUPPORT_REASON,
-                }
-            )
-
-
 def _balance_type_neutral_distractors(
     rng: random.Random,
     documents: list[dict[str, str]],
@@ -641,51 +397,47 @@ def _balance_type_neutral_distractors(
     *,
     sector: str,
 ) -> None:
-    """Add varied neutral prose without encoding document or planted-issue roles.
+    """Add neutral procedural sentences across every document.
 
-    Counts are sampled independently for every document, and each sentence is
-    composed from the same cross-product of procedural clauses already blended
-    into authored policy sentences. Some neutral spans combine two independently
-    sampled clauses. Both one-clause and two-clause distractors remain visible,
-    so there is no single clause-count marker, while their length distribution
-    overlaps the authored policy spans instead of making the longest sentences
-    a reliable issue locator. The renderer rejects duplicates within a scenario.
-    A later pass independently shuffles sentence order.
+    Authored policy sentences stay intact.  Filler predicates are sampled
+    without replacement within a scenario, so repeated actions cannot create
+    accidental cross-document contradictions or a reusable role codebook.
+    Counts are balanced and then assigned after seeded shuffling so a planted
+    issue is not recoverable from sentence position.  A later pass independently
+    shuffles sentence order.
     """
 
-    used: set[str] = set()
-    supported_doc_ids = {
-        str(distractor["doc_id"])
-        for distractor in distractors
-        if distractor["reason"] in {_COMPOSED_DISTRACTOR_REASON, ACTOR_SUPPORT_REASON}
-    }
-    for document in documents:
-        # Plant documents already carry at least one actor-support distractor;
-        # other documents receive at least one neutral clause here. Sampling
-        # the remaining count preserves the intended two-to-seven sentence
-        # range while reducing a fixed sentence-count signal.
-        already_supported = str(document["doc_id"]) in supported_doc_ids
-        current_sentence_count = len(
-            [
-                sentence
-                for sentence in re.split(r"(?<=[.!?])\s+", document["text"])
-                if sentence
-            ]
-        )
-        minimum_extra = 0 if already_supported else 1
-        maximum_extra = max(minimum_extra, 7 - current_sentence_count)
-        selected = [
-            _compose_neutral_distractor(rng, sector=sector, used=used)
-            for _ in range(rng.randint(minimum_extra, maximum_extra))
+    used_sentences: set[str] = set()
+    used_predicates: set[str] = set()
+    extra_counts = [1] * len(documents)
+    remaining = len(_SHARED_PROCEDURAL_PREDICATES) - len(documents)
+    while remaining > 0 and any(count < 4 for count in extra_counts):
+        document_indices = list(range(len(documents)))
+        rng.shuffle(document_indices)
+        for document_index in document_indices:
+            if remaining == 0:
+                break
+            if extra_counts[document_index] < 4:
+                extra_counts[document_index] += 1
+                remaining -= 1
+    for document, extra_count in zip(documents, extra_counts, strict=True):
+        sentences = [
+            _compose_neutral_distractor(
+                rng,
+                sector=sector,
+                used_sentences=used_sentences,
+                used_predicates=used_predicates,
+            )
+            for _ in range(extra_count)
         ]
-        document["text"] = " ".join([document["text"].strip(), *selected])
+        document["text"] = " ".join((document["text"].strip(), *sentences))
         distractors.extend(
             {
                 "doc_id": document["doc_id"],
                 "anchor_quote": sentence,
                 "reason": _COMPOSED_DISTRACTOR_REASON,
             }
-            for sentence in selected
+            for sentence in sentences
         )
 
 
@@ -693,38 +445,19 @@ def _compose_neutral_distractor(
     rng: random.Random,
     *,
     sector: str,
-    used: set[str],
-    required_actor: str | None = None,
+    used_sentences: set[str],
+    used_predicates: set[str],
 ) -> str:
-    """Render one unique neutral span with overlapping authored-span lengths.
-
-    A single generated clause was systematically shorter than an authored rule
-    blended with that same clause. That made the three longest visible sentences
-    a strong prompt-only issue locator. Seeded one/two-clause composition keeps
-    the vocabulary shared and the lengths overlapping without restoring a fixed
-    filler pool or an exclusive lexical marker.
-    """
+    """Render one unique, grammatically stable neutral sentence."""
 
     for _ in range(100):
-        first = _compose_shared_procedural_clause(
+        sentence = _compose_shared_procedural_clause(
             rng,
             sector=sector,
-            used=used,
-            required_actor=required_actor,
+            used_predicates=used_predicates,
         )
-        sentence = first
-        # Required actor support must remain usable in bounded document views.
-        # One shared procedural clause is sufficient evidence; optional neutral
-        # distractors still use one/two-clause variation for length overlap.
-        if required_actor is None and rng.randrange(3) != 0:
-            second = _compose_shared_procedural_clause(
-                rng,
-                sector=sector,
-                used=used | {first},
-            )
-            sentence = f"{first.removesuffix('.')}; {second[0].lower()}{second[1:]}"
-        if sentence not in used:
-            used.add(sentence)
+        if sentence not in used_sentences:
+            used_sentences.add(sentence)
             return sentence
     raise RuntimeError("unable to compose a unique neutral distractor")
 
@@ -733,26 +466,28 @@ def _compose_shared_procedural_clause(
     rng: random.Random,
     *,
     sector: str,
-    used: set[str],
-    required_actor: str | None = None,
+    used_predicates: set[str],
 ) -> str:
-    """Render one clause from the distribution shared by all sentence roles."""
+    """Render one neutral clause using a scenario-unique predicate."""
 
     domain_contexts = tuple(
         context.format(sector=sector) for context in _SHARED_PROCEDURAL_CONTEXTS
     )
-    for _ in range(100):
-        context = rng.choice(domain_contexts)
-        actor = required_actor or rng.choice(_SHARED_PROCEDURAL_ACTORS)
-        predicate = rng.choice(_SHARED_PROCEDURAL_PREDICATES)
-        purpose = rng.choice(_SHARED_PROCEDURAL_PURPOSES)
-        if rng.randrange(2):
-            sentence = f"{context}, {actor} {predicate} {purpose}."
-        else:
-            sentence = f"{actor.capitalize()} {predicate} {context.lower()} {purpose}."
-        if sentence not in used:
-            return sentence
-    raise RuntimeError("unable to compose a unique shared procedural clause")
+    remaining_predicates = [
+        predicate
+        for predicate in _SHARED_PROCEDURAL_PREDICATES
+        if predicate not in used_predicates
+    ]
+    if not remaining_predicates:
+        raise RuntimeError("neutral procedural predicate pool exhausted")
+    predicate = rng.choice(remaining_predicates)
+    used_predicates.add(predicate)
+    context = rng.choice(domain_contexts)
+    actor = rng.choice(_SHARED_PROCEDURAL_ACTORS)
+    purpose = rng.choice(_SHARED_PROCEDURAL_PURPOSES)
+    if rng.randrange(2):
+        return f"{context}, {actor} {predicate} {purpose}."
+    return f"{actor.capitalize()} {predicate} {context.lower()} {purpose}."
 
 
 def _randomize_faction_structure(

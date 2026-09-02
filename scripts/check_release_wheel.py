@@ -486,7 +486,6 @@ def elicit_response(row):
                     "quote",
                     "type",
                     "diagnosis",
-                    "decision",
                     "related_evidence",
                 )
             }

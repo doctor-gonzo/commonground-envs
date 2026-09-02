@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import copy
 import json
 import math
 import os
@@ -18,7 +17,6 @@ from commonground_scenarios import (
     is_yes_no_question,
     validate_scenario,
 )
-from commonground_scenarios.generator import ACTOR_SUPPORT_REASON
 from commonground_scenarios.templates import VALUE_DIMENSIONS
 from commonground_scenarios.validation import PASS_THRESHOLD, YES_NO_AUXILIARIES
 from commonground_score import (
@@ -658,8 +656,6 @@ def scenario_to_row(
             "quote": plant["anchor_quote"],
             "type": plant["type"],
             "diagnosis": str(plant["canonical_question"]),
-            "decision": _canonical_decision_frame(plant, documents),
-            "decision_aliases": copy.deepcopy(plant["decision_aliases"]),
             "related_evidence": plant["related_evidence"],
             "related_document_text": (
                 next(
@@ -826,41 +822,12 @@ def build_document_view(
     selected_distractors = [
         item for item in scenario["distractors"] if item["doc_id"] in selected_doc_ids
     ]
-    actor_support_distractors = [
-        item for item in selected_distractors if item["reason"] == ACTOR_SUPPORT_REASON
-    ]
-    required_actor_support = [
-        item
-        for item in actor_support_distractors
-        if any(
-            plant["doc_id"] == item["doc_id"]
-            and any(
-                str(alias).casefold() in str(item["anchor_quote"]).casefold()
-                for alias in _plant_actor_aliases(plant)
-            )
-            for plant in selected_plants
-        )
-    ]
-    visible_neutral_distractors = _density_prefix(
-        [
-            item
-            for item in selected_distractors
-            if item["reason"] != ACTOR_SUPPORT_REASON
-        ],
+    visible_distractors = _density_prefix(
+        selected_distractors,
         distractor_density,
     )
-    # Regression guard: actor support is part of a scored candidate's public
-    # evidence, not optional noise. Density still controls only true neutral
-    # distractors, while support for omitted plants stays hidden.
-    visible_distractors = [*required_actor_support, *visible_neutral_distractors]
     visible_distractor_anchors = {
         (item["doc_id"], item["anchor_quote"]) for item in visible_distractors
-    }
-    visible_neutral_anchors = {
-        (item["doc_id"], item["anchor_quote"]) for item in visible_neutral_distractors
-    }
-    required_actor_support_anchors = {
-        (item["doc_id"], item["anchor_quote"]) for item in required_actor_support
     }
     all_distractor_anchors = {
         (item["doc_id"], item["anchor_quote"]) for item in scenario["distractors"]
@@ -889,119 +856,19 @@ def build_document_view(
                 for doc_id, anchor in sorted(visible_distractor_anchors)
                 if doc_id == document["doc_id"]
             ]
-            truncated = _truncate_document(text, docs_length, visible_anchors)
-
-            # Optional noise must not crowd a scored actor key out of a bounded
-            # excerpt. Prefer the ordinary density view; only discard its
-            # neutral spans when doing so preserves more complete candidates.
-            support_first_source = _remove_document_anchors(
-                text,
-                [
-                    anchor
-                    for doc_id, anchor in sorted(visible_neutral_anchors)
-                    if doc_id == document["doc_id"]
-                ],
-            )
-            support_first_source = " ".join(support_first_source.split())
-            protected_anchors = [plant["anchor_quote"] for plant in document_plants] + [
-                anchor
-                for doc_id, anchor in sorted(required_actor_support_anchors)
-                if doc_id == document["doc_id"]
-            ]
-            support_first = _truncate_document(
-                support_first_source,
-                docs_length,
-                protected_anchors,
-            )
-            standard_complete = sum(
-                plant["anchor_quote"] in truncated
-                and _plant_actor_aliases_visible(plant, truncated)
-                for plant in document_plants
-            )
-            support_first_complete = sum(
-                plant["anchor_quote"] in support_first
-                and _plant_actor_aliases_visible(plant, support_first)
-                for plant in document_plants
-            )
-            text = (
-                support_first
-                if support_first_complete > standard_complete
-                else truncated
-            )
+            text = _truncate_document(text, docs_length, visible_anchors)
         documents.append({**document, "text": text})
 
     visible_text_by_doc = {
         document["doc_id"]: document["text"] for document in documents
     }
-    initially_visible_plants = [
+    visible_plants = [
         plant
         for plant in selected_plants
         if plant["doc_id"] in visible_text_by_doc
         and plant["anchor_quote"] in visible_text_by_doc[plant["doc_id"]]
     ]
-    visible_plants = [
-        plant
-        for plant in initially_visible_plants
-        if _plant_actor_aliases_visible(
-            plant,
-            visible_text_by_doc[plant["doc_id"]],
-        )
-    ]
-    unobservable_anchors = {
-        (plant["doc_id"], plant["anchor_quote"])
-        for plant in initially_visible_plants
-        if plant not in visible_plants
-    }
-    if unobservable_anchors:
-        # A prefix may preserve an issue anchor but truncate its accepted actor
-        # evidence. Remove that now-unscorable issue rather than emitting a
-        # visible prompt with a hidden semantic answer-key requirement.
-        documents = [
-            {
-                **document,
-                "text": " ".join(
-                    _remove_document_anchors(
-                        document["text"],
-                        [
-                            anchor
-                            for doc_id, anchor in sorted(unobservable_anchors)
-                            if doc_id == document["doc_id"]
-                        ],
-                    ).split()
-                ),
-            }
-            for document in documents
-        ]
     return documents, visible_plants
-
-
-def _plant_actor_aliases(plant: Mapping[str, Any]) -> tuple[str, ...]:
-    """Return the exact prompt-visible actor aliases accepted by Find."""
-
-    decision = plant.get("decision")
-    canonical = (
-        str(decision.get("actor", "")).strip() if isinstance(decision, Mapping) else ""
-    )
-    decision_aliases = plant.get("decision_aliases")
-    raw_aliases = (
-        decision_aliases.get("actor", ())
-        if isinstance(decision_aliases, Mapping)
-        else ()
-    )
-    aliases = tuple(
-        str(alias).strip()
-        for alias in raw_aliases
-        if isinstance(alias, str) and alias.strip()
-    )
-    return aliases or ((canonical,) if canonical else ())
-
-
-def _plant_actor_aliases_visible(plant: Mapping[str, Any], text: str) -> bool:
-    """Require every accepted actor spelling to appear in the public document."""
-
-    folded_text = text.casefold()
-    aliases = _plant_actor_aliases(plant)
-    return bool(aliases) and all(alias.casefold() in folded_text for alias in aliases)
 
 
 def _remove_document_anchors(text: str, anchors: Sequence[str]) -> str:
@@ -1028,7 +895,7 @@ def render_prompt(
     question_object_label = "question object" + ("" if question_count == 1 else "s")
     lines = [
         "Find material ambiguities, contradictions, and gaps in these policy documents.",
-        "Use an exact or close quote from the relevant document for each finding.",
+        "Copy the complete sentence containing each issue into quote.",
         "Do not flag a passage merely because it discusses a rule; report only a concrete issue.",
         "",
         "Stakeholder factions for the companion question-utility metric:",
@@ -1054,9 +921,8 @@ def render_prompt(
                 "optional weight-zero companion; a findings-only root is valid:"
             ),
             (
-                '{"findings":[{"doc_id":"<document id>","quote":"<minimal passage>","type":"ambiguity|contradiction|gap",'
+                '{"findings":[{"doc_id":"<document id>","quote":"<complete sentence containing the issue>","type":"ambiguity|contradiction|gap",'
                 '"diagnosis":"<yes/no question naming the unresolved decision>",'
-                '"decision":{"actor":"<decision maker>","action":"<decision action>","condition":"<trigger or scope>","anchor_outcome":"<outcome preserving the primary rule>","alternative_outcome":"<clarification, fallback, or conflicting outcome>"},'
                 '"related_evidence":null|{"doc_id":"<conflicting document id>","quote":"<conflicting passage>"}}],'
                 '"questions":[{"doc_id":"<document id>","quote":"<passage>","type":"ambiguity|contradiction|gap",'
                 '"question":"<specific yes/no clarifying question>",'
@@ -1071,8 +937,10 @@ def render_prompt(
             f"Begin every diagnosis and optional question with one of: {YES_NO_AUXILIARY_LIST}. End it with exactly one question mark.",
             "For optional questions, agree means that faction predicts yes, disagree means no, and pass means no position.",
             "Set yes_choice to anchor when yes preserves or applies the primary quoted rule; set it to alternative when yes favors a clarification, fallback, or the second conflicting rule.",
-            "For every finding and question, fill all five decision fields from the visible documents. Those structured fields carry the scored decision meaning; diagnosis and question prose are presentation fields and must have valid yes/no form.",
-            "For contradictions, related_evidence must quote the second conflicting rule. For other finding types it must be null.",
+            "For each finding, diagnosis is a concise yes/no question that explains the unresolved decision. It is checked for valid yes/no form; evidence grounding, issue type, and relation determine correctness.",
+            "For optional questions, copy all five decision fields from the visible candidate profile.",
+            "For contradictions, related_evidence must quote the other conflicting rule. Either conflicting rule may be the primary quote. For other finding types related_evidence must be null.",
+            "Copy complete supporting sentences without ellipses or omitted words.",
         ]
     )
     return "\n".join(lines)
@@ -1598,37 +1466,6 @@ def _parse_decision_frame(raw_decision: Any) -> dict[str, str] | None:
     return decision
 
 
-def _accepted_decision_aliases(
-    plant: Mapping[str, Any],
-) -> dict[str, tuple[str, ...]] | None:
-    """Return the explicitly authored Find aliases or fail closed."""
-
-    raw_aliases = plant.get("decision_aliases")
-    if (
-        not isinstance(raw_aliases, Mapping)
-        or set(raw_aliases) != DECISION_FRAME_FIELDS
-    ):
-        return None
-    aliases: dict[str, tuple[str, ...]] = {}
-    for field in DECISION_FRAME_FIELDS:
-        raw_field_aliases = raw_aliases[field]
-        if (
-            not isinstance(raw_field_aliases, Sequence)
-            or isinstance(raw_field_aliases, str)
-            or not raw_field_aliases
-        ):
-            return None
-        accepted = tuple(
-            alias.strip()
-            for alias in raw_field_aliases
-            if isinstance(alias, str) and alias.strip()
-        )
-        if len(accepted) != len(raw_field_aliases):
-            return None
-        aliases[field] = accepted
-    return aliases
-
-
 def question_utility_score(
     candidates: Sequence[Mapping[str, Any]],
     planted: Sequence[Mapping[str, Any]],
@@ -1833,46 +1670,6 @@ def _normalize_contract_text(text: str) -> str:
     return " ".join(unicodedata.normalize("NFKC", text).casefold().split())
 
 
-def question_decision_similarity(
-    question: str,
-    plant: Mapping[str, Any],
-    *,
-    candidate_decision: Any = None,
-) -> float:
-    """Validate Find's public structured diagnosis contract.
-
-    The free-form diagnosis is only a yes/no presentation field. Semantic
-    credit comes from the submitted five-slot decision frame. Each slot must
-    equal one explicitly authored alias after Unicode, case, and whitespace
-    normalization; there is no fuzzy prose matcher.
-    """
-
-    if not is_yes_no_question(question):
-        return 0.0
-    submitted = _parse_decision_frame(candidate_decision)
-    if submitted is None:
-        return 0.0
-    reference = _parse_decision_frame(plant.get("decision"))
-    if reference is None:
-        return 0.0
-    aliases = _accepted_decision_aliases(plant)
-    if aliases is None:
-        return 0.0
-    for field in DECISION_FRAME_FIELDS:
-        submitted_text = _normalize_contract_text(submitted[field])
-        accepted = {
-            _normalize_contract_text(alias)
-            for alias in aliases.get(field, (reference[field],))
-        }
-        if submitted_text not in accepted:
-            return 0.0
-    if _normalize_contract_text(
-        submitted["anchor_outcome"]
-    ) == _normalize_contract_text(submitted["alternative_outcome"]):
-        return 0.0
-    return 1.0
-
-
 def _stances_for_yes_choice(
     plant: Mapping[str, Any], yes_choice: str
 ) -> Mapping[str, str]:
@@ -2068,7 +1865,6 @@ def _parse_findings_list(raw_findings: Any) -> list[dict[str, Any]] | None:
             "quote",
             "type",
             "diagnosis",
-            "decision",
             "related_evidence",
         }:
             return None
@@ -2082,9 +1878,6 @@ def _parse_findings_list(raw_findings: Any) -> list[dict[str, Any]] | None:
         ):
             return None
         if raw_finding["type"] not in FINDING_TYPES:
-            return None
-        decision = _parse_decision_frame(raw_finding["decision"])
-        if decision is None:
             return None
         related = raw_finding["related_evidence"]
         if related is not None and (
@@ -2106,7 +1899,6 @@ def _parse_findings_list(raw_findings: Any) -> list[dict[str, Any]] | None:
         findings.append(
             {
                 **dict(raw_finding),
-                "decision": decision,
                 "related_evidence": dict(related)
                 if isinstance(related, Mapping)
                 else None,
@@ -2129,8 +1921,6 @@ def parse_planted_items(
             "quote": str(item.get("quote", item.get("anchor_quote", ""))),
             "type": str(item["type"]),
             "diagnosis": str(item.get("diagnosis", item.get("canonical_question", ""))),
-            "decision": item.get("decision", item.get("decision_frame")),
-            "decision_aliases": item.get("decision_aliases"),
             "related_evidence": item.get("related_evidence"),
             "related_document_text": item.get("related_document_text"),
             "document_text": str(
@@ -2166,37 +1956,57 @@ def match_findings(
     }
     for candidate_index, candidate in enumerate(candidates):
         for plant_index, plant in enumerate(planted):
-            if candidate.get("doc_id") != plant.get("doc_id"):
+            normal_overlap = _evidence_span_overlap(
+                candidate,
+                expected_doc_id=str(plant.get("doc_id", "")),
+                expected_quote=str(plant.get("quote", "")),
+                document_text=str(plant.get("document_text", plant.get("quote", ""))),
+                quote_overlap_threshold=quote_overlap_threshold,
+                plant_coverage_threshold=plant_coverage_threshold,
+            )
+            reversed_overlap: float | None = None
+            related = plant.get("related_evidence")
+            if plant.get("type") == "contradiction" and isinstance(related, Mapping):
+                reversed_overlap = _evidence_span_overlap(
+                    candidate,
+                    expected_doc_id=str(related.get("doc_id", "")),
+                    expected_quote=str(related.get("quote", "")),
+                    document_text=str(
+                        plant.get("related_document_text", related.get("quote", ""))
+                    ),
+                    quote_overlap_threshold=quote_overlap_threshold,
+                    plant_coverage_threshold=plant_coverage_threshold,
+                )
+            primary_overlaps = [
+                overlap
+                for overlap in (normal_overlap, reversed_overlap)
+                if overlap is not None
+            ]
+            if not primary_overlaps:
                 continue
-            if not normalized_contiguous_quote(
-                candidate.get("quote", ""),
-                plant.get("document_text", plant.get("quote", "")),
+            localization_overlap = max(primary_overlaps)
+            localization_adjacency[candidate_index].append(
+                (localization_overlap, plant_index)
+            )
+            if candidate.get("type") != plant.get("type"):
+                continue
+            typed_adjacency[candidate_index].append((localization_overlap, plant_index))
+            if not _finding_diagnosis_matches(candidate, plant):
+                continue
+            diagnosis_adjacency[candidate_index].append(
+                (localization_overlap, plant_index)
+            )
+            relation_overlaps: list[float] = []
+            if normal_overlap is not None and _related_evidence_matches(
+                candidate, plant, reversed_pair=False
             ):
-                continue
-            plant_coverage = normalized_plant_coverage(
-                candidate.get("quote", ""), plant.get("quote", "")
-            )
-            if plant_coverage < plant_coverage_threshold:
-                continue
-            precision = normalized_quote_precision(
-                candidate.get("quote", ""), plant.get("quote", "")
-            )
-            if precision < QUOTE_PRECISION_THRESHOLD:
-                continue
-            overlap = normalized_quote_overlap(
-                candidate.get("quote", ""), plant.get("quote", "")
-            )
-            if overlap >= quote_overlap_threshold:
-                localization_adjacency[candidate_index].append((overlap, plant_index))
-                if candidate.get("type") != plant.get("type"):
-                    continue
-                typed_adjacency[candidate_index].append((overlap, plant_index))
-                if not _finding_diagnosis_matches(candidate, plant):
-                    continue
-                diagnosis_adjacency[candidate_index].append((overlap, plant_index))
-                if not _related_evidence_matches(candidate, plant):
-                    continue
-                adjacency[candidate_index].append((overlap, plant_index))
+                relation_overlaps.append(normal_overlap)
+            if reversed_overlap is not None and _related_evidence_matches(
+                candidate, plant, reversed_pair=True
+            ):
+                relation_overlaps.append(reversed_overlap)
+            if relation_overlaps:
+                adjacency[candidate_index].append((max(relation_overlaps), plant_index))
     for graph in (
         localization_adjacency,
         typed_adjacency,
@@ -2291,21 +2101,44 @@ def _finding_diagnosis_matches(
     candidate: Mapping[str, Any], plant: Mapping[str, Any]
 ) -> bool:
     diagnosis = str(candidate.get("diagnosis", ""))
-    if not plant.get("diagnosis"):
-        return False
-    return (
-        is_yes_no_question(diagnosis)
-        and question_decision_similarity(
-            diagnosis,
-            plant,
-            candidate_decision=candidate.get("decision"),
-        )
-        > 0
-    )
+    return bool(plant.get("diagnosis")) and is_yes_no_question(diagnosis)
+
+
+def _evidence_span_overlap(
+    candidate: Mapping[str, Any],
+    *,
+    expected_doc_id: str,
+    expected_quote: str,
+    document_text: str,
+    quote_overlap_threshold: float,
+    plant_coverage_threshold: float,
+) -> float | None:
+    """Return overlap for a grounded candidate span, or ``None`` on failure."""
+
+    candidate_quote = str(candidate.get("quote", ""))
+    if candidate.get("doc_id") != expected_doc_id:
+        return None
+    if not normalized_contiguous_quote(candidate_quote, document_text):
+        return None
+    if (
+        normalized_plant_coverage(candidate_quote, expected_quote)
+        < plant_coverage_threshold
+    ):
+        return None
+    if (
+        normalized_quote_precision(candidate_quote, expected_quote)
+        < QUOTE_PRECISION_THRESHOLD
+    ):
+        return None
+    overlap = normalized_quote_overlap(candidate_quote, expected_quote)
+    return overlap if overlap >= quote_overlap_threshold else None
 
 
 def _related_evidence_matches(
-    candidate: Mapping[str, Any], plant: Mapping[str, Any]
+    candidate: Mapping[str, Any],
+    plant: Mapping[str, Any],
+    *,
+    reversed_pair: bool,
 ) -> bool:
     expected = plant.get("related_evidence")
     actual = candidate.get("related_evidence")
@@ -2315,24 +2148,28 @@ def _related_evidence_matches(
         return actual is None and expected is None
     if not isinstance(expected, Mapping) or not isinstance(actual, Mapping):
         return False
+    related_candidate = {
+        "doc_id": actual.get("doc_id"),
+        "quote": actual.get("quote"),
+    }
+    if reversed_pair:
+        expected_doc_id = str(plant.get("doc_id", ""))
+        expected_quote = str(plant.get("quote", ""))
+        document_text = str(plant.get("document_text", expected_quote))
+    else:
+        expected_doc_id = str(expected.get("doc_id", ""))
+        expected_quote = str(expected.get("quote", ""))
+        document_text = str(plant.get("related_document_text", expected_quote))
     return (
-        actual.get("doc_id") == expected.get("doc_id")
-        and normalized_contiguous_quote(
-            str(actual.get("quote", "")),
-            str(plant.get("related_document_text", expected.get("quote", ""))),
+        _evidence_span_overlap(
+            related_candidate,
+            expected_doc_id=expected_doc_id,
+            expected_quote=expected_quote,
+            document_text=document_text,
+            quote_overlap_threshold=QUOTE_OVERLAP_THRESHOLD,
+            plant_coverage_threshold=PLANT_COVERAGE_THRESHOLD,
         )
-        and normalized_quote_overlap(
-            str(actual.get("quote", "")), str(expected.get("quote", ""))
-        )
-        >= QUOTE_OVERLAP_THRESHOLD
-        and normalized_plant_coverage(
-            str(actual.get("quote", "")), str(expected.get("quote", ""))
-        )
-        >= PLANT_COVERAGE_THRESHOLD
-        and normalized_quote_precision(
-            str(actual.get("quote", "")), str(expected.get("quote", ""))
-        )
-        >= QUOTE_PRECISION_THRESHOLD
+        is not None
     )
 
 

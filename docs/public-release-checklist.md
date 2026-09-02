@@ -82,5 +82,5 @@ The release may be described as a reproducible synthetic benchmark with proper
 Predict scoring and grounded Elicit contracts. It must not be described as
 real-human preference inference, real information gain, independent-domain
 generalization, or proven RL utility without separate evidence. Disclose that
-first-clause procedural placement can simplify Find localization and that one
-public trade-off vector identifies the Ask winner in 90 of 100 evaluation rows.
+one public trade-off vector identifies the Ask winner in 90 of 100 evaluation
+rows.

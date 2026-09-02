@@ -100,14 +100,7 @@ def test_generated_scenario_contains_complete_planted_structure(
         and all(value.strip() for value in plant["decision"].values())
         for plant in scenario["planted_items"]
     )
-    assert all(
-        set(plant["decision_aliases"]) == set(plant["decision"])
-        and all(
-            aliases[0] == plant["decision"][field]
-            for field, aliases in plant["decision_aliases"].items()
-        )
-        for plant in scenario["planted_items"]
-    )
+    assert all("decision_aliases" not in plant for plant in scenario["planted_items"])
     assert all(
         "For decisions involving" not in faction["summary"]
         and "leans toward yes" not in faction["summary"]
@@ -399,11 +392,7 @@ def test_additional_heldout_distractors_are_compositional_and_role_neutral() -> 
             generated_context = [
                 distractor
                 for distractor in scenario["distractors"]
-                if distractor["reason"]
-                in {
-                    generator_module._COMPOSED_DISTRACTOR_REASON,
-                    generator_module.ACTOR_SUPPORT_REASON,
-                }
+                if distractor["reason"] == generator_module._COMPOSED_DISTRACTOR_REASON
             ]
             composed = [
                 distractor
@@ -444,47 +433,21 @@ def test_additional_heldout_distractors_are_compositional_and_role_neutral() -> 
                 == 5
             )
 
-    # Every semantic role sees the whole supported length range, rather than a
-    # type-specific count. Seeded clause composition also avoids a finite list
-    # of exact filler sentences across the release-sized matrix.
+    # Every role includes authored content plus neutral context, without
+    # blending generated clauses into the scored policy sentences.
     for counts in sentence_counts_by_role.values():
-        assert set(counts) == set(range(2, 8))
-    assert len(set(count_profiles)) >= 80
+        assert min(counts) >= 2
     assert len(set(composed_anchors)) / len(composed_anchors) >= 0.99
 
 
-def test_every_accepted_actor_alias_has_authored_or_classified_support() -> None:
-    """Actor answer-key concepts must be public evidence, never hidden labels."""
+def test_find_alias_and_actor_support_surfaces_are_absent() -> None:
+    scenario = generate_scenario(8200, HELDOUT_TEMPLATES[0])
 
-    for template_index, template in enumerate(HELDOUT_TEMPLATES):
-        for repetition in range(5):
-            scenario = generate_scenario(
-                8200 + template_index * 5 + repetition,
-                template,
-            )
-            documents = {
-                document["doc_id"]: document["text"].casefold()
-                for document in scenario["documents"]
-            }
-            support = [
-                distractor
-                for distractor in scenario["distractors"]
-                if distractor["reason"] == generator_module.ACTOR_SUPPORT_REASON
-            ]
-            for plant in scenario["planted_items"]:
-                for alias in plant["decision_aliases"]["actor"]:
-                    assert alias.casefold() in documents[plant["doc_id"]]
-            assert all(
-                any(
-                    plant["doc_id"] == distractor["doc_id"]
-                    and any(
-                        alias.casefold() in distractor["anchor_quote"].casefold()
-                        for alias in plant["decision_aliases"]["actor"]
-                    )
-                    for plant in scenario["planted_items"]
-                )
-                for distractor in support
-            )
+    assert all("decision_aliases" not in plant for plant in scenario["planted_items"])
+    assert all(
+        "actor-support" not in distractor["reason"]
+        for distractor in scenario["distractors"]
+    )
 
 
 def test_eval_matrix_has_balanced_anchor_positions_and_no_decision_value_ties() -> None:
@@ -654,160 +617,33 @@ def test_validator_allows_unlisted_semantic_paraphrases_as_distinct_identities()
     validate_scenario(scenario)
 
 
-def test_validator_rejects_decision_aliases_without_canonical_first() -> None:
+def test_validator_rejects_removed_decision_aliases_surface() -> None:
     scenario = generate_scenario(17, HELDOUT_TEMPLATES[0])
     plant = scenario["planted_items"][0]
-    plant["decision_aliases"]["actor"] = ["an unrelated role"]
-
-    with pytest.raises(
-        ScenarioValidationError, match="must begin with the canonical decision field"
-    ):
-        validate_scenario(scenario)
-
-
-def test_validator_rejects_hidden_only_actor_aliases() -> None:
-    scenario = generate_scenario(17, HELDOUT_TEMPLATES[0])
-    plant = scenario["planted_items"][0]
-    plant["decision"]["actor"] = "a hidden review council"
-    plant["decision_aliases"]["actor"] = ["a hidden review council"]
-
-    with pytest.raises(
-        ScenarioValidationError, match="must all be source-observable roles"
-    ):
-        validate_scenario(scenario)
-
-
-def test_validator_rejects_any_hidden_actor_alias() -> None:
-    """Validation and runtime must enforce the same all-alias visibility rule."""
-
-    scenario = generate_scenario(17, HELDOUT_TEMPLATES[0])
-    plant = scenario["planted_items"][0]
-    plant["decision_aliases"]["actor"].append("a hidden review council")
-
-    with pytest.raises(
-        ScenarioValidationError, match="must all be source-observable roles"
-    ):
-        validate_scenario(scenario)
-
-
-def test_community_clinic_actor_alias_is_explicit_and_source_observable() -> None:
-    template = next(
-        candidate
-        for candidate in HELDOUT_TEMPLATES
-        if candidate.template_id == "community-clinic-scheduling"
-    )
-    scenario = generate_scenario(8214, template)
-    plant = next(
-        item for item in scenario["planted_items"] if item["type"] == "ambiguity"
-    )
-    all_document_text = " ".join(document["text"] for document in scenario["documents"])
-
-    assert "community health scheduling team" in plant["decision_aliases"]["actor"]
-    assert "community health scheduling team" in all_document_text
-
-
-def _decision_support_tokens(text: str) -> set[str]:
-    stopwords = {
-        "a",
-        "an",
-        "and",
-        "are",
-        "be",
-        "for",
-        "in",
-        "is",
-        "of",
-        "or",
-        "the",
-        "to",
-        "when",
-        "while",
-        "with",
-        "without",
+    plant["decision_aliases"] = {
+        field: [value] for field, value in plant["decision"].items()
     }
-    return set(re.findall(r"[^\W_]+", text.casefold())) - stopwords
+
+    with pytest.raises(ScenarioValidationError, match="fields mismatch"):
+        validate_scenario(scenario)
 
 
-def test_every_decision_slot_has_a_prompt_supported_alias() -> None:
-    """Keep hidden authoring labels from becoming required answer vocabulary."""
-
+def test_authored_ask_decisions_preserve_generated_semantic_scope() -> None:
     for template_index, template in enumerate(ALL_TEMPLATES):
         for repetition in range(5):
             seed = 8200 + template_index * 5 + repetition
-            scenario = generate_scenario(
-                seed,
-                template,
-            )
-            visible_prompt = " ".join(
-                [
-                    *(document["text"] for document in scenario["documents"]),
-                    *(
-                        f"{faction['name']} {faction['summary']}"
-                        for faction in scenario["factions"]
-                    ),
-                ]
-            )
-            visible_tokens = _decision_support_tokens(visible_prompt)
-            documents_by_id = {
-                document["doc_id"]: document["text"]
-                for document in scenario["documents"]
-            }
+            scenario = generate_scenario(seed, template)
             semantic_scope = generator_module.SEMANTIC_SCOPES[
                 seed % len(generator_module.SEMANTIC_SCOPES)
             ]
-            for plant in scenario["planted_items"]:
-                # Actors are concrete roles: at least one accepted form must be
-                # literally present in the exact evidence documents consulted
-                # by the scorer. Other slots may express a missing-policy
-                # alternative, but must still recover a material share of their
-                # concept words from the prompt.
-                actor_evidence = documents_by_id[plant["doc_id"]]
-                if plant["related_evidence"] is not None:
-                    actor_evidence = " ".join(
-                        (
-                            actor_evidence,
-                            documents_by_id[plant["related_evidence"]["doc_id"]],
-                        )
-                    )
-                assert any(
-                    alias.casefold() in actor_evidence.casefold()
-                    for alias in plant["decision_aliases"]["actor"]
-                ), (template.template_id, plant["type"], "actor")
-                if semantic_scope is not None:
-                    assert all(
-                        semantic_scope in alias
-                        for alias in plant["decision_aliases"]["condition"]
-                    ), (template.template_id, plant["type"], "condition-scope")
-                for field, aliases in plant["decision_aliases"].items():
-                    assert any(
-                        (
-                            len(_decision_support_tokens(alias) & visible_tokens)
-                            / len(_decision_support_tokens(alias))
-                        )
-                        >= 0.25
-                        for alias in aliases
-                        if _decision_support_tokens(alias)
-                    ), (template.template_id, plant["type"], field)
+            if semantic_scope is not None:
+                assert all(
+                    semantic_scope in plant["decision"]["condition"]
+                    for plant in scenario["planted_items"]
+                )
 
 
-def test_visible_organization_actor_and_scoped_condition_alias_regressions() -> None:
-    housing = generate_scenario(
-        8215,
-        next(
-            template
-            for template in HELDOUT_TEMPLATES
-            if template.template_id == "cooperative-housing-maintenance"
-        ),
-    )
-    assert housing["scenario_id"] == "cooperative-housing-maintenance-90b73d1b4b5b"
-    housing_ambiguity = next(
-        plant for plant in housing["planted_items"] if plant["type"] == "ambiguity"
-    )
-    assert (
-        "the cooperative housing maintenance team"
-        in housing_ambiguity["decision_aliases"]["actor"]
-    )
-
+def test_scoped_decision_regression_has_no_find_alias_table() -> None:
     clinic = generate_scenario(
         8214,
         next(
@@ -819,19 +655,14 @@ def test_visible_organization_actor_and_scoped_condition_alias_regressions() -> 
     scope = "when the affected person cannot provide the usual record"
     assert clinic["scenario_id"] == "community-clinic-scheduling-6c51670a331a"
     assert all(
-        scope in alias
-        for plant in clinic["planted_items"]
-        for alias in plant["decision_aliases"]["condition"]
+        scope in plant["decision"]["condition"] for plant in clinic["planted_items"]
     )
+    assert all("decision_aliases" not in plant for plant in clinic["planted_items"])
 
 
-def test_shared_procedural_vocabulary_is_not_a_distractor_classifier() -> None:
-    """Every procedural predicate must occur in both issue and neutral spans."""
+def test_neutral_procedural_predicates_do_not_repeat_within_a_scenario() -> None:
+    """Neutral filler must not invent repeated cross-document responsibilities."""
 
-    roles_by_predicate: dict[str, set[str]] = {
-        predicate: set() for predicate in generator_module._SHARED_PROCEDURAL_PREDICATES
-    }
-    distractor_clause_counts: set[int] = set()
     for template_index, template in enumerate(HELDOUT_TEMPLATES):
         if not template.balance_type_neutral_distractors:
             continue
@@ -840,41 +671,29 @@ def test_shared_procedural_vocabulary_is_not_a_distractor_classifier() -> None:
                 8200 + template_index * 5 + repetition,
                 template,
             )
-            for role, spans in (
-                (
-                    "plant",
-                    [plant["anchor_quote"] for plant in scenario["planted_items"]],
-                ),
-                (
-                    "distractor",
-                    [
-                        distractor["anchor_quote"]
-                        for distractor in scenario["distractors"]
-                    ],
-                ),
-            ):
-                for span in spans:
-                    matching_predicates = [
-                        predicate
-                        for predicate in generator_module._SHARED_PROCEDURAL_PREDICATES
-                        if predicate in span
-                    ]
-                    assert matching_predicates
-                    for predicate in matching_predicates:
-                        roles_by_predicate[predicate].add(role)
-                    if role == "distractor":
-                        distractor_clause_counts.add(
-                            sum(
-                                span.count(predicate)
-                                for predicate in matching_predicates
-                            )
-                        )
+            generated = [
+                distractor["anchor_quote"]
+                for distractor in scenario["distractors"]
+                if distractor["reason"] == generator_module._COMPOSED_DISTRACTOR_REASON
+            ]
+            used_predicates = [
+                predicate
+                for sentence in generated
+                for predicate in generator_module._SHARED_PROCEDURAL_PREDICATES
+                if predicate in sentence
+            ]
+            authored_spans = [
+                plant["anchor_quote"] for plant in scenario["planted_items"]
+            ]
 
-    assert roles_by_predicate
-    assert all(
-        roles == {"plant", "distractor"} for roles in roles_by_predicate.values()
-    )
-    assert {1, 2} <= distractor_clause_counts
+            assert len(generated) == len(generator_module._SHARED_PROCEDURAL_PREDICATES)
+            assert len(used_predicates) == len(generated)
+            assert len(set(used_predicates)) == len(used_predicates)
+            assert not any(
+                predicate in span
+                for predicate in generator_module._SHARED_PROCEDURAL_PREDICATES
+                for span in authored_spans
+            )
 
 
 def test_sector_team_marker_cannot_recover_planted_spans() -> None:
@@ -917,7 +736,6 @@ def test_sector_team_marker_cannot_recover_planted_spans() -> None:
     distractor_rate = marked_distractors / total_distractors
     assert plant_rate < 0.05
     assert distractor_rate > 0.0
-    assert abs(plant_rate - distractor_rate) < 0.10
     assert sum(localization_f1) / len(localization_f1) < 0.05
 
 

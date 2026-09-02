@@ -141,7 +141,7 @@
     "plantedItem": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["plant_id", "doc_id", "anchor_quote", "type", "canonical_question", "decision", "decision_aliases", "value_weights", "alternative_stances", "canonical_yes_choice", "target_stances", "decision_value", "related_evidence"],
+      "required": ["plant_id", "doc_id", "anchor_quote", "type", "canonical_question", "decision", "value_weights", "alternative_stances", "canonical_yes_choice", "target_stances", "decision_value", "related_evidence"],
       "properties": {
         "plant_id": {"$ref": "#/$defs/identifier"},
         "doc_id": {"$ref": "#/$defs/identifier"},
@@ -152,7 +152,6 @@
           "pattern": "^(Am|Are|Can|Could|Did|Do|Does|Had|Has|Have|Is|May|Might|Must|Shall|Should|Was|Were|Will|Would) [^\\s?]+(?: [^\\s?]+)*\\?(?![\\s\\S])"
         },
         "decision": {"$ref": "#/$defs/decisionFrame"},
-        "decision_aliases": {"$ref": "#/$defs/decisionAliases"},
         "value_weights": {
           "type": "object",
           "additionalProperties": false,
@@ -204,25 +203,6 @@
         "anchor_outcome": {"type": "string", "minLength": 1, "maxLength": 240},
         "alternative_outcome": {"type": "string", "minLength": 1, "maxLength": 240}
       }
-    },
-    "decisionAliases": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["actor", "action", "condition", "anchor_outcome", "alternative_outcome"],
-      "properties": {
-        "actor": {"$ref": "#/$defs/decisionAliasList"},
-        "action": {"$ref": "#/$defs/decisionAliasList"},
-        "condition": {"$ref": "#/$defs/decisionAliasList"},
-        "anchor_outcome": {"$ref": "#/$defs/decisionAliasList"},
-        "alternative_outcome": {"$ref": "#/$defs/decisionAliasList"}
-      }
-    },
-    "decisionAliasList": {
-      "type": "array",
-      "minItems": 1,
-      "maxItems": 8,
-      "uniqueItems": true,
-      "items": {"type": "string", "minLength": 1, "maxLength": 240}
     },
     "distractor": {
       "type": "object",

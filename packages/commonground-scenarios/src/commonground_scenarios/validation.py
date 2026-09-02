@@ -244,7 +244,6 @@ def _validate_plants(
                 "type",
                 "canonical_question",
                 "decision",
-                "decision_aliases",
                 "value_weights",
                 "alternative_stances",
                 "canonical_yes_choice",
@@ -305,48 +304,6 @@ def _validate_plants(
                 raise ScenarioValidationError(
                     f"planted_items[{index}].decision.{field} exceeds 240 characters"
                 )
-        decision_aliases = _exact_object(
-            plant["decision_aliases"],
-            DECISION_FIELDS,
-            f"planted_items[{index}].decision_aliases",
-        )
-        for field in sorted(DECISION_FIELDS):
-            raw_aliases = decision_aliases[field]
-            if not isinstance(raw_aliases, list) or not 1 <= len(raw_aliases) <= 8:
-                raise ScenarioValidationError(
-                    f"planted_items[{index}].decision_aliases.{field} must contain one to eight aliases"
-                )
-            aliases_for_field = [
-                _nonempty_text(
-                    alias,
-                    f"planted_items[{index}].decision_aliases.{field}[{alias_index}]",
-                )
-                for alias_index, alias in enumerate(raw_aliases)
-            ]
-            if any(len(alias) > 240 for alias in aliases_for_field):
-                raise ScenarioValidationError(
-                    f"planted_items[{index}].decision_aliases.{field} exceeds 240 characters"
-                )
-            if len(set(aliases_for_field)) != len(aliases_for_field):
-                raise ScenarioValidationError(
-                    f"planted_items[{index}].decision_aliases.{field} must be unique"
-                )
-            if aliases_for_field[0] != decision[field]:
-                raise ScenarioValidationError(
-                    f"planted_items[{index}].decision_aliases.{field} must begin with the canonical decision field"
-                )
-        # Actor labels are concrete source roles, unlike a gap's deliberately
-        # missing alternative. Every spelling accepted by the Find scorer
-        # must occur in the plant's own evidence document; otherwise a custom
-        # scenario can validate successfully but lose the plant when the
-        # runtime enforces prompt observability.
-        if not all(
-            alias.casefold() in str(documents[doc_id]["text"]).casefold()
-            for alias in decision_aliases["actor"]
-        ):
-            raise ScenarioValidationError(
-                f"planted_items[{index}].decision_aliases.actor must all be source-observable roles"
-            )
         weights = _validate_value_vector(
             plant["value_weights"],
             f"planted_items[{index}].value_weights",

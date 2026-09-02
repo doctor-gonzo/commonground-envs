@@ -39,7 +39,7 @@ Each synthetic scenario has public documents, issue-independent faction value
 vectors, and exactly one ambiguity, contradiction, and gap. Every issue authors:
 
 - one primary passage;
-- one five-slot decision frame;
+- one five-slot decision frame exposed only in Ask;
 - one canonical yes/no presentation question;
 - one explicit yes-side orientation;
 - one value trade-off vector;
@@ -58,13 +58,11 @@ from authored template references, not lexical search.
 ## Elicit Find
 
 Strict Find scoring uses one-to-one F1. Candidate and gold findings match only
-when source grounding, issue type, the five decision slots, and required
-contradiction evidence match. Diagnosis prose must have yes/no form but carries
-no lexical answer key.
-
-Find permits only explicitly authored aliases in the same decision slot. Human
-text is normalized with Unicode NFKC, case folding, and whitespace collapse.
-Opaque IDs and JSON keys are exact.
+when visible-source grounding, issue type, and required contradiction evidence
+match. Diagnosis prose must have yes/no form but carries no lexical answer key.
+Find has no submitted decision frame or alias table. Contradiction evidence is
+an unordered pair: either authored passage may be primary. Opaque IDs and JSON
+keys remain exact.
 
 The optional shaped reward is the mean of four cumulative stage F1 scores:
 localization, type, diagnosis, and final relation. The final relation stage is
@@ -130,9 +128,6 @@ release path.
 - Synthetic template separation is weaker than an independently implemented
   private generator.
 - Model-free ceilings demonstrate scorer reachability, not model capability.
-- Generator clause ordering leaves a source-aware first-clause shortcut for
-  locating candidate issue sentences. It does not supply the scored type,
-  decision frame, or relationship, but limits what localization demonstrates.
 - The same public trade-off vector identifies the winning Ask candidate in 90
   of 100 evaluation rows, so fixed-corpus selection need not demonstrate
   general utility computation.

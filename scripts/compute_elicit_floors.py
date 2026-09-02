@@ -62,13 +62,6 @@ def _generic_finding(
         "quote": quote,
         "type": issue_type,
         "diagnosis": "Should this documented rule be clarified?",
-        "decision": {
-            "actor": "the documented decision maker",
-            "action": "apply the documented rule",
-            "condition": "the documented condition occurs",
-            "anchor_outcome": "preserve the documented rule",
-            "alternative_outcome": "clarify the documented rule",
-        },
         "related_evidence": None,
     }
 

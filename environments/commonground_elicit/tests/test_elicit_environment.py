@@ -41,7 +41,7 @@ from commonground_scenarios import (
     generate_scenario,
     validate_scenario,
 )
-from commonground_scenarios.generator import ACTOR_SUPPORT_REASON, orient_stances
+from commonground_scenarios.generator import orient_stances
 from commonground_scenarios.templates import VALUE_DIMENSIONS
 from commonground_scenarios.validation import (
     PASS_THRESHOLD,
@@ -71,7 +71,6 @@ FINDING_RESPONSE_FIELDS = (
     "quote",
     "type",
     "diagnosis",
-    "decision",
     "related_evidence",
 )
 
@@ -552,16 +551,13 @@ def test_malformed_stance_values_fail_closed_without_raising(
 
 
 @pytest.mark.parametrize("malformed_field", [None, [], {}, True, 1, 1.0])
-@pytest.mark.parametrize("task", ["find", "elicit-ask"])
 def test_malformed_decision_fields_fail_closed_without_raising(
     malformed_field: Any,
-    task: str,
 ) -> None:
-    env = load_environment(task=task, question_count=1)
+    env = load_environment(task="elicit-ask", question_count=1)
     row = dict(env.get_eval_dataset()[0])
     response = correct_response_from_row(row)
-    response_key = "findings" if task == "find" else "questions"
-    response[response_key][0]["decision"]["actor"] = malformed_field
+    response["questions"][0]["decision"]["actor"] = malformed_field
 
     state = score_row(env, row, response)
 
@@ -1088,7 +1084,6 @@ def test_false_positive_strictly_reduces_precision_and_f1() -> None:
             "quote": "This is a rule.",
             "type": "ambiguity",
             "diagnosis": "Should this rule apply?",
-            "decision": answer["findings"][0]["decision"],
             "related_evidence": None,
         }
     )
@@ -1108,7 +1103,6 @@ def test_type_hedging_same_span_under_three_types_is_rejected() -> None:
             "quote": planted["quote"],
             "type": finding_type,
             "diagnosis": planted["diagnosis"],
-            "decision": planted["decision"],
             "related_evidence": (
                 planted["related_evidence"] if finding_type == "contradiction" else None
             ),
@@ -1135,6 +1129,30 @@ def test_contradiction_requires_second_conflicting_rule() -> None:
     assert 0.0 < state["reward"] < 1.0
     assert state["metrics"]["finding_localization_recall"] == 1.0
     assert state["metrics"]["finding_type_accuracy"] == 1.0
+
+
+def test_contradiction_accepts_the_same_evidence_pair_in_either_direction() -> None:
+    env = load_environment()
+    row = dict(env.get_eval_dataset()[0])
+    response = correct_response_from_row(row)
+    contradiction = next(
+        finding
+        for finding in response["findings"]
+        if finding["type"] == "contradiction"
+    )
+    primary = {
+        "doc_id": contradiction["doc_id"],
+        "quote": contradiction["quote"],
+    }
+    related = dict(contradiction["related_evidence"])
+    contradiction["doc_id"] = related["doc_id"]
+    contradiction["quote"] = related["quote"]
+    contradiction["related_evidence"] = primary
+
+    state = score_row(env, row, response)
+
+    assert state["reward"] == 1.0
+    assert state["metrics"]["finding_relation_recall"] == 1.0
 
 
 def test_contradiction_rejects_broad_second_document_evidence() -> None:
@@ -2087,19 +2105,16 @@ def test_distractor_density_removes_hidden_near_miss_passages() -> None:
 
     for distractor in scenario["distractors"]:
         assert distractor["anchor_quote"] in all_text
-        if distractor["reason"] == ACTOR_SUPPORT_REASON:
-            assert distractor["anchor_quote"] in no_distractor_text
-        else:
-            assert distractor["anchor_quote"] not in no_distractor_text
+        assert distractor["anchor_quote"] not in no_distractor_text
 
 
 @pytest.mark.parametrize("distractor_density", [0.0, 0.5, 1.0])
 @pytest.mark.parametrize("docs_length", [None, 400, 800, 1_200])
-def test_every_retained_plant_actor_alias_is_visible_across_release_views(
+def test_every_retained_plant_anchor_is_visible_across_release_views(
     distractor_density: float,
     docs_length: int | None,
 ) -> None:
-    """Density/truncation controls cannot create hidden semantic answer keys."""
+    """Density/truncation controls cannot retain a hidden issue anchor."""
 
     retained = 0
     for template_index, template in enumerate(HELDOUT_TEMPLATES):
@@ -2122,10 +2137,7 @@ def test_every_retained_plant_actor_alias_is_visible_across_release_views(
             visible_ids = {plant["plant_id"] for plant in visible_plants}
             retained += len(visible_plants)
             for plant in visible_plants:
-                assert all(
-                    alias.casefold() in text_by_doc[plant["doc_id"]]
-                    for alias in plant["decision_aliases"]["actor"]
-                )
+                assert plant["anchor_quote"].casefold() in text_by_doc[plant["doc_id"]]
             for plant in scenario["planted_items"]:
                 if (
                     plant["doc_id"] in text_by_doc
@@ -2245,20 +2257,11 @@ def candidate_for_plant(
 
 
 def complete_find_contract(item: dict[str, Any]) -> dict[str, Any]:
-    """Attach the smallest complete authored Find contract to a span fixture."""
+    """Attach the smallest complete Find contract to a span fixture."""
 
-    decision = {
-        "actor": "the policy owner",
-        "action": "clarify the documented decision",
-        "condition": "the documented condition applies",
-        "anchor_outcome": "retain the documented outcome",
-        "alternative_outcome": "adopt the clarified alternative",
-    }
     return {
         **item,
         "diagnosis": "Should the policy owner clarify the documented decision?",
-        "decision": decision,
-        "decision_aliases": {field: [value] for field, value in decision.items()},
     }
 
 
@@ -2295,22 +2298,6 @@ def semantic_contract_plant(issue_type: str) -> dict[str, Any]:
                 "alternative_outcome": (
                     "define observable conditions before pausing the route"
                 ),
-            },
-            "decision_aliases": {
-                "actor": ["dispatchers", "route dispatchers"],
-                "action": ["pause a route", "pause unsafe routes"],
-                "condition": [
-                    "conditions may be unsafe",
-                    "travel conditions may be unsafe",
-                ],
-                "anchor_outcome": [
-                    "pause the route when conditions are unsafe",
-                    "pause unsafe routes",
-                ],
-                "alternative_outcome": [
-                    "define observable conditions before pausing the route",
-                    "define observable unsafe conditions before a route pause",
-                ],
             },
             "yes_choice": "anchor",
             "related_evidence": None,
@@ -2353,22 +2340,6 @@ def semantic_contract_plant(issue_type: str) -> dict[str, Any]:
                     "only the assigned dispatcher transfers the delayed load"
                 ),
             },
-            "decision_aliases": {
-                "actor": ["duty coordinator", "on-duty coordinator"],
-                "action": ["transfer a delayed load", "transfer delayed loads"],
-                "condition": [
-                    "after hours when the assigned dispatcher is unavailable",
-                    "after hours while the assigned dispatcher is unavailable",
-                ],
-                "anchor_outcome": [
-                    "the duty coordinator transfers the delayed load to an available route",
-                    "the coordinator transfers the delayed load to an available route",
-                ],
-                "alternative_outcome": [
-                    "only the assigned dispatcher transfers the delayed load",
-                    "the assigned dispatcher alone transfers the delayed load",
-                ],
-            },
             "yes_choice": "anchor",
             "related_evidence": {
                 "doc_id": "dispatcher-rule",
@@ -2402,19 +2373,6 @@ def semantic_contract_plant(issue_type: str) -> dict[str, Any]:
                     "deliver a notice through a non-digital channel without a "
                     "verified address"
                 ),
-            },
-            "decision_aliases": {
-                "actor": ["staff", "notice staff"],
-                "action": ["deliver resident notices"],
-                "condition": [
-                    "a resident has no verified address",
-                    "a resident lacks a verified address",
-                ],
-                "anchor_outcome": ["mail notices to the verified address on file"],
-                "alternative_outcome": [
-                    "deliver a notice through a non-digital channel without a verified address",
-                    "use a non-digital delivery channel without a verified address",
-                ],
             },
             "yes_choice": "alternative",
             "related_evidence": None,

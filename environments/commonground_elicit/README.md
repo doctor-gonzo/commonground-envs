@@ -48,16 +48,9 @@ The default task is `find`. Return strict JSON:
   "findings": [
     {
       "doc_id": "<exact opaque id>",
-      "quote": "<grounding passage>",
+      "quote": "<complete sentence containing the issue>",
       "type": "ambiguity|contradiction|gap",
       "diagnosis": "<yes/no presentation question>",
-      "decision": {
-        "actor": "<decision maker>",
-        "action": "<decision action>",
-        "condition": "<scope or trigger>",
-        "anchor_outcome": "<outcome preserving the primary rule>",
-        "alternative_outcome": "<clarification, fallback, or conflicting rule>"
-      },
       "related_evidence": null
     }
   ]
@@ -65,16 +58,19 @@ The default task is `find`. Return strict JSON:
 ```
 
 For a contradiction, `related_evidence` must instead be an object containing
-the exact opposing `doc_id` and its passage.
+the opposing `doc_id` and complete sentence. Either conflicting passage may be
+the primary `quote`; swapping the pair does not change correctness.
 
 Strict Find reward is one-to-one finding F1. A match requires:
 
-1. correct document and sufficient contiguous grounding;
+1. correct document and sufficient contiguous grounding in a visible sentence;
 2. correct issue type;
-3. each decision slot to equal one explicitly authored slot alias after only
-   Unicode compatibility, case, and whitespace normalization;
-4. valid yes/no form for `diagnosis` (its wording is otherwise unscored);
-5. the authored second passage for a contradiction and `null` otherwise.
+3. valid yes/no form for `diagnosis` (its wording is otherwise unscored);
+4. the authored evidence pair for a contradiction and `null` otherwise.
+
+Find deliberately has no decision object, alias table, or hidden lexical
+diagnosis key. The prompt requests complete source sentences so its visible
+instruction matches the scorer's grounding threshold.
 
 The complete response must start with `{` and end with `}` without Markdown or
 prose wrappers. A diagnosis must start with one of the validator's listed
@@ -129,7 +125,7 @@ Ask's primary reward combines:
 - exact faction-key coverage and stance accuracy in the declared orientation.
 
 The free-form `question` is only required to have yes/no form. Hidden canonical
-wording and Find aliases cannot affect Ask reward. Opaque IDs and schema keys
+wording cannot affect Ask reward. Opaque IDs and schema keys
 are exact. Ask evidence and decision text normalize only Unicode compatibility,
 case, and whitespace; fragments, padding, punctuation edits, or moved fields do
 not match.
@@ -178,13 +174,9 @@ Legacy callers may use `load_environment` with the same task arguments.
 
 - One synthetic generator and public answers permit memorization.
 - Ask is candidate selection and composition, not open-ended information gain.
-- Generator clause ordering leaves a source-aware first-clause shortcut for
-  localizing candidate issue sentences. It does not provide the remaining
-  scored finding fields, but limits what localization success demonstrates.
 - The same public trade-off vector wins Ask in 90 of 100 evaluation rows, so a
   source-aware selector can recognize that vector instead of demonstrating
   general utility computation.
-- Decision-slot aliases are authored references, not general semantic judges.
 - Low or high model reward does not establish useful real-world questions.
 - Training utility and transfer require multiple seeds and a fresh,
   independently implemented private generator.

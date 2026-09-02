@@ -39,17 +39,19 @@ The environments expose native Verifiers v1 plugins and legacy
 - Predict includes only four probability-native references: uniform, empirical
   prior, visible frequency, and smoothed neighbor frequency. Four fixed prompt
   views isolate text and matrix contributions.
-- Each Elicit issue authors one primary passage, one five-slot decision frame,
-  and—only for contradictions—one explicit opposing passage. No relationship
-  is inferred through token overlap.
-- Find scores source grounding, issue type, the authored decision slots, and
-  required opposing evidence. Diagnosis prose is checked only for yes/no form.
+- Each Elicit issue authors one primary passage and—only for contradictions—one
+  explicit opposing passage. Ask additionally exposes one five-slot decision
+  profile. No relationship is inferred through token overlap.
+- Find scores source grounding, issue type, and required opposing evidence.
+  Diagnosis prose is checked only for yes/no form; it has no hidden vocabulary
+  or structured-decision answer key.
 - Ask publishes unordered decision profiles and the value-composition rule.
   It scores candidate selection, exact evidence, an exact copied profile,
   explicit `yes_choice`, and faction stances. Question prose is presentation.
-- Opaque identifiers and JSON keys are exact. Decision strings and Ask evidence
-  normalize only Unicode compatibility, case, and whitespace; Find grounding
-  uses a bounded contiguous-span match against visible source text.
+- Opaque identifiers and JSON keys are exact. Ask decision strings and evidence
+  normalize only Unicode compatibility, case, and whitespace. Find grounding
+  uses a bounded contiguous-span match against visible source text and accepts
+  a contradiction's two passages in either order.
 - Faction descriptions come from general value vectors that are independent of
   the current issue labels. Stances are composed from those values and reverse
   consistently when the yes-side alternative reverses.
@@ -105,10 +107,10 @@ answer ceilings, class balance, and the minimum top-one margin. Historical
 exploit baselines remain in historical release reports rather than the active
 gate.
 
-Two fixed-corpus shortcuts remain disclosed: generator clause ordering can
-simplify Find localization, and one public trade-off vector identifies the Ask
-winner in 90 of 100 evaluation rows. Neither supplies the complete scored
-response, but both narrow what model results can demonstrate.
+One fixed-corpus shortcut remains disclosed: one public trade-off vector
+identifies the Ask winner in 90 of 100 evaluation rows. It does not supply the
+evidence, type, orientation, or faction predictions, but it narrows what model
+selection results can demonstrate.
 
 ## Evaluation status
 
