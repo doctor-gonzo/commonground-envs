@@ -46,6 +46,9 @@ All notable changes to this project are documented in this file.
   public answers, a first-clause localization shortcut, one public trade-off
   vector winning Ask in 90 of 100 evaluation rows, no demonstrated training
   transfer, and no live-human export.
+- Correct the Elicit dataset card to state that scenarios contain three to five
+  documents, and stage a small optional usefulness pilot before any complete
+  exact-artifact model study.
 
 ## 0.5.0 - 2026-08-30
 

@@ -66,7 +66,35 @@ Elicit should publish only the compact suite from
 Historical exploit baselines may be cited from historical reports. They are not
 parallel 0.6 release gates.
 
-## 4. Exact-artifact model study
+## 4. Small usefulness pilot
+
+Before the complete study, run a small exact-artifact usefulness pilot. This is
+recommended but not release-blocking: it is a cheap check that the hosted
+runner works, rewards have usable variation, and failures can be interpreted.
+
+Use two contrasting model families on the same 20 evaluation tasks with two
+rollouts each for Predict full, Elicit Find, and Elicit Ask. For one model,
+also run Predict matrix-only, text-only, and shuffled-text on those same tasks.
+Do not publish these pilot scores as the final 0.6 model comparison.
+
+Proceed to the complete study only if:
+
+- every selected trace completes without parser, provider, or harness errors;
+- rewards are finite and not uniformly zero or one;
+- Predict beats uniform probability reward (`0.667`) and the prompt-view runs
+  are aligned to the same task IDs and answers;
+- Elicit component metrics distinguish format, grounding, decision-frame, and
+  stance failures rather than collapsing every failure into one opaque zero;
+- a manual review of at least ten non-perfect Find/Ask traces finds genuine
+  reasoning or reference-contract errors, not only malformed output;
+- no prompt exposes hidden answer fields and no obvious fixed shortcut solves
+  the complete response.
+
+If a condition fails, stop and diagnose the smallest failing slice. A pilot is
+evidence that the task has measurable model-facing signal; it is not evidence
+of real-world usefulness, successful RL training, or transfer.
+
+## 5. Exact-artifact model study
 
 After source and artifacts freeze, evaluate at least four model families on:
 
@@ -92,7 +120,7 @@ Report:
 
 No result from 0.5 or an earlier candidate is 0.6 evidence.
 
-## 5. Training utility
+## 6. Training utility
 
 Publication as an environment does not require a successful RL result, but
 claims of training value do. A training study should use multiple seeds and a
@@ -106,7 +134,7 @@ Required comparisons:
 - strict Find evaluation even if shaped Find reward is used for training;
 - evidence that reward gains are not formatting-only or spam behavior.
 
-## 6. Publication claims
+## 7. Publication claims
 
 Supported after the local release evidence passes:
 

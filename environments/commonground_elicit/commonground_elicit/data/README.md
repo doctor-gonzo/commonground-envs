@@ -14,7 +14,8 @@ are intended for reproducible open training and evaluation.
 
 Each scenario includes:
 
-- three public organizational documents plus type-neutral distractors;
+- three to five public organizational documents, including type-neutral
+  distractors;
 - three to five factions with round-trip-exact general values over access,
   adaptability, continuity, oversight, and safety;
 - exactly one ambiguity, contradiction, and gap;
