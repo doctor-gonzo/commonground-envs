@@ -820,6 +820,8 @@ def render_prompt(
             "Each distribution must contain exactly agree, disagree, and pass, use finite non-negative numbers, and have a positive total.",
             "Return STRICT JSON only, with this shape:",
             '{"predictions":{"<participant_idx>,<statement_idx>":{"agree":0.0,"disagree":0.0,"pass":0.0}}}',
+            "Your entire response must begin with { and end with }.",
+            "Do not use Markdown code fences or explanatory prose.",
         ]
     )
     return "\n".join(lines)

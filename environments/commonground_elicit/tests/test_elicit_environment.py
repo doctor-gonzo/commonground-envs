@@ -444,6 +444,19 @@ def test_ask_task_builds_same_env_id_with_task_specific_prompt() -> None:
         assert json.dumps(plant["target_stances"], sort_keys=True) not in prompt
 
 
+@pytest.mark.parametrize("task", ["find", "elicit-ask"])
+def test_prompts_state_the_exact_json_and_question_surface_contract(task: str) -> None:
+    env = load_environment(task=task)
+    prompt = dict(env.get_eval_dataset()[0])["prompt"][0]["content"]
+
+    assert "entire response must begin with { and end with }" in prompt
+    assert "Do not use Markdown code fences or explanatory prose" in prompt
+    assert "Am, Are, Can, Could, Did, Do, Does" in prompt
+    assert "End it with exactly one question mark" in prompt
+    if task == "elicit-ask":
+        assert "without ellipses or omitted words" in prompt
+
+
 def test_ask_task_exact_planted_response_is_positive_and_deterministic() -> None:
     env = load_environment(task="elicit-ask")
     row = dict(env.get_eval_dataset()[0])

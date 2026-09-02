@@ -20,7 +20,7 @@ from commonground_scenarios import (
 )
 from commonground_scenarios.generator import ACTOR_SUPPORT_REASON
 from commonground_scenarios.templates import VALUE_DIMENSIONS
-from commonground_scenarios.validation import PASS_THRESHOLD
+from commonground_scenarios.validation import PASS_THRESHOLD, YES_NO_AUXILIARIES
 from commonground_score import (
     cluster_separation,
     vote_entropy,
@@ -59,6 +59,7 @@ DECISION_FRAME_FIELDS = frozenset(
         "alternative_outcome",
     }
 )
+YES_NO_AUXILIARY_LIST = ", ".join(sorted(YES_NO_AUXILIARIES))
 _TOKEN_PATTERN = re.compile(
     r"(?:!=|<=|>=|==)|[!~](?=\s*[^\W_])|-(?=\s*\d)|[^\W_]+|"
     r"[¬≠≤≥=<>±+\N{MINUS SIGN}%$€£¥∉∈∧\N{LOGICAL OR}]",
@@ -1064,8 +1065,11 @@ def render_prompt(
                 '"related_evidence":null|{"doc_id":"<conflicting document id>","quote":"<conflicting passage>"},'
                 '"target_stances":{"<faction id>":"agree|disagree|pass"}}]}'
             ),
+            "Your entire response must begin with { and end with }.",
+            "Do not use Markdown code fences or explanatory prose.",
             f"The root may also include exactly {question_count} optional {question_object_label} for the logged weight-zero companion metric. Omitting or malformed companion questions never changes the findings reward.",
-            "Phrase each question as yes/no: agree means that faction predicts yes, disagree means no, and pass means no position.",
+            f"Begin every diagnosis and optional question with one of: {YES_NO_AUXILIARY_LIST}. End it with exactly one question mark.",
+            "For optional questions, agree means that faction predicts yes, disagree means no, and pass means no position.",
             "Set yes_choice to anchor when yes preserves or applies the primary quoted rule; set it to alternative when yes favors a clarification, fallback, or the second conflicting rule.",
             "For every finding and question, fill all five decision fields from the visible documents. Those structured fields carry the scored decision meaning; diagnosis and question prose are presentation fields and must have valid yes/no form.",
             "For contradictions, related_evidence must quote the second conflicting rule. For other finding types it must be null.",
@@ -1137,6 +1141,10 @@ def render_ask_prompt(
             "",
             "Return STRICT JSON only, with this shape:",
             '{"questions":[{"doc_id":"<document id>","quote":"<passage>","type":"ambiguity|contradiction|gap","question":"<specific clarifying question>","decision":{"actor":"<decision maker>","action":"<decision action>","condition":"<trigger or scope>","anchor_outcome":"<outcome preserving the primary rule>","alternative_outcome":"<clarification, fallback, or conflicting outcome>"},"yes_choice":"anchor|alternative","related_evidence":null|{"doc_id":"<conflicting document id>","quote":"<conflicting passage>"},"target_stances":{"<faction id>":"agree|disagree|pass"}}]}',
+            "Your entire response must begin with { and end with }.",
+            "Do not use Markdown code fences or explanatory prose.",
+            f"Begin every question with one of: {YES_NO_AUXILIARY_LIST}. End it with exactly one question mark.",
+            "Copy complete supporting passages without ellipses or omitted words.",
         ]
     )
     return "\n".join(lines)

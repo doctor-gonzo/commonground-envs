@@ -76,6 +76,11 @@ Strict Find reward is one-to-one finding F1. A match requires:
 4. valid yes/no form for `diagnosis` (its wording is otherwise unscored);
 5. the authored second passage for a contradiction and `null` otherwise.
 
+The complete response must start with `{` and end with `}` without Markdown or
+prose wrappers. A diagnosis must start with one of the validator's listed
+yes/no auxiliaries (for example `Should`, `Can`, or `May`) and end with one
+question mark.
+
 The optional `reward_mode="shaped"` is the mean of four cumulative stage F1
 scores: localization, type, diagnosis, and final relation. The final relation
 stage is the strict finding F1. Every stage charges unmatched candidates as
@@ -128,6 +133,9 @@ wording and Find aliases cannot affect Ask reward. Opaque IDs and schema keys
 are exact. Ask evidence and decision text normalize only Unicode compatibility,
 case, and whitespace; fragments, padding, punctuation edits, or moved fields do
 not match.
+The complete response must start with `{` and end with `}` without Markdown or
+prose wrappers. Questions use the same auxiliary-first surface rule as Find,
+and supporting passages must be copied without ellipses or omitted words.
 
 Logged diagnostics separate schema/format validity, top-one selection,
 grounding, and stance accuracy. They are deterministic synthetic conformance

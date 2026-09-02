@@ -77,6 +77,11 @@ rollouts each for Predict full, Elicit Find, and Elicit Ask. For one model,
 also run Predict matrix-only, text-only, and shuffled-text on those same tasks.
 Do not publish these pilot scores as the final 0.6 model comparison.
 
+Use JSON-object decoding when the provider exposes it, and record the resolved
+sampling configuration with every run. The task prompts independently state
+the raw-JSON envelope and Elicit's auxiliary-first yes/no surface rule; JSON
+decoding only prevents Markdown/prose wrappers and does not supply answers.
+
 Proceed to the complete study only if:
 
 - every selected trace completes without parser, provider, or harness errors;

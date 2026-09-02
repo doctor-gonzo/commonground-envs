@@ -24,6 +24,8 @@ All notable changes to this project are documented in this file.
 - Treat Ask question and Find diagnosis prose as yes/no presentation fields,
   removing the fuzzy lexical semantic scorer, canonical question aliases, and
   orientation markers from the answer contract.
+- State the enforced raw-JSON envelope, auxiliary-first yes/no grammar, and
+  no-ellipsis Ask evidence rule directly in the generated task prompts.
 - Keep opaque IDs and schema keys exact. Normalize decision strings and Ask
   evidence only by Unicode compatibility, case, and whitespace; retain Find's
   bounded visible-source span contract.

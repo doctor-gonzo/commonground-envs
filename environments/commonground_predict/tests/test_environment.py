@@ -149,6 +149,13 @@ def test_full_prompt_mode_is_the_default_and_preserves_task_identity() -> None:
     assert explicit_task.data.info["prompt_mode"] == "full"
 
 
+def test_prompt_states_the_exact_raw_json_envelope() -> None:
+    prompt = next(iter(load_environment())).data.prompt
+
+    assert "entire response must begin with { and end with }" in prompt
+    assert "Do not use Markdown code fences or explanatory prose" in prompt
+
+
 @pytest.mark.parametrize(
     "prompt_mode",
     ["full", "matrix-only", "text-only", "shuffled-text"],
