@@ -5,16 +5,19 @@ All notable changes to this project are documented in this file.
 ## 0.6.0 - Unreleased candidate
 
 - Align all four distributions at version 0.6.0 while keeping the candidate
-  unpublished until its exact-artifact study and release evidence pass.
+  unpublished until its clean local artifact and release checks pass.
 - Keep Predict's exact masked-cell response contract and proper
   `1 - normalized Brier` reward; reject malformed/non-finite probabilities and
   retain accuracy, Brier, and named-reference Brier skill as diagnostics.
+- Remove the obsolete 128-object parser ceiling so every size-legal exact
+  masked-cell response remains answerable, including 127 or more cells.
 - Add deterministic full, matrix-only, text-only, and shuffled-text Predict
   prompt views, plus a compact probability-native baseline suite.
 - Replace inferred contradiction relationships with explicit authored opposing
   passages that survive deterministic document-ID remapping.
 - Generate faction descriptions from general issue-independent value vectors;
-  compose stances from those values and explicit issue trade-offs.
+  render their numeric inputs with round-trip precision, and compose stances
+  from those values and explicit issue trade-offs.
 - Represent Elicit decisions with five structured slots and explicit yes-side
   orientation. Ask copies one prompt-visible canonical profile; Find accepts
   only explicitly authored aliases in the corresponding slot.
@@ -24,8 +27,11 @@ All notable changes to this project are documented in this file.
 - Keep opaque IDs and schema keys exact. Normalize decision strings and Ask
   evidence only by Unicode compatibility, case, and whitespace; retain Find's
   bounded visible-source span contract.
-- Make shaped Find reward precision-sensitive so exact-plus-spam scores below a
-  concise exact answer.
+- Make shaped Find reward the mean of four cumulative stage F1 scores,
+  including final strict relation F1, so exact-plus-spam scores below a concise
+  exact answer.
+- Name the model-free Ask oracle truthfully as the exact answer ceiling rather
+  than implying that it independently derives the answer from public profiles.
 - Focus split auditing on exact instance identity, one policy-semantic identity,
   and one word-ngram TF-IDF near-neighbor check.
 - Replace the historical Elicit attack framework with two prompt-only Find
@@ -37,7 +43,10 @@ All notable changes to this project are documented in this file.
   holdout schedules, attempt-ledger machinery, and documentation for deleted
   release paths.
 - Document the remaining scientific limits: one public synthetic generator,
-  public answers, no demonstrated training transfer, and no live-human export.
+  public answers, a first-clause localization shortcut, one public trade-off
+  vector winning Ask in 90 of 100 evaluation rows, no demonstrated training
+  transfer, and no live-human export.
+
 ## 0.5.0 - 2026-08-30
 
 - Replace heuristic contradiction-passage discovery with explicit authored

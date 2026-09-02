@@ -49,7 +49,6 @@ PROMPT_MODES: tuple[PromptMode, ...] = (
 )
 MAX_COMPLETION_CHARS = 65_536
 MAX_JSON_NESTING = 64
-MAX_JSON_CANDIDATES = 128
 CELL_ID_PATTERN = re.compile(r"(0|[1-9]\d*),(0|[1-9]\d*)")
 
 
@@ -1139,10 +1138,10 @@ def extract_json_object(text: str) -> Any:
         )
 
     payload = text.strip()
-    # Validate nesting and work bounds before decoding. Exact key-set
-    # validation cannot detect duplicates after a normal decoder has silently
-    # collapsed them, so reject repeats while objects are built.
-    _json_candidate_indices(payload)
+    # Validate nesting before decoding. Exact key-set validation cannot detect
+    # duplicates after a normal decoder has silently collapsed them, so reject
+    # repeats while objects are built.
+    _validate_json_nesting(payload)
     decoder = json.JSONDecoder(
         object_pairs_hook=_reject_duplicate_json_keys,
         parse_constant=_reject_non_finite_json_constant,
@@ -1156,15 +1155,14 @@ def extract_json_object(text: str) -> Any:
     return parsed
 
 
-def _json_candidate_indices(text: str) -> list[int]:
-    """Find object starts in one pass while enforcing depth and work bounds."""
+def _validate_json_nesting(text: str) -> None:
+    """Enforce the nesting bound without limiting valid prediction objects."""
 
-    candidates: list[int] = []
     stack: list[str] = []
     in_string = False
     escaped = False
     pairs = {"}": "{", "]": "["}
-    for index, character in enumerate(text):
+    for character in text:
         if in_string:
             if escaped:
                 escaped = False
@@ -1182,19 +1180,12 @@ def _json_candidate_indices(text: str) -> list[int]:
                 raise ValueError(
                     f"JSON nesting exceeds maximum depth {MAX_JSON_NESTING}"
                 )
-            if character == "{":
-                candidates.append(index)
-                if len(candidates) > MAX_JSON_CANDIDATES:
-                    raise ValueError(
-                        f"completion exceeds {MAX_JSON_CANDIDATES} JSON candidates"
-                    )
             continue
         if character in "}]" and stack:
             if stack[-1] == pairs[character]:
                 stack.pop()
             else:
                 stack.clear()
-    return candidates
 
 
 def _vote_symbol(vote: Any) -> str:

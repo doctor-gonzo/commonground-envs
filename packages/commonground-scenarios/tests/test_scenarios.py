@@ -133,8 +133,7 @@ def test_generated_scenario_contains_complete_planted_structure(
     )
     assert all(
         all(
-            f"{dimension}={float(faction['values'][dimension]):+.2f}"
-            in faction["summary"]
+            f"{dimension}={float(faction['values'][dimension])!r}" in faction["summary"]
             for dimension in VALUE_DIMENSIONS
         )
         for faction in scenario["factions"]
@@ -246,6 +245,63 @@ def test_visible_value_renderer_never_receives_plants_or_stances() -> None:
         "Value profile used for this panel:" in faction["summary"]
         for faction in factions
     )
+
+
+def test_visible_value_profile_preserves_target_changing_precision() -> None:
+    template = copy.deepcopy(
+        next(
+            template
+            for template in HELDOUT_TEMPLATES
+            if template.template_id == "freight-cooperative-manual"
+        )
+    )
+    changed_template = copy.deepcopy(template)
+    changed_values = {
+        "access": 0.8,
+        "adaptability": 0.4049,
+        "continuity": 0.9049,
+        "oversight": 0.0951,
+        "safety": 0.3049,
+    }
+    changed_template.factions[2]["values"] = changed_values
+
+    original = generate_scenario(7352, template)
+    changed = generate_scenario(7352, changed_template)
+    original_faction = next(
+        faction
+        for faction in original["factions"]
+        if faction["name"] == "Customer coordinators"
+    )
+    changed_faction = next(
+        faction
+        for faction in changed["factions"]
+        if faction["name"] == "Customer coordinators"
+    )
+
+    def displayed_values(faction: dict[str, object]) -> dict[str, float]:
+        summary = str(faction["summary"])
+        profile = summary.split("Value profile used for this panel: ", 1)[1]
+        profile = profile.split(". ", 1)[0]
+        return {
+            dimension: float(component)
+            for dimension, component in (
+                item.split("=", 1) for item in profile.split(", ")
+            )
+        }
+
+    assert displayed_values(original_faction) == original_faction["values"]
+    assert displayed_values(changed_faction) == changed_faction["values"]
+    assert displayed_values(original_faction) != displayed_values(changed_faction)
+
+    original_ambiguity = next(
+        plant for plant in original["planted_items"] if plant["type"] == "ambiguity"
+    )
+    changed_ambiguity = next(
+        plant for plant in changed["planted_items"] if plant["type"] == "ambiguity"
+    )
+    faction_id = str(original_faction["faction_id"])
+    assert original_ambiguity["alternative_stances"][faction_id] == "pass"
+    assert changed_ambiguity["alternative_stances"][faction_id] == "agree"
 
 
 def test_faction_value_change_is_visible_and_changes_composed_targets() -> None:

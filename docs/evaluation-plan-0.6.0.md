@@ -60,7 +60,7 @@ Elicit should publish only the compact suite from
 - random and longest-sentence Find probes;
 - exact Find ceiling;
 - uniform-candidate and runner-up Ask references;
-- public-profile Ask ceiling;
+- exact Ask answer ceiling;
 - top-one tie/margin and issue-class balance.
 
 Historical exploit baselines may be cited from historical reports. They are not
@@ -108,12 +108,14 @@ Required comparisons:
 
 ## 6. Publication claims
 
-Supported after local and exact-artifact evidence passes:
+Supported after the local release evidence passes:
 
 - reproducible synthetic environment;
 - proper calibrated Predict reward;
-- grounded structured Elicit contracts;
-- measurable headroom on the fixed public corpus.
+- grounded structured Elicit contracts.
+
+Claims about model performance or measurable headroom on the fixed public
+corpus additionally require the exact-artifact model study.
 
 Not supported without additional evidence:
 
@@ -122,3 +124,8 @@ Not supported without additional evidence:
 - contamination-resistant model ranking;
 - broad policy-domain generalization;
 - beneficial RL training or private-generator transfer.
+
+Interpret fixed-corpus Elicit results with two disclosed shortcuts in mind:
+first-clause procedural placement can simplify Find localization, and the same
+public trade-off vector identifies the Ask winner in 90 of 100 evaluation rows.
+Neither shortcut supplies the complete scored response.

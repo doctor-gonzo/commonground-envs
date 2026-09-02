@@ -501,12 +501,23 @@ def test_parser_rejects_oversized_completion() -> None:
     assert parser.parse(completion) == {}
 
 
-def test_parser_caps_json_candidate_work() -> None:
+def test_parser_accepts_valid_127_cell_probability_response() -> None:
     parser = PredictionJsonParser()
-    completion = " ".join('{"draft":true}' for _ in range(129))
-    completion += ' {"predictions":{"0,1":1}}'
+    labels = (1, -1, 0)
+    answer = {f"0,{index}": labels[index % len(labels)] for index in range(127)}
+    predictions = probability_predictions(answer)
+    completion = json.dumps({"predictions": predictions}, sort_keys=True)
 
-    assert parser.parse(completion) == {}
+    assert parser.parse(completion) == {"predictions": predictions}
+    assert score_probability_predictions(predictions, answer) == 1.0
+    assert (
+        asyncio.run(
+            probability_reward(
+                [{"role": "assistant", "content": completion}], answer, parser
+            )
+        )
+        == 1.0
+    )
 
 
 def test_cell_keys_ignore_whitespace_for_point_and_brier_scores() -> None:

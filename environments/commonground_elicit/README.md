@@ -76,18 +76,20 @@ Strict Find reward is one-to-one finding F1. A match requires:
 4. valid yes/no form for `diagnosis` (its wording is otherwise unscored);
 5. the authored second passage for a contradiction and `null` otherwise.
 
-The optional `reward_mode="shaped"` averages strict finding F1 with
-stage-specific F1 components for localization, type, diagnosis, and relation.
-Each component charges unmatched candidates as false positives. Therefore an
-exact answer plus spam scores below the exact concise answer.
+The optional `reward_mode="shaped"` is the mean of four cumulative stage F1
+scores: localization, type, diagnosis, and final relation. The final relation
+stage is the strict finding F1. Every stage charges unmatched candidates as
+false positives, so an exact answer plus spam scores below the exact concise
+answer.
 
 ## Ask contract
 
 Load Ask with `task="elicit-ask"`. The prompt publishes an unordered profile
 for each candidate: the complete canonical decision frame and its signed value
-trade-off weights. It also publishes the faction values, pass threshold, stance
-composition rule, and ranking formula. It does not reveal evidence locations,
-issue types, relationships, stance labels, decision values, or final utilities.
+trade-off weights. It also publishes the faction values with round-trip
+precision, pass threshold, stance composition rule, and ranking formula. It
+does not reveal evidence locations, issue types, relationships, stance labels,
+decision values, or final utilities.
 
 Return strict JSON:
 
@@ -144,7 +146,7 @@ The active baseline tool intentionally contains only:
 - random and longest-visible-sentence Find probes;
 - an exact Find ceiling;
 - uniform-candidate and runner-up Ask references;
-- an exact public-profile Ask ceiling;
+- an exact Ask answer ceiling;
 - top-one tie/margin and issue-class-balance diagnostics.
 
 Retired codebook attacks and experimental structural classifiers live only in
@@ -168,6 +170,12 @@ Legacy callers may use `load_environment` with the same task arguments.
 
 - One synthetic generator and public answers permit memorization.
 - Ask is candidate selection and composition, not open-ended information gain.
+- Generator clause ordering leaves a source-aware first-clause shortcut for
+  localizing candidate issue sentences. It does not provide the remaining
+  scored finding fields, but limits what localization success demonstrates.
+- The same public trade-off vector wins Ask in 90 of 100 evaluation rows, so a
+  source-aware selector can recognize that vector instead of demonstrating
+  general utility computation.
 - Decision-slot aliases are authored references, not general semantic judges.
 - Low or high model reward does not establish useful real-world questions.
 - Training utility and transfer require multiple seeds and a fresh,

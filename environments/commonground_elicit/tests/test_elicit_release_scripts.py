@@ -259,7 +259,7 @@ def test_minimal_model_free_baselines_and_corpus_diagnostics(tmp_path: Path) -> 
         "find/exact-ceiling",
         "elicit-ask/uniform-random-candidate",
         "elicit-ask/runner-up-candidate",
-        "elicit-ask/public-profile-ceiling",
+        "elicit-ask/exact-answer-ceiling",
         "audit/top1-tie-rate",
         "audit/top1-normalized-margin-min",
         "audit/issue-class-min-proportion",
@@ -270,7 +270,7 @@ def test_minimal_model_free_baselines_and_corpus_diagnostics(tmp_path: Path) -> 
     assert computed["find/exact-ceiling"] == 1.0
     assert 0.0 < computed["elicit-ask/uniform-random-candidate"] < 1.0
     assert 0.0 < computed["elicit-ask/runner-up-candidate"] < 1.0
-    assert computed["elicit-ask/public-profile-ceiling"] == 1.0
+    assert computed["elicit-ask/exact-answer-ceiling"] == 1.0
     assert computed["audit/top1-tie-rate"] == 0.0
     assert computed["audit/top1-normalized-margin-min"] > 0.0
     assert computed["audit/issue-class-min-proportion"] == pytest.approx(1 / 3)
@@ -279,7 +279,7 @@ def test_minimal_model_free_baselines_and_corpus_diagnostics(tmp_path: Path) -> 
     rendered = floors.render_markdown(computed)
     assert "Random visible sentences" in rendered
     assert "Uniform candidate + exact components" in rendered
-    assert "Public-profile composition (ceiling)" in rendered
+    assert "Exact Ask answer ceiling" in rendered
 
 
 def read_jsonl(path: Path) -> list[dict[str, Any]]:

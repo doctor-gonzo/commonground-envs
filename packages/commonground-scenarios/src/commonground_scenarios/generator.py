@@ -871,7 +871,7 @@ def _add_visible_faction_values(
             clauses.append(rng.choice(_VALUE_PRINCIPLES[(dimension, direction)]))
         rng.shuffle(clauses)
         exact_profile = ", ".join(
-            f"{dimension}={float(faction['values'][dimension]):+.2f}"
+            f"{dimension}={float(faction['values'][dimension])!r}"
             for dimension in VALUE_DIMENSIONS
         )
         faction["summary"] = (

@@ -101,15 +101,23 @@ uv run python scripts/compute_elicit_floors.py
 
 Predict reports probability-native references. Elicit reports two prompt-only
 Find probes, a uniform Ask candidate reference, a runner-up diagnostic, exact
-ceilings, class balance, and the minimum top-one margin. Historical exploit
-baselines remain in historical release reports rather than the active gate.
+answer ceilings, class balance, and the minimum top-one margin. Historical
+exploit baselines remain in historical release reports rather than the active
+gate.
+
+Two fixed-corpus shortcuts remain disclosed: generator clause ordering can
+simplify Find localization, and one public trade-off vector identifies the Ask
+winner in 90 of 100 evaluation rows. Neither supplies the complete scored
+response, but both narrow what model results can demonstrate.
 
 ## Evaluation status
 
-The 0.6 candidate still needs a frozen exact-artifact model study and genuinely
-fresh transfer evaluation before publication claims. Those later steps are
-defined in the [0.6 evaluation plan](docs/evaluation-plan-0.6.0.md). Historical
-results remain available in the
+The 0.6 candidate remains unpublished until the clean local artifact gate and
+release checklist pass. A frozen exact-artifact model study is needed for new
+model-result claims, and genuinely fresh transfer evidence is needed for
+generalization or training claims; neither is required to verify the environment
+contract. Those later steps are defined in the
+[0.6 evaluation plan](docs/evaluation-plan-0.6.0.md). Historical results remain available in the
 [0.5.0 evaluation report](docs/evaluation-report-0.5.0.md) and earlier reports,
 but are not 0.6 evidence.
 

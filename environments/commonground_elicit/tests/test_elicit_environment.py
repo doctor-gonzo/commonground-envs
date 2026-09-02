@@ -2495,7 +2495,8 @@ def visible_value_panel(*, access: float, safety: float) -> list[dict[str, Any]]
     for index, sign in enumerate((1.0, -1.0, 0.8, -0.8)):
         values = value_vector(access=sign * access, safety=sign * safety)
         exact_profile = ", ".join(
-            f"{dimension}={values[dimension]:+.2f}" for dimension in VALUE_DIMENSIONS
+            f"{dimension}={float(values[dimension])!r}"
+            for dimension in VALUE_DIMENSIONS
         )
         factions.append(
             {

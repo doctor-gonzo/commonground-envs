@@ -975,7 +975,7 @@ def build_document_view(
 
 
 def _plant_actor_aliases(plant: Mapping[str, Any]) -> tuple[str, ...]:
-    """Return the exact actor concepts accepted by the semantic scorer."""
+    """Return the exact prompt-visible actor aliases accepted by Find."""
 
     decision = plant.get("decision")
     canonical = (

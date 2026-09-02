@@ -199,7 +199,7 @@ def assert_split_integrity(
     train_scenarios: Sequence[dict[str, Any]],
     eval_scenarios: Sequence[dict[str, Any]],
 ) -> None:
-    """Block exact/canonical overlap and overly close train/eval semantics."""
+    """Block exact/policy-semantic overlap and close train/eval neighbors."""
 
     for label, scenarios in (("train", train_scenarios), ("eval", eval_scenarios)):
         for fingerprint_name, fingerprint in (

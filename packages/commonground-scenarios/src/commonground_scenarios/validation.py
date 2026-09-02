@@ -336,7 +336,7 @@ def _validate_plants(
                     f"planted_items[{index}].decision_aliases.{field} must begin with the canonical decision field"
                 )
         # Actor labels are concrete source roles, unlike a gap's deliberately
-        # missing alternative. Every spelling accepted by the semantic scorer
+        # missing alternative. Every spelling accepted by the Find scorer
         # must occur in the plant's own evidence document; otherwise a custom
         # scenario can validate successfully but lose the plant when the
         # runtime enforces prompt observability.

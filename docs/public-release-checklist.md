@@ -20,16 +20,20 @@ publication.
 
 ## 2. Review the candidate
 
-- [ ] Predict exact-key/probability tests and proper-reward tests pass.
+- [ ] Predict exact-key/probability, proper-reward, and high-mask parser tests
+      pass.
 - [ ] Elicit explicit-relationship, issue-independent faction prose, polarity,
-      false-positive, and opaque-ID regressions pass.
+      round-trip public values, false-positive, and opaque-ID regressions pass.
 - [ ] Exact instance, policy-semantic, and TF-IDF split checks pass.
 - [ ] Model-free summaries have reachable exact ceilings and no top-one ties.
 - [ ] READMEs, dataset card, methodology, changelog, and version strings agree.
 - [ ] No secrets, live human data, private study fixtures, or generated local
       outputs are included.
 
-## 3. Run exact-artifact evidence
+## 3. Optional exact-artifact model evidence
+
+This section is required when publishing new model-result claims alongside the
+environment. It is not required to verify or publish the environment contract.
 
 - [ ] Use only the frozen artifacts.
 - [ ] Preserve all traces and provider failures.
@@ -77,4 +81,6 @@ historical record.
 The release may be described as a reproducible synthetic benchmark with proper
 Predict scoring and grounded Elicit contracts. It must not be described as
 real-human preference inference, real information gain, independent-domain
-generalization, or proven RL utility without separate evidence.
+generalization, or proven RL utility without separate evidence. Disclose that
+first-clause procedural placement can simplify Find localization and that one
+public trade-off vector identifies the Ask winner in 90 of 100 evaluation rows.

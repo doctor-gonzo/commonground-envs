@@ -46,10 +46,10 @@ vectors, and exactly one ambiguity, contradiction, and gap. Every issue authors:
 - for contradictions, one explicit opposing passage.
 
 Faction alternative preferences are the normalized dot product between public
-faction values and issue trade-off weights. Values at or above `+0.25` agree
-with the alternative, values at or below `-0.25` disagree, and values between
-those thresholds pass. `yes_choice="anchor"` swaps agree and disagree; pass is
-unchanged.
+faction values, rendered with round-trip precision, and issue trade-off
+weights. Values at or above `+0.25` agree with the alternative, values at or
+below `-0.25` disagree, and values between those thresholds pass.
+`yes_choice="anchor"` swaps agree and disagree; pass is unchanged.
 
 Faction summaries describe only general values. They are generated before and
 independently of issue stance labels. Contradiction relationships come directly
@@ -66,10 +66,10 @@ Find permits only explicitly authored aliases in the same decision slot. Human
 text is normalized with Unicode NFKC, case folding, and whitespace collapse.
 Opaque IDs and JSON keys are exact.
 
-The optional shaped reward is the average of strict F1 and stage-specific F1
-for localization, type, diagnosis, and relation. Every stage counts unmatched
-candidates as false positives. It cannot reward exact-plus-spam equally to a
-concise exact answer.
+The optional shaped reward is the mean of four cumulative stage F1 scores:
+localization, type, diagnosis, and final relation. The final relation stage is
+the strict finding F1. Every stage counts unmatched candidates as false
+positives, so exact-plus-spam scores below a concise exact answer.
 
 ## Elicit Ask
 
@@ -130,6 +130,12 @@ release path.
 - Synthetic template separation is weaker than an independently implemented
   private generator.
 - Model-free ceilings demonstrate scorer reachability, not model capability.
+- Generator clause ordering leaves a source-aware first-clause shortcut for
+  locating candidate issue sentences. It does not supply the scored type,
+  decision frame, or relationship, but limits what localization demonstrates.
+- The same public trade-off vector identifies the winning Ask candidate in 90
+  of 100 evaluation rows, so fixed-corpus selection need not demonstrate
+  general utility computation.
 - Low Elicit scores may reflect task difficulty, formatting, or construct
   mismatch; they do not prove useful RL dynamics.
 - Training value needs multiple seeds and fresh private transfer evaluation.

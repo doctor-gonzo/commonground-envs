@@ -15,8 +15,8 @@ are intended for reproducible open training and evaluation.
 Each scenario includes:
 
 - three public organizational documents plus type-neutral distractors;
-- three to five factions with general signed values over access, adaptability,
-  continuity, oversight, and safety;
+- three to five factions with round-trip-exact general values over access,
+  adaptability, continuity, oversight, and safety;
 - exactly one ambiguity, contradiction, and gap;
 - an authored primary passage and five-slot decision frame for each issue;
 - an explicit opposing passage for each contradiction;
@@ -46,8 +46,9 @@ gate byte-compares regenerated files and checks:
 - one word unigram/bigram TF-IDF cross-split nearest-neighbor threshold;
 - absence of retired stable document identifiers.
 
-These checks target known synthetic shortcuts. They do not establish
-independence from the shared generator recipe.
+These checks target exact and near-neighbor overlap. They do not remove all
+source-aware generator shortcuts or establish independence from the shared
+generator recipe.
 
 ## Reproduction
 
@@ -63,7 +64,10 @@ alongside tests, model-free summaries, static checks, and fresh artifact loads.
 ## Limits
 
 The held-out templates share the same generator, issue taxonomy, value model,
-and scoring ontology as training. Public answers allow memorization. Claims
-about transfer, training benefit, or real organizations require fresh private
-evaluation from an independently implemented generator and, for human data,
-separate consent and governance.
+and scoring ontology as training. Generator clause ordering leaves a
+first-clause localization shortcut, and one public trade-off vector wins Ask
+in 90 of 100 evaluation rows. Public answers allow memorization. These fixed-
+corpus shortcuts do not reveal every scored field, but they narrow what a high
+score establishes. Claims about transfer, training benefit, or real
+organizations require fresh private evaluation from an independently
+implemented generator and, for human data, separate consent and governance.
