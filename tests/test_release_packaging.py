@@ -227,23 +227,26 @@ def test_predict_notice_pins_demo_fixture_provenance_and_content() -> None:
     assert "Mozilla Public License, Version 2.0" in notice
 
 
-def test_local_smoke_runs_offline_tests_before_authentication() -> None:
+def test_local_smoke_is_one_local_release_verification_path() -> None:
     script = (ROOT / "scripts" / "local_smoke.sh").read_text(encoding="utf-8")
 
+    assert "git status --porcelain" in script
     assert script.index("uv sync --all-packages --locked") < script.index(
         "uv run pytest -q"
     )
-    assert script.index("uv run pytest -q") < script.index("prime --plain whoami")
-    assert script.index("uv run validate commonground-predict") < script.index(
-        "prime --plain whoami"
+    assert "scripts/generate_elicit_splits.py" in script
+    assert "scripts/compute_floors.py" in script
+    assert "scripts/compute_elicit_floors.py" in script
+    assert "scripts/check_dependency_manifests.py --check" in script
+    assert "scripts/check_release_wheel.py" in script
+    assert '--output-dir "$evidence_dir/artifacts"' in script
+    assert "$(git rev-parse HEAD)" in script
+    assert "evidence.sha256" in script
+    assert "LOCAL RELEASE VERIFICATION PASS" in script
+    assert all(
+        forbidden not in script
+        for forbidden in ("prime ", "uv run eval", "uv publish", "git push", "curl ")
     )
-    assert 'source "$HOME/.config/prime/env"' not in script
-    assert "PASTE-KEY-HERE" not in script
-    assert "prime config set-api-key" in script
-    assert "prime --plain eval run" not in script
-    assert script.count("uv run eval commonground-") == 3
-    assert script.count("--no-push") == 3
-    assert "--runtime.type subprocess" in script
 
 
 def test_ci_audits_the_locked_third_party_dependency_set() -> None:
@@ -283,9 +286,17 @@ def test_every_shipped_test_passes_from_detached_environment_source(
     assert "1 skipped" in result.stdout
 
 
-def test_built_release_artifacts_pass_policy_checks() -> None:
+def test_built_release_artifacts_pass_policy_checks(tmp_path: Path) -> None:
+    artifact_dir = tmp_path / "artifacts"
     subprocess.run(
-        [sys.executable, str(ROOT / "scripts" / "check_release_wheel.py")],
+        [
+            sys.executable,
+            str(ROOT / "scripts" / "check_release_wheel.py"),
+            "--output-dir",
+            str(artifact_dir),
+        ],
         cwd=ROOT,
         check=True,
     )
+    assert len(list(artifact_dir.glob("*.whl"))) == 4
+    assert len(list(artifact_dir.glob("*.tar.gz"))) == 4

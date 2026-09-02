@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import argparse
 import email
 import subprocess
 import sys
 import tarfile
 import tempfile
 import zipfile
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -345,7 +347,17 @@ def _inspect_sdist(target: WheelTarget, sdist_path: Path) -> None:
 def _fresh_install(wheel_paths: list[Path], output_dir: Path) -> None:
     """Install built wheels together and load every taskset outside the source tree."""
 
-    venv_dir = output_dir / "fresh-install"
+    with tempfile.TemporaryDirectory(
+        prefix="commonground-fresh-install-"
+    ) as temporary_dir:
+        _fresh_install_in_venv(wheel_paths, output_dir, Path(temporary_dir))
+
+
+def _fresh_install_in_venv(
+    wheel_paths: list[Path], output_dir: Path, venv_dir: Path
+) -> None:
+    """Run the fresh-install probe in an automatically discarded environment."""
+
     subprocess.run(
         ["uv", "venv", "--python", "3.12", str(venv_dir)],
         cwd=output_dir,
@@ -498,7 +510,75 @@ assert score(
     )
 
 
-def main() -> None:
+def _build_and_check(output_dir: Path) -> list[str]:
+    """Build, inspect, and fresh-install one exact artifact set."""
+
+    summaries: list[str] = []
+    wheel_paths: list[Path] = []
+    for target in TARGETS:
+        source_license = target.source_dir / "LICENSE"
+        if source_license.read_bytes() != CANONICAL_LICENSE.read_bytes():
+            raise AssertionError(
+                f"{target.name}: Hub source LICENSE differs from repository"
+            )
+        subprocess.run(
+            [
+                "uv",
+                "build",
+                "--wheel",
+                "--out-dir",
+                str(output_dir),
+                str(target.source_dir),
+            ],
+            cwd=ROOT,
+            check=True,
+        )
+        subprocess.run(
+            [
+                "uv",
+                "build",
+                "--sdist",
+                "--out-dir",
+                str(output_dir),
+                str(target.source_dir),
+            ],
+            cwd=ROOT,
+            check=True,
+        )
+        wheel_prefix = target.name.replace("-", "_") + "-"
+        wheels = sorted(output_dir.glob(f"{wheel_prefix}*.whl"))
+        if len(wheels) != 1:
+            raise AssertionError(
+                f"{target.name}: expected one release wheel, found {len(wheels)}"
+            )
+        wheel_paths.append(wheels[0])
+        bundled_count = _inspect_wheel(target, wheels[0])
+        sdists = sorted(output_dir.glob(f"{wheel_prefix}*.tar.gz"))
+        if len(sdists) != 1:
+            raise AssertionError(
+                f"{target.name}: expected one release sdist, found {len(sdists)}"
+            )
+        _inspect_sdist(target, sdists[0])
+        summaries.append(
+            f"{wheels[0].name} + {sdists[0].name} "
+            f"({bundled_count} required bundled files)"
+        )
+    _fresh_install(wheel_paths, output_dir)
+    return summaries
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        help="Retain the exact verified wheels and source distributions here.",
+    )
+    return parser
+
+
+def main(argv: Sequence[str] | None = None) -> None:
+    args = build_parser().parse_args(argv)
     subprocess.run(
         [
             sys.executable,
@@ -508,59 +588,12 @@ def main() -> None:
         cwd=ROOT,
         check=True,
     )
-    summaries: list[str] = []
-    with tempfile.TemporaryDirectory(prefix="commonground-wheel-") as temporary_dir:
-        output_dir = Path(temporary_dir)
-        wheel_paths: list[Path] = []
-        for target in TARGETS:
-            source_license = target.source_dir / "LICENSE"
-            if source_license.read_bytes() != CANONICAL_LICENSE.read_bytes():
-                raise AssertionError(
-                    f"{target.name}: Hub source LICENSE differs from repository"
-                )
-            subprocess.run(
-                [
-                    "uv",
-                    "build",
-                    "--wheel",
-                    "--out-dir",
-                    str(output_dir),
-                    str(target.source_dir),
-                ],
-                cwd=ROOT,
-                check=True,
-            )
-            subprocess.run(
-                [
-                    "uv",
-                    "build",
-                    "--sdist",
-                    "--out-dir",
-                    str(output_dir),
-                    str(target.source_dir),
-                ],
-                cwd=ROOT,
-                check=True,
-            )
-            wheel_prefix = target.name.replace("-", "_") + "-"
-            wheels = sorted(output_dir.glob(f"{wheel_prefix}*.whl"))
-            if len(wheels) != 1:
-                raise AssertionError(
-                    f"{target.name}: expected one release wheel, found {len(wheels)}"
-                )
-            wheel_paths.append(wheels[0])
-            bundled_count = _inspect_wheel(target, wheels[0])
-            sdists = sorted(output_dir.glob(f"{wheel_prefix}*.tar.gz"))
-            if len(sdists) != 1:
-                raise AssertionError(
-                    f"{target.name}: expected one release sdist, found {len(sdists)}"
-                )
-            _inspect_sdist(target, sdists[0])
-            summaries.append(
-                f"{wheels[0].name} + {sdists[0].name} "
-                f"({bundled_count} required bundled files)"
-            )
-        _fresh_install(wheel_paths, output_dir)
+    if args.output_dir is None:
+        with tempfile.TemporaryDirectory(prefix="commonground-wheel-") as temporary_dir:
+            summaries = _build_and_check(Path(temporary_dir))
+    else:
+        args.output_dir.mkdir(parents=True, exist_ok=True)
+        summaries = _build_and_check(args.output_dir)
 
     print(
         "release artifact check passed (licenses present; project configuration and "

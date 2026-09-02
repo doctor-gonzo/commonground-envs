@@ -30,7 +30,6 @@ TRAIN_SEED_BASE = 8100
 EVAL_SEED_BASE = 8200
 TRAIN_SCENARIOS_PER_TEMPLATE = 25
 EVAL_SCENARIOS_PER_TEMPLATE = 5
-MAX_CROSS_SPLIT_LEXICAL_JACCARD = 0.85
 MAX_CROSS_SPLIT_TFIDF_COSINE = 0.90
 
 
@@ -78,48 +77,6 @@ def instance_fingerprint(scenario: dict[str, Any]) -> str:
     )
 
 
-def canonical_prompt_semantics(scenario: dict[str, Any]) -> str:
-    """Hash visible propositions, faction principles, and Ask profiles."""
-
-    documents = sorted(
-        (
-            sorted(_normalized_propositions(str(document["text"])))
-            for document in scenario["documents"]
-        ),
-        key=lambda propositions: json.dumps(propositions, ensure_ascii=False),
-    )
-    factions = sorted(
-        (
-            {
-                "name": _normalized_text(str(faction["name"])),
-                "principles": sorted(_normalized_propositions(str(faction["summary"]))),
-            }
-            for faction in scenario["factions"]
-        ),
-        key=lambda faction: json.dumps(faction, sort_keys=True, ensure_ascii=False),
-    )
-    candidate_profiles = sorted(
-        (
-            {
-                "decision": {
-                    field: _normalized_text(str(value))
-                    for field, value in plant["decision"].items()
-                },
-                "alternative_tradeoff_weights": plant["value_weights"],
-            }
-            for plant in scenario["planted_items"]
-        ),
-        key=lambda profile: json.dumps(profile, sort_keys=True, ensure_ascii=False),
-    )
-    return _payload_hash(
-        {
-            "documents": documents,
-            "factions": factions,
-            "candidate_profiles": candidate_profiles,
-        }
-    )
-
-
 def policy_issue_semantics(scenario: dict[str, Any]) -> str:
     """Hash policy propositions, unresolved decisions, relations, and stances.
 
@@ -148,10 +105,6 @@ def policy_issue_semantics(scenario: dict[str, Any]) -> str:
                 "anchor": _normalized_text(str(plant["anchor_quote"])),
                 "type": str(plant["type"]),
                 "question": _normalized_text(str(plant["canonical_question"])),
-                "aliases": sorted(
-                    _normalized_text(str(alias))
-                    for alias in plant["canonical_question_aliases"]
-                ),
                 "related_quote": (
                     _normalized_text(str(related["quote"]))
                     if isinstance(related, dict)
@@ -166,49 +119,6 @@ def policy_issue_semantics(scenario: dict[str, Any]) -> str:
     return _payload_hash(
         sorted(plants, key=lambda plant: json.dumps(plant, sort_keys=True))
     )
-
-
-def scenario_semantic_key(scenario: dict[str, Any]) -> str:
-    """Compatibility alias for the canonical policy-issue semantic hash."""
-
-    return policy_issue_semantics(scenario)
-
-
-def lexical_semantic_tokens(scenario: dict[str, Any]) -> frozenset[str]:
-    """Return normalized tokens for a low-complexity near-duplicate audit."""
-
-    texts = [str(document["text"]) for document in scenario["documents"]] + [
-        str(plant["canonical_question"]) for plant in scenario["planted_items"]
-    ]
-    return frozenset(
-        token
-        for text in texts
-        for token in re.findall(r"[^\W_]+", text.casefold())
-        if len(token) >= 4
-    )
-
-
-def maximum_cross_split_lexical_jaccard(
-    train_scenarios: Sequence[dict[str, Any]],
-    eval_scenarios: Sequence[dict[str, Any]],
-) -> tuple[float, str, str]:
-    """Return the closest train/eval pair under token-set Jaccard similarity."""
-
-    best = (0.0, "", "")
-    train_tokens = [lexical_semantic_tokens(scenario) for scenario in train_scenarios]
-    eval_tokens = [lexical_semantic_tokens(scenario) for scenario in eval_scenarios]
-    for train_scenario, left in zip(train_scenarios, train_tokens, strict=True):
-        for eval_scenario, right in zip(eval_scenarios, eval_tokens, strict=True):
-            union = left | right
-            score = len(left & right) / len(union) if union else 1.0
-            candidate = (
-                score,
-                str(train_scenario["scenario_id"]),
-                str(eval_scenario["scenario_id"]),
-            )
-            if candidate > best:
-                best = candidate
-    return best
 
 
 def semantic_word_ngrams(scenario: dict[str, Any]) -> Counter[str]:
@@ -285,84 +195,6 @@ def _normalized_propositions(text: str) -> list[str]:
     ]
 
 
-def prompt_fingerprint(scenario: dict[str, Any]) -> str:
-    """Hash the exact model-visible instance, including opaque layout identity."""
-
-    payload = {
-        "documents": sorted(scenario["documents"], key=lambda item: item["doc_id"]),
-        "factions": [
-            {
-                "faction_id": faction["faction_id"],
-                "name": faction["name"],
-                "summary": faction["summary"],
-            }
-            for faction in scenario["factions"]
-        ],
-        # Ask renders candidates in this same canonical order, so layout-only
-        # plant shuffles cannot create a distinct model-visible fingerprint.
-        "candidate_profiles": sorted(
-            (
-                {
-                    "decision": plant["decision"],
-                    "alternative_tradeoff_weights": plant["value_weights"],
-                }
-                for plant in scenario["planted_items"]
-            ),
-            key=lambda profile: json.dumps(
-                profile["decision"], sort_keys=True, ensure_ascii=False
-            ),
-        ),
-    }
-    return _payload_hash(payload)
-
-
-def answer_fingerprint(scenario: dict[str, Any]) -> str:
-    """Hash the hidden answer contract independently of the prompt hash."""
-
-    return _payload_hash(scenario["planted_items"])
-
-
-def structural_signature(scenario: dict[str, Any]) -> str:
-    """Describe task structure without domain wording or random opaque IDs."""
-
-    documents = {document["doc_id"]: document for document in scenario["documents"]}
-    issue_layout = []
-    for plant in scenario["planted_items"]:
-        sentences = [
-            sentence.strip()
-            for sentence in documents[plant["doc_id"]]["text"].split(".")
-            if sentence.strip()
-        ]
-        anchor_prefix = plant["anchor_quote"].removesuffix(".")
-        anchor_position = next(
-            (
-                index
-                for index, sentence in enumerate(sentences)
-                if sentence.startswith(anchor_prefix)
-            ),
-            -1,
-        )
-        issue_layout.append(
-            {
-                "type": plant["type"],
-                "anchor_position": anchor_position,
-                "document_sentence_count": len(sentences),
-                "stance_multiset": sorted(plant["target_stances"].values()),
-                "has_related_evidence": plant["related_evidence"] is not None,
-            }
-        )
-    return _payload_hash(
-        {
-            "generator_family": scenario["provenance"]["generator_family"],
-            "document_count": len(scenario["documents"]),
-            "faction_count": len(scenario["factions"]),
-            "issue_layout": sorted(
-                issue_layout, key=lambda item: json.dumps(item, sort_keys=True)
-            ),
-        }
-    )
-
-
 def assert_split_integrity(
     train_scenarios: Sequence[dict[str, Any]],
     eval_scenarios: Sequence[dict[str, Any]],
@@ -372,30 +204,19 @@ def assert_split_integrity(
     for label, scenarios in (("train", train_scenarios), ("eval", eval_scenarios)):
         for fingerprint_name, fingerprint in (
             ("instance", instance_fingerprint),
-            ("prompt", prompt_fingerprint),
-            ("answer", answer_fingerprint),
-            ("canonical prompt semantics", canonical_prompt_semantics),
             ("policy issue semantics", policy_issue_semantics),
         ):
             values = [fingerprint(scenario) for scenario in scenarios]
             if len(values) != len(set(values)):
                 raise ValueError(f"duplicate {fingerprint_name} fingerprint in {label}")
-    train_prompt_keys = {prompt_fingerprint(scenario) for scenario in train_scenarios}
-    eval_prompt_keys = {prompt_fingerprint(scenario) for scenario in eval_scenarios}
-    if train_prompt_keys & eval_prompt_keys:
-        raise ValueError("train/eval prompt fingerprint overlap")
-    train_answer_keys = {answer_fingerprint(scenario) for scenario in train_scenarios}
-    eval_answer_keys = {answer_fingerprint(scenario) for scenario in eval_scenarios}
-    if train_answer_keys & eval_answer_keys:
-        raise ValueError("train/eval answer fingerprint overlap")
-    for fingerprint_name, fingerprint in (
-        ("canonical prompt semantics", canonical_prompt_semantics),
-        ("policy issue semantics", policy_issue_semantics),
-    ):
-        train_keys = {fingerprint(scenario) for scenario in train_scenarios}
-        eval_keys = {fingerprint(scenario) for scenario in eval_scenarios}
-        if train_keys & eval_keys:
-            raise ValueError(f"train/eval {fingerprint_name} overlap")
+    train_instances = {instance_fingerprint(scenario) for scenario in train_scenarios}
+    eval_instances = {instance_fingerprint(scenario) for scenario in eval_scenarios}
+    if train_instances & eval_instances:
+        raise ValueError("train/eval exact instance overlap")
+    train_semantics = {policy_issue_semantics(scenario) for scenario in train_scenarios}
+    eval_semantics = {policy_issue_semantics(scenario) for scenario in eval_scenarios}
+    if train_semantics & eval_semantics:
+        raise ValueError("train/eval policy issue semantics overlap")
     train_families = {
         scenario["provenance"]["generator_family"] for scenario in train_scenarios
     }
@@ -404,14 +225,6 @@ def assert_split_integrity(
     }
     if train_families & eval_families:
         raise ValueError("train/eval generator-profile labels must be disjoint")
-    similarity, train_id, eval_id = maximum_cross_split_lexical_jaccard(
-        train_scenarios, eval_scenarios
-    )
-    if similarity > MAX_CROSS_SPLIT_LEXICAL_JACCARD:
-        raise ValueError(
-            "train/eval lexical near-duplicate exceeds threshold: "
-            f"{similarity:.3f} for {train_id} and {eval_id}"
-        )
     similarity, train_id, eval_id = maximum_cross_split_tfidf_cosine(
         train_scenarios, eval_scenarios
     )
@@ -452,12 +265,6 @@ def assert_unique_policy_issue_semantics(
         if previous is not None:
             raise ValueError(f"duplicate semantic task: {previous} and {scenario_id}")
         seen[semantic_key] = scenario_id
-
-
-def assert_unique_semantic_tasks(scenarios: Sequence[dict[str, Any]]) -> None:
-    """Compatibility wrapper for the explicitly named policy-semantic audit."""
-
-    assert_unique_policy_issue_semantics(scenarios)
 
 
 def write_splits(

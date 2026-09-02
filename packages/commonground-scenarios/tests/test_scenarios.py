@@ -101,10 +101,6 @@ def test_generated_scenario_contains_complete_planted_structure(
         for plant in scenario["planted_items"]
     )
     assert all(
-        isinstance(plant["canonical_question_aliases"], list)
-        for plant in scenario["planted_items"]
-    )
-    assert all(
         set(plant["decision_aliases"]) == set(plant["decision"])
         and all(
             aliases[0] == plant["decision"][field]
@@ -600,43 +596,6 @@ def test_validator_allows_unlisted_semantic_paraphrases_as_distinct_identities()
     )
 
     validate_scenario(scenario)
-
-
-def test_validator_rejects_alias_that_duplicates_its_canonical_question() -> None:
-    scenario = generate_scenario(17, HELDOUT_TEMPLATES[0])
-    plant = scenario["planted_items"][0]
-    plant["canonical_question_aliases"] = [plant["canonical_question"]]
-
-    with pytest.raises(
-        ScenarioValidationError, match="duplicate canonical question or alias"
-    ):
-        validate_scenario(scenario)
-
-
-def test_validator_rejects_alias_that_duplicates_another_plant_question() -> None:
-    scenario = generate_scenario(17, HELDOUT_TEMPLATES[0])
-    first, second = scenario["planted_items"][:2]
-    first["canonical_question_aliases"] = [second["canonical_question"]]
-
-    with pytest.raises(ScenarioValidationError, match="duplicate canonical_question"):
-        validate_scenario(scenario)
-
-
-def test_validator_and_schema_reject_non_yes_no_question_alias() -> None:
-    scenario = generate_scenario(17, HELDOUT_TEMPLATES[0])
-    scenario["planted_items"][0]["canonical_question_aliases"] = [
-        "Which conditions require a route pause?"
-    ]
-
-    with pytest.raises(
-        ScenarioValidationError, match="alias must be a yes/no question"
-    ):
-        validate_scenario(scenario)
-    assert list(
-        Draft202012Validator(
-            load_scenario_schema(), format_checker=FormatChecker()
-        ).iter_errors(scenario)
-    )
 
 
 def test_validator_rejects_decision_aliases_without_canonical_first() -> None:

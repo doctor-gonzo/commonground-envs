@@ -477,10 +477,6 @@ def _apply_semantic_scope(
         plant["canonical_question"] = (
             f"{plant['canonical_question'].removesuffix('?')} {scope}?"
         )
-        plant["canonical_question_aliases"] = [
-            f"{alias.removesuffix('?')} {scope}?"
-            for alias in plant["canonical_question_aliases"]
-        ]
         # The scope changes the decision, not merely its surface wording. Keep
         # the authored structured reference aligned with the scoped evidence.
         plant["decision"]["condition"] = f"{plant['decision']['condition']} {scope}"

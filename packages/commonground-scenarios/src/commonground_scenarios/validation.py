@@ -243,7 +243,6 @@ def _validate_plants(
                 "anchor_quote",
                 "type",
                 "canonical_question",
-                "canonical_question_aliases",
                 "decision",
                 "decision_aliases",
                 "value_weights",
@@ -292,26 +291,6 @@ def _validate_plants(
         if question_key in seen_question_fingerprints:
             raise ScenarioValidationError(f"duplicate canonical_question: {plant_id}")
         seen_question_fingerprints.add(question_key)
-        aliases = plant["canonical_question_aliases"]
-        if not isinstance(aliases, list):
-            raise ScenarioValidationError(
-                f"canonical_question_aliases must be an array: {plant_id}"
-            )
-        for alias_index, alias_value in enumerate(aliases):
-            alias = _nonempty_text(
-                alias_value,
-                f"planted_items[{index}].canonical_question_aliases[{alias_index}]",
-            )
-            if not is_yes_no_question(alias):
-                raise ScenarioValidationError(
-                    f"canonical question alias must be a yes/no question: {plant_id}"
-                )
-            alias_key = question_fingerprint(alias)
-            if alias_key in seen_question_fingerprints:
-                raise ScenarioValidationError(
-                    f"duplicate canonical question or alias: {plant_id}"
-                )
-            seen_question_fingerprints.add(alias_key)
         decision = _exact_object(
             plant["decision"],
             DECISION_FIELDS,

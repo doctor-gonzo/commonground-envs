@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import sys
@@ -27,6 +28,18 @@ compute_floors = floors_module.compute_floors
 nearest_participant_probabilities = floors_module.nearest_participant_probabilities
 probability_distribution = floors_module.probability_distribution
 render_markdown = floors_module.render_markdown
+
+BASELINES_WITHOUT_TRAIN = {
+    "uniform-probability",
+    "statement-visible-frequency",
+    "distance-weighted-five-neighbor",
+}
+BASE_METRICS = {
+    "vote_accuracy",
+    "probability_reward",
+    "brier",
+    "brier_skill_vs_uniform",
+}
 
 
 def _snapshot(
@@ -85,7 +98,7 @@ def test_probability_distribution_is_normalized_smoothed_and_fail_closed() -> No
         probability_distribution([1], smoothing=True)
 
 
-def test_neighbor_probability_forecasts_are_deterministic_and_smoothed() -> None:
+def test_neighbor_probability_forecast_is_deterministic_weighted_and_smoothed() -> None:
     votes = [
         [1, None, 1, -1],
         [1, 1, 1, -1],
@@ -93,20 +106,24 @@ def test_neighbor_probability_forecasts_are_deterministic_and_smoothed() -> None
         [-1, 0, 1, 1],
     ]
 
-    unweighted = nearest_participant_probabilities(votes, 0, 1, neighbor_count=2)
-    weighted = nearest_participant_probabilities(
+    forecast = nearest_participant_probabilities(
         votes,
         0,
         1,
-        neighbor_count=2,
-        weighted=True,
+        neighbor_count=5,
         smoothing=0.5,
     )
 
-    assert unweighted == {"disagree": 0.5, "pass": 0.0, "agree": 0.5}
-    assert sum(weighted.values()) == pytest.approx(1.0)
-    assert all(probability > 0 for probability in weighted.values())
-    assert weighted["agree"] > weighted["disagree"] > weighted["pass"]
+    assert sum(forecast.values()) == pytest.approx(1.0)
+    assert all(probability > 0 for probability in forecast.values())
+    assert forecast["agree"] > forecast["disagree"] > forecast["pass"]
+    assert forecast == nearest_participant_probabilities(
+        votes,
+        0,
+        1,
+        neighbor_count=5,
+        smoothing=0.5,
+    )
 
     with pytest.raises(ValueError, match="positive integer"):
         nearest_participant_probabilities(votes, 0, 1, neighbor_count=0)
@@ -116,7 +133,7 @@ def test_neighbor_probability_forecasts_are_deterministic_and_smoothed() -> None
         )
 
 
-def test_compute_floors_reports_native_probability_ladder_and_named_skill(
+def test_compute_floors_has_only_required_probability_baselines_without_train(
     tmp_path: Path,
 ) -> None:
     split = tmp_path / "custom-eval.jsonl"
@@ -125,23 +142,13 @@ def test_compute_floors_reports_native_probability_ladder_and_named_skill(
         [
             _snapshot(
                 "fixture-a",
-                [
-                    [None, 1],
-                    [1, 1],
-                    [-1, 1],
-                    [0, 1],
-                ],
+                [[None, 1], [1, 1], [-1, 1], [0, 1]],
                 masked_cell=(0, 0),
                 held_out_vote=1,
             ),
             _snapshot(
                 "fixture-b",
-                [
-                    [1, -1],
-                    [-1, None],
-                    [-1, 0],
-                    [-1, -1],
-                ],
+                [[1, -1], [-1, None], [-1, 0], [-1, -1]],
                 masked_cell=(1, 1),
                 held_out_vote=-1,
             ),
@@ -150,68 +157,161 @@ def test_compute_floors_reports_native_probability_ladder_and_named_skill(
 
     floors = compute_floors(split, masked_vote_count=1)
 
-    assert {
-        "uniform-probability",
-        "snapshot-visible-prior",
-        "global-visible-prior",
-        "statement-visible-frequency",
-        "five-neighbor-frequency",
-        "distance-weighted-five-neighbor",
-    } <= floors.keys()
-    assert "train-global-prior" not in floors
-    assert "train-text-naive-bayes" not in floors
+    assert set(floors) == BASELINES_WITHOUT_TRAIN
+    assert all(set(metrics) == BASE_METRICS for metrics in floors.values())
     uniform = floors["uniform-probability"]
     assert uniform["vote_accuracy"] == 0.5
     assert uniform["probability_reward"] == pytest.approx(2 / 3)
     assert uniform["brier"] == pytest.approx(1 / 3)
-    assert uniform["brier_skill_vs_uniform"] == pytest.approx(0.0)
-    assert uniform["brier_skill_vs_original_snapshot_visible_prior"] == pytest.approx(
-        1.0 - uniform["brier"] / floors["snapshot-visible-prior"]["brier"]
-    )
-    assert (
-        floors["snapshot-visible-prior"][
-            "brier_skill_vs_original_snapshot_visible_prior"
-        ]
-        == 0.0
-    )
-    assert floors["snapshot-visible-prior"] != floors["global-visible-prior"]
+    assert uniform["brier_skill_vs_uniform"] == 0.0
 
     rendered = render_markdown(floors)
-    assert "Per-snapshot visible class prior" in rendered
-    assert "Global visible class prior" in rendered
-    assert "Evaluation-corpus visible (transductive)" in rendered
-    assert "Brier skill vs uniform" in rendered
-    assert "Brier skill vs snapshot prior" in rendered
+    assert "Uniform probability" in rendered
+    assert "Per-statement visible class frequencies" in rendered
+    assert "Smoothed distance-weighted 5-neighbor frequencies" in rendered
+    assert "Brier skill vs empirical prior" in rendered
+    assert "| — |" in rendered
+    assert "Naive Bayes" not in rendered
+    assert "oracle" not in rendered.casefold()
 
 
-def test_compute_floors_includes_train_only_probability_comparators(
+def test_compute_floors_adds_labeled_train_prior_and_empirical_skill(
     tmp_path: Path,
 ) -> None:
     split = tmp_path / "eval.jsonl"
     train = tmp_path / "train.jsonl"
-    row = _snapshot(
-        "fixture-eval",
-        [[None, 1], [1, -1], [-1, 0], [0, 1]],
-        masked_cell=(0, 0),
-        held_out_vote=1,
+    _write_jsonl(
+        split,
+        [
+            _snapshot(
+                "fixture-eval",
+                [[None, 1], [1, -1], [-1, 0], [0, 1]],
+                masked_cell=(0, 0),
+                held_out_vote=1,
+            )
+        ],
     )
-    train_row = _snapshot(
-        "fixture-train",
-        [[1, None], [1, -1], [0, -1], [-1, 0]],
-        masked_cell=(0, 1),
-        held_out_vote=1,
+    _write_jsonl(
+        train,
+        [
+            _snapshot(
+                "fixture-train",
+                [[1, None], [1, -1], [0, -1], [-1, 0]],
+                masked_cell=(0, 1),
+                held_out_vote=1,
+            )
+        ],
     )
-    _write_jsonl(split, [row])
-    _write_jsonl(train, [train_row])
 
     floors = compute_floors(split, masked_vote_count=1, train_path=train)
 
-    assert "train-global-prior" in floors
-    assert "train-text-naive-bayes" in floors
-    assert set(floors["train-global-prior"]) == {
-        "vote_accuracy",
-        "probability_reward",
-        "brier",
-        "brier_skill_vs_uniform",
-        "brier_skill_vs_original_snapshot_visible_prior",
+    assert list(floors) == [
+        "uniform-probability",
+        "train-global-prior",
+        "statement-visible-frequency",
+        "distance-weighted-five-neighbor",
+    ]
+    expected_metrics = BASE_METRICS | {"brier_skill_vs_empirical_prior"}
+    assert all(set(metrics) == expected_metrics for metrics in floors.values())
+    # The labeled train counts are disagree=3, pass=2, agree=3; the held-out
+    # train label must be included rather than silently treated as missing.
+    assert floors["train-global-prior"]["probability_reward"] == pytest.approx(0.703125)
+    assert floors["train-global-prior"]["brier_skill_vs_empirical_prior"] == 0.0
+
+
+def test_predict_floor_cli_infers_train_and_writes_deterministic_digests(
+    tmp_path: Path,
+) -> None:
+    split = tmp_path / "eval_synthetic.jsonl"
+    train = tmp_path / "train_synthetic.jsonl"
+    first_output = tmp_path / "floors-a.json"
+    second_output = tmp_path / "floors-b.json"
+    _write_jsonl(
+        split,
+        [
+            _snapshot(
+                "fixture-json-eval",
+                [[None, 1], [1, -1], [-1, 0], [0, 1]],
+                masked_cell=(0, 0),
+                held_out_vote=1,
+            )
+        ],
+    )
+    _write_jsonl(
+        train,
+        [
+            _snapshot(
+                "fixture-json-train",
+                [[1, None], [1, -1], [0, -1], [-1, 0]],
+                masked_cell=(0, 1),
+                held_out_vote=1,
+            )
+        ],
+    )
+
+    for output in (first_output, second_output):
+        assert (
+            floors_module.main(
+                [
+                    str(split),
+                    "--masked-vote-count",
+                    "1",
+                    "--seed",
+                    "fixed-seed",
+                    "--output-json",
+                    str(output),
+                ]
+            )
+            == 0
+        )
+
+    assert first_output.read_bytes() == second_output.read_bytes()
+    report = json.loads(first_output.read_text())
+    assert report["schema_version"] == 1
+    assert report["seed"] == "fixed-seed"
+    assert report["split"] == {
+        "path": str(split),
+        "sha256": hashlib.sha256(split.read_bytes()).hexdigest(),
     }
+    assert report["train_split"] == {
+        "path": str(train),
+        "sha256": hashlib.sha256(train.read_bytes()).hexdigest(),
+    }
+    assert set(report["floors"]) == BASELINES_WITHOUT_TRAIN | {"train-global-prior"}
+
+
+def test_predict_floor_cli_omits_missing_train_cleanly(tmp_path: Path) -> None:
+    split = tmp_path / "custom-eval.jsonl"
+    output = tmp_path / "floors.json"
+    _write_jsonl(
+        split,
+        [
+            _snapshot(
+                "fixture-no-train",
+                [[None, 1], [1, -1], [-1, 0], [0, 1]],
+                masked_cell=(0, 0),
+                held_out_vote=1,
+            )
+        ],
+    )
+
+    assert (
+        floors_module.main(
+            [
+                str(split),
+                "--masked-vote-count",
+                "1",
+                "--output-json",
+                str(output),
+            ]
+        )
+        == 0
+    )
+
+    report = json.loads(output.read_text())
+    assert "train_split" not in report
+    assert set(report["floors"]) == BASELINES_WITHOUT_TRAIN
+    assert all(
+        "brier_skill_vs_empirical_prior" not in metrics
+        for metrics in report["floors"].values()
+    )

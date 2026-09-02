@@ -45,7 +45,6 @@ from commonground_scenarios.generator import ACTOR_SUPPORT_REASON, orient_stance
 from commonground_scenarios.templates import VALUE_DIMENSIONS
 from commonground_scenarios.validation import (
     PASS_THRESHOLD,
-    YES_NO_AUXILIARIES,
     preference_tradeoff_value,
 )
 from verifiers.types import State
@@ -360,7 +359,6 @@ def test_prompt_does_not_leak_answer_key_or_faction_priors() -> None:
         assert json.dumps(plant["target_stances"], sort_keys=True) not in prompt
     for question in answer["questions"]:
         assert question["question"] not in prompt
-        assert all(alias not in prompt for alias in question["question_aliases"])
         assert json.dumps(question["target_stances"], sort_keys=True) not in prompt
 
 
@@ -439,11 +437,10 @@ def test_ask_task_builds_same_env_id_with_task_specific_prompt() -> None:
     assert "Select and raise exactly 1 clarifying question" in prompt
     assert "agree means yes" in prompt
     assert "copy the exact supporting passage" in prompt.casefold()
-    assert "generic questions receive no semantic credit" in prompt.casefold()
+    assert "question text is a presentation field" in prompt.casefold()
     assert "Stakeholder factions:" in prompt
     for plant in planted:
         assert plant["question"] not in prompt
-        assert all(alias not in prompt for alias in plant["question_aliases"])
         assert json.dumps(plant["target_stances"], sort_keys=True) not in prompt
 
 
@@ -480,14 +477,19 @@ def test_ask_diagnostics_separate_format_grounding_and_stance_failures() -> None
     )
     semantic_error = json.loads(json.dumps(exact))
     semantic_error["questions"][0]["decision"]["actor"] = "an unrelated committee"
+    declarative = json.loads(json.dumps(exact))
+    declarative["questions"][0]["question"] = "This is not a yes-or-no question."
 
     malformed = score_row(env, row, {"questions": "invalid"})
     ungrounded = score_row(env, row, wrong_grounding)
     stance_error = score_row(env, row, wrong_stance)
     semantic_failure = score_row(env, row, semantic_error)
+    declarative_failure = score_row(env, row, declarative)
 
     assert malformed["metrics"]["question_format_valid"] == 0.0
     assert malformed["metrics"]["question_top1_selection_accuracy"] == 0.0
+    assert declarative_failure["metrics"]["question_format_valid"] == 0.0
+    assert declarative_failure["reward"] == 0.0
     assert ungrounded["metrics"]["question_format_valid"] == 1.0
     assert ungrounded["metrics"]["question_grounding_recall"] == 0.0
     assert ungrounded["metrics"]["question_evidence_match_recall"] == 0.0
@@ -619,41 +621,6 @@ def test_panel_polarization_changes_selection_weights_without_changing_exact_max
     half_score = score_row(half_env, half_row, half_answer)["reward"]
 
     assert half_score == pytest.approx(full_score) == 1.0
-
-
-def test_generic_question_cannot_claim_structured_decision_grounding() -> None:
-    env = load_environment(task="elicit-ask", question_count=1)
-    row = dict(env.get_eval_dataset()[0])
-    plant = planted_questions_from_row(row)[0]
-    targeted = candidate_for_plant(plant)
-    generic = {
-        **targeted,
-        "question": "Should we have rules at all?",
-    }
-    targeted_paraphrase = {
-        **targeted,
-        "question": (
-            plant["question_aliases"][0]
-            if plant["question_aliases"]
-            else plant["question"]
-        ),
-    }
-
-    targeted_score = question_utility_score(
-        [targeted], [plant], panel_polarization=1.0, question_count=1
-    )
-    generic_score = question_utility_score(
-        [generic], [plant], panel_polarization=1.0, question_count=1
-    )
-    paraphrase_score = question_utility_score(
-        [targeted_paraphrase],
-        [plant],
-        panel_polarization=1.0,
-        question_count=1,
-    )
-
-    assert targeted_score == paraphrase_score == 1.0
-    assert generic_score == 0.0
 
 
 def test_precise_distractor_quote_cannot_receive_planted_question_credit() -> None:
@@ -796,234 +763,6 @@ def test_question_must_be_yes_no(
     )
 
 
-@pytest.mark.parametrize(
-    "question",
-    [
-        "Should we have rules at all?",
-        "Should this policy apply?",
-        "May a synonym-rich reformulation govern this case?",
-    ],
-)
-def test_generic_question_vocabulary_cannot_replace_decision_semantics(
-    question: str,
-) -> None:
-    env = load_environment(task="elicit-ask", question_count=1)
-    plant = planted_questions_from_row(dict(env.get_eval_dataset()[0]))[0]
-
-    assert (
-        question_utility_score(
-            [candidate_for_plant(plant, question=question)],
-            [plant],
-            panel_polarization=1.0,
-            question_count=1,
-        )
-        == 0.0
-    )
-
-
-def test_quote_only_question_without_decision_frame_semantics_scores_zero() -> None:
-    env = load_environment(task="elicit-ask", question_count=1)
-    plant = planted_questions_from_row(dict(env.get_eval_dataset()[0]))[0]
-    question = f"Should {' '.join(plant['quote'].split()[:4])} be clarified?"
-    assert question not in {plant["question"], *plant["question_aliases"]}
-
-    score = question_utility_score(
-        [candidate_for_plant(plant, question=question)],
-        [plant],
-        panel_polarization=1.0,
-        question_count=1,
-    )
-
-    assert score == 0.0
-
-
-@pytest.mark.parametrize("issue_type", ["ambiguity", "contradiction", "gap"])
-def test_independently_authored_decision_paraphrases_score_for_ask_and_find(
-    issue_type: str,
-) -> None:
-    """Natural paraphrases must work without copying the hidden frame strings."""
-
-    plant = semantic_contract_plant(issue_type)
-    candidate = semantic_contract_candidate(issue_type, plant)
-    finding_candidate = {
-        "doc_id": candidate["doc_id"],
-        "quote": candidate["quote"],
-        "type": candidate["type"],
-        "diagnosis": candidate["question"],
-        "decision": candidate["decision"],
-        "related_evidence": candidate["related_evidence"],
-    }
-
-    assert candidate["decision"] != plant["decision"]
-    assert candidate["question"] not in {
-        plant["question"],
-        *plant["question_aliases"],
-    }
-    assert (
-        question_utility_score(
-            [candidate],
-            [plant],
-            panel_polarization=1.0,
-            question_count=1,
-        )
-        == 1.0
-    )
-    assert match_findings([finding_candidate], [plant])["f1"] == 1.0
-
-
-@pytest.mark.parametrize("auxiliary", sorted(YES_NO_AUXILIARIES))
-def test_semantic_credit_is_invariant_to_accepted_yes_no_auxiliary(
-    auxiliary: str,
-) -> None:
-    """Surface-form auxiliaries must not become hidden semantic keywords."""
-
-    plant = semantic_contract_plant("ambiguity")
-    candidate = semantic_contract_candidate("ambiguity", plant)
-    _, remainder = candidate["question"].split(maxsplit=1)
-    candidate["question"] = f"{auxiliary} {remainder}"
-
-    assert (
-        question_utility_score(
-            [candidate],
-            [plant],
-            panel_polarization=1.0,
-            question_count=1,
-        )
-        == 1.0
-    )
-
-
-@pytest.mark.parametrize("malformation", ["repeat-actor", "swap-actor-action"])
-def test_decision_core_slots_cannot_be_repeated_or_swapped(
-    malformation: str,
-) -> None:
-    plant = semantic_contract_plant("ambiguity")
-    candidate = semantic_contract_candidate("ambiguity", plant)
-    malformed = json.loads(json.dumps(candidate))
-
-    if malformation == "repeat-actor":
-        repeated = malformed["decision"]["actor"]
-        malformed["decision"]["action"] = repeated
-        malformed["decision"]["condition"] = repeated
-    else:
-        malformed["decision"]["actor"], malformed["decision"]["action"] = (
-            malformed["decision"]["action"],
-            malformed["decision"]["actor"],
-        )
-
-    assert (
-        question_utility_score(
-            [malformed],
-            [plant],
-            panel_polarization=1.0,
-            question_count=1,
-        )
-        == 0.0
-    )
-
-
-def test_evidence_word_dump_cannot_satisfy_decision_slots() -> None:
-    plant = semantic_contract_plant("contradiction")
-    candidate = semantic_contract_candidate("contradiction", plant)
-    evidence_dump = (
-        "duty coordinator assigned dispatcher transfer delayed load after hours "
-        "available route alone unavailable"
-    )
-    dumped = {
-        **candidate,
-        "question": f"Should {evidence_dump}?",
-        "decision": {
-            "actor": evidence_dump,
-            "action": evidence_dump,
-            "condition": evidence_dump,
-            "anchor_outcome": evidence_dump,
-            "alternative_outcome": f"{evidence_dump} alternate",
-        },
-    }
-
-    assert (
-        question_utility_score(
-            [dumped],
-            [plant],
-            panel_polarization=1.0,
-            question_count=1,
-        )
-        == 0.0
-    )
-
-
-def test_baseline_style_paraphrase_without_unsupported_clause_is_scorable() -> None:
-    plant = {
-        "doc_id": "listing-rules",
-        "quote": "Trust reviewers may remove a misleading listing immediately.",
-        "type": "ambiguity",
-        "question": (
-            "Should trust reviewers remove a listing immediately "
-            "(yes selects the alternative outcome: immediate trust removal)?"
-        ),
-        "question_aliases": [],
-        "yes_choice": "alternative",
-        "related_evidence": None,
-        "decision": {
-            "actor": "trust reviewers",
-            "action": "remove listing",
-            "condition": "immediately",
-            "anchor_outcome": "remove misleading listing",
-            "alternative_outcome": "immediate trust removal",
-        },
-        "alternative_stances": {
-            "buyers": "agree",
-            "creators": "disagree",
-            "trust": "agree",
-        },
-        "target_stances": {
-            "buyers": "agree",
-            "creators": "disagree",
-            "trust": "agree",
-        },
-        "document_text": (
-            "Removed listing records retain the cited rule. "
-            "Trust reviewers may remove a misleading listing immediately."
-        ),
-    }
-    candidate = candidate_for_plant(
-        plant,
-        question=("Is immediate removal of a listing by trust reviewers allowed?"),
-        target_stances={
-            "buyers": "pass",
-            "creators": "disagree",
-            "trust": "agree",
-        },
-    )
-
-    score = question_utility_score(
-        [candidate], [plant], panel_polarization=1.0, question_count=1
-    )
-
-    assert (
-        0.0
-        < score
-        < question_utility_score(
-            [candidate_for_plant(plant)],
-            [plant],
-            panel_polarization=1.0,
-            question_count=1,
-        )
-    )
-
-    unsupported = copy.deepcopy(candidate)
-    unsupported["question"] = (
-        "Is immediate removal of a listing by trust reviewers allowed before "
-        "a creator can appeal?"
-    )
-    assert (
-        question_utility_score(
-            [unsupported], [plant], panel_polarization=1.0, question_count=1
-        )
-        == 0.0
-    )
-
-
 def test_stance_accuracy_adds_monotonic_partial_credit() -> None:
     env = load_environment(task="elicit-ask", question_count=1)
     plant = planted_questions_from_row(dict(env.get_eval_dataset()[0]))[0]
@@ -1060,215 +799,6 @@ def test_stance_accuracy_adds_monotonic_partial_credit() -> None:
     assert exact_score > partial_score > grounding_only_score > 0.0
 
 
-def test_fully_consistent_question_polarity_reversal_preserves_full_credit() -> None:
-    plant = semantic_contract_plant("ambiguity")
-    inverse = {"agree": "disagree", "disagree": "agree", "pass": "pass"}
-    assert plant["yes_choice"] == "anchor"
-    flipped_choice = "alternative"
-    flipped_stances = {
-        faction_id: inverse[stance]
-        for faction_id, stance in plant["target_stances"].items()
-    }
-    canonical = semantic_contract_candidate("ambiguity", plant)
-    reversed_question = (
-        "Should dispatchers define observable unsafe conditions before pausing "
-        "a route (yes selects the alternative outcome: define observable unsafe "
-        "conditions before a route pause)?"
-    )
-    fully_reversed = candidate_for_plant(
-        plant,
-        question=reversed_question,
-        decision=canonical["decision"],
-        yes_choice=flipped_choice,
-        target_stances=flipped_stances,
-    )
-    metadata_only_flip = candidate_for_plant(
-        plant,
-        question=canonical["question"],
-        decision=canonical["decision"],
-        yes_choice=flipped_choice,
-        target_stances=flipped_stances,
-    )
-
-    canonical_score = question_utility_score(
-        [canonical],
-        [plant],
-        panel_polarization=1.0,
-        question_count=1,
-    )
-    counterfactual_score = question_utility_score(
-        [fully_reversed],
-        [plant],
-        panel_polarization=1.0,
-        question_count=1,
-    )
-    mislabeled_score = question_utility_score(
-        [metadata_only_flip],
-        [plant],
-        panel_polarization=1.0,
-        question_count=1,
-    )
-
-    # Outcome fields retain their evidence roles. Orientation changes through
-    # question prose, yes_choice, and the correspondingly inverted stances.
-    assert fully_reversed["decision"] == canonical["decision"]
-    assert canonical_score == counterfactual_score == 1.0
-    assert mislabeled_score == 0.0
-
-
-def test_added_negation_cannot_preserve_question_or_decision_credit() -> None:
-    plant = semantic_contract_plant("ambiguity")
-    exact = semantic_contract_candidate("ambiguity", plant)
-    negated_question = json.loads(json.dumps(exact))
-    negated_question["question"] = (
-        "Should route dispatchers not pause unsafe routes when travel conditions "
-        "may be unsafe (yes selects the anchor outcome: pause unsafe routes)?"
-    )
-    contracted_question = json.loads(json.dumps(exact))
-    contracted_question["question"] = (
-        "Should route dispatchers ensure the route doesn't pause when travel "
-        "conditions may be unsafe (yes selects the anchor outcome: pause unsafe "
-        "routes)?"
-    )
-    negated_decision = json.loads(json.dumps(exact))
-    negated_decision["decision"]["anchor_outcome"] = "do not pause unsafe routes"
-    negated_decision["question"] = (
-        "Should route dispatchers not pause unsafe routes when travel conditions "
-        "may be unsafe (yes selects the anchor outcome: do not pause unsafe routes)?"
-    )
-
-    assert (
-        question_utility_score(
-            [exact], [plant], panel_polarization=1.0, question_count=1
-        )
-        == 1.0
-    )
-    for candidate in (negated_question, contracted_question, negated_decision):
-        assert (
-            question_utility_score(
-                [candidate], [plant], panel_polarization=1.0, question_count=1
-            )
-            == 0.0
-        )
-
-
-@pytest.mark.parametrize(
-    "negating_action",
-    [
-        "avoid transfer of a delayed load",
-        "refuse to transfer a delayed load",
-        "decline to transfer a delayed load",
-        "fail to transfer a delayed load",
-    ],
-)
-def test_lexically_negated_action_cannot_preserve_credit(
-    negating_action: str,
-) -> None:
-    plant = semantic_contract_plant("contradiction")
-    exact = semantic_contract_candidate("contradiction", plant)
-    question_only = copy.deepcopy(exact)
-    question_only["question"] = (
-        f"Should the on-duty coordinator {negating_action} after hours while the "
-        "assigned dispatcher is unavailable (yes selects the anchor outcome: "
-        "the coordinator transfers the delayed load to an available route)?"
-    )
-    frame_only = copy.deepcopy(exact)
-    frame_only["decision"]["action"] = negating_action
-    negated_question_and_frame = copy.deepcopy(question_only)
-    negated_question_and_frame["decision"]["action"] = negating_action
-
-    for candidate in (question_only, frame_only, negated_question_and_frame):
-        assert (
-            question_utility_score(
-                [candidate], [plant], panel_polarization=1.0, question_count=1
-            )
-            == 0.0
-        )
-
-
-@pytest.mark.parametrize(
-    "unsupported_action",
-    [
-        "transfer a delayed load and fire the driver",
-        "transfer a delayed load and sell records",
-        "transfer a delayed load or ignore the report",
-        "transfer a delayed load and poison the water",
-    ],
-)
-def test_unsupported_appended_action_semantics_cannot_preserve_credit(
-    unsupported_action: str,
-) -> None:
-    plant = semantic_contract_plant("contradiction")
-    exact = semantic_contract_candidate("contradiction", plant)
-    frame_append = copy.deepcopy(exact)
-    frame_append["decision"]["action"] = unsupported_action
-    stem_append = copy.deepcopy(exact)
-    stem, marker, tail = stem_append["question"].partition(" (yes selects")
-    stem_append["question"] = (
-        f"{stem} and {unsupported_action}{marker and ' (yes selects'}{tail}"
-    )
-    tail_append = copy.deepcopy(exact)
-    tail_append["question"] = tail_append["question"].replace(
-        ")?", f" and {unsupported_action})?"
-    )
-
-    assert (
-        question_utility_score(
-            [exact], [plant], panel_polarization=1.0, question_count=1
-        )
-        == 1.0
-    )
-    for candidate in (frame_append, stem_append, tail_append):
-        assert (
-            question_utility_score(
-                [candidate], [plant], panel_polarization=1.0, question_count=1
-            )
-            == 0.0
-        )
-
-
-def test_orientation_marker_tail_must_name_its_labeled_outcome() -> None:
-    plant = semantic_contract_plant("ambiguity")
-    candidate = semantic_contract_candidate("ambiguity", plant)
-    candidate["question"] = (
-        "Should route dispatchers pause unsafe routes when travel conditions may "
-        "be unsafe (yes selects the anchor outcome: define observable unsafe "
-        "conditions before a route pause)?"
-    )
-
-    assert (
-        question_utility_score(
-            [candidate], [plant], panel_polarization=1.0, question_count=1
-        )
-        == 0.0
-    )
-
-
-def test_marker_payload_cannot_supply_a_missing_core_condition() -> None:
-    plant = semantic_contract_plant("ambiguity")
-    candidate = semantic_contract_candidate("ambiguity", plant)
-    candidate["question"] = (
-        "Should route dispatchers pause unsafe routes (yes selects the anchor "
-        "outcome: pause unsafe routes when travel conditions may be unsafe)?"
-    )
-    finding = {
-        "doc_id": candidate["doc_id"],
-        "quote": candidate["quote"],
-        "type": candidate["type"],
-        "diagnosis": candidate["question"],
-        "decision": candidate["decision"],
-        "related_evidence": candidate["related_evidence"],
-    }
-
-    assert (
-        question_utility_score(
-            [candidate], [plant], panel_polarization=1.0, question_count=1
-        )
-        == 0.0
-    )
-    assert match_findings([finding], [plant])["f1"] == 0.0
-
-
 @pytest.mark.parametrize(
     ("field", "wrong_value"),
     [
@@ -1295,13 +825,16 @@ def test_wrong_document_or_quote_cannot_claim_question_credit(
 
 def test_exact_quote_preserves_semantic_operators() -> None:
     stances = {"operations": "agree", "risk": "disagree", "support": "pass"}
+    inverse = {"agree": "disagree", "disagree": "agree", "pass": "pass"}
     plant = {
         "doc_id": "approval-policy",
         "quote": "Approval requires threshold >= 5.",
         "question": "Should approval require a threshold >= 5?",
-        "question_aliases": [],
         "yes_choice": "anchor",
         "target_stances": stances,
+        "alternative_stances": {
+            faction_id: inverse[stance] for faction_id, stance in stances.items()
+        },
         "document_text": "Approval requires threshold >= 5.",
         "decision": {
             "actor": "approval",
@@ -1386,303 +919,6 @@ def test_distinct_grounded_questions_use_global_one_to_one_assignment() -> None:
     )
 
     assert score > 0.0
-
-
-def test_question_must_express_its_structured_decision_frame() -> None:
-    env = load_environment(task="elicit-ask", question_count=1)
-    plant = planted_questions_from_row(dict(env.get_eval_dataset()[0]))[0]
-    no_token = candidate_for_plant(plant, question="Should this policy apply?")
-    one_noun = candidate_for_plant(plant, question="Should this route apply?")
-    grounded = candidate_for_plant(plant)
-
-    scores = [
-        question_utility_score(
-            [candidate], [plant], panel_polarization=1.0, question_count=1
-        )
-        for candidate in (no_token, one_noun, grounded)
-    ]
-
-    assert scores[0] == 0.0
-    assert scores[1] < scores[2]
-    assert scores[2] == 1.0
-
-
-def test_source_observable_decision_aliases_receive_full_semantic_credit() -> None:
-    template = next(
-        candidate
-        for candidate in HELDOUT_TEMPLATES
-        if candidate.template_id == "community-clinic-scheduling"
-    )
-    row = scenario_to_row(
-        generate_scenario(8214, template),
-        docs_count=None,
-        docs_length=None,
-        planted_density=1.0,
-        distractor_density=1.0,
-        panel_polarization=1.0,
-        question_count=1,
-        task="elicit-ask",
-    )
-    plant = next(
-        item for item in planted_questions_from_row(row) if item["type"] == "ambiguity"
-    )
-    decision = dict(plant["decision"])
-    decision.update(
-        {
-            "actor": "community health scheduling team",
-            "action": (
-                "decide which conditions make a patient eligible for an early "
-                "appointment"
-            ),
-            "condition": (
-                "conditions make a patient eligible for an early appointment "
-                "when the affected person cannot provide the usual record"
-            ),
-        }
-    )
-    candidate = candidate_for_plant(
-        plant,
-        question=(
-            "Should the community health scheduling team decide which conditions "
-            "make a patient eligible for an early appointment when the affected "
-            "person cannot provide the usual record (yes selects the alternative "
-            "outcome: schedulers define which conditions qualify for an early "
-            "appointment)?"
-        ),
-        decision=decision,
-    )
-
-    assert (
-        question_utility_score(
-            [candidate], [plant], panel_polarization=1.0, question_count=1
-        )
-        == 1.0
-    )
-
-    unscoped = copy.deepcopy(candidate)
-    unscoped["decision"]["condition"] = (
-        "conditions make a patient eligible for an early appointment"
-    )
-    assert (
-        question_utility_score(
-            [unscoped], [plant], panel_polarization=1.0, question_count=1
-        )
-        == 0.0
-    )
-
-    moved_negation = copy.deepcopy(candidate)
-    moved_negation["question"] = (
-        "Should the community health scheduling team not decide which conditions "
-        "make a patient eligible for an early appointment when the affected "
-        "person can provide the usual record (yes selects the alternative "
-        "outcome: schedulers define which conditions qualify for an early "
-        "appointment)?"
-    )
-    assert (
-        question_utility_score(
-            [moved_negation], [plant], panel_polarization=1.0, question_count=1
-        )
-        == 0.0
-    )
-
-
-def test_disaster_shelter_source_action_alias_receives_full_semantic_credit() -> None:
-    template = next(
-        candidate
-        for candidate in HELDOUT_TEMPLATES
-        if candidate.template_id == "disaster-shelter-intake"
-    )
-    row = scenario_to_row(
-        generate_scenario(8247, template),
-        docs_count=None,
-        docs_length=None,
-        planted_density=1.0,
-        distractor_density=1.0,
-        panel_polarization=1.0,
-        question_count=1,
-        task="elicit-ask",
-    )
-    plant = next(
-        item for item in planted_questions_from_row(row) if item["type"] == "ambiguity"
-    )
-    decision = dict(plant["decision"])
-    decision["action"] = "prioritize vulnerable residents for available shelter beds"
-    selected = str(plant["yes_choice"])
-    candidate = candidate_for_plant(
-        plant,
-        question=(
-            f"Should {decision['actor']} {decision['action']} when "
-            f"{decision['condition']} (yes selects the {selected} outcome: "
-            f"{decision[f'{selected}_outcome']})?"
-        ),
-        decision=decision,
-    )
-
-    assert decision["action"] in plant["decision_aliases"]["action"]
-    assert (
-        question_utility_score(
-            [candidate], [plant], panel_polarization=1.0, question_count=1
-        )
-        == 1.0
-    )
-
-
-def test_visible_organization_team_alias_receives_full_semantic_credit() -> None:
-    template = next(
-        candidate
-        for candidate in HELDOUT_TEMPLATES
-        if candidate.template_id == "cooperative-housing-maintenance"
-    )
-    row = scenario_to_row(
-        generate_scenario(8215, template),
-        docs_count=None,
-        docs_length=None,
-        planted_density=1.0,
-        distractor_density=1.0,
-        panel_polarization=1.0,
-        question_count=1,
-        task="elicit-ask",
-    )
-    plant = next(
-        item for item in planted_questions_from_row(row) if item["type"] == "ambiguity"
-    )
-    canonical = candidate_for_plant(plant)
-    visible_actor = copy.deepcopy(canonical)
-    visible_actor["decision"]["actor"] = "the cooperative housing maintenance team"
-    visible_actor["question"] = visible_actor["question"].replace(
-        "maintenance coordinators",
-        "the cooperative housing maintenance team",
-    )
-
-    assert (
-        question_utility_score(
-            [canonical], [plant], panel_polarization=1.0, question_count=1
-        )
-        == question_utility_score(
-            [visible_actor], [plant], panel_polarization=1.0, question_count=1
-        )
-        == 1.0
-    )
-
-
-def test_candidate_question_cannot_supply_its_own_missing_evidence() -> None:
-    plant = semantic_contract_plant("ambiguity")
-    plant["document_text"] = "Priority patients are offered an early appointment."
-    plant["decision"] = {
-        "actor": "clinic schedulers",
-        "action": "determine early appointment eligibility",
-        "condition": "a patient's condition may warrant priority scheduling",
-        "anchor_outcome": "priority patients are offered an early appointment",
-        "alternative_outcome": (
-            "schedulers define which conditions qualify for an early appointment"
-        ),
-    }
-    candidate_decision = dict(plant["decision"])
-    candidate_decision["actor"] = "a self-declared eligibility committee"
-    candidate = candidate_for_plant(
-        plant,
-        question=(
-            "Should a self-declared eligibility committee determine early appointment "
-            "eligibility when a patient's condition may warrant priority scheduling "
-            "(yes selects the anchor outcome: priority patients are offered an early "
-            "appointment)?"
-        ),
-        decision=candidate_decision,
-    )
-
-    assert (
-        question_utility_score(
-            [candidate], [plant], panel_polarization=1.0, question_count=1
-        )
-        == 0.0
-    )
-
-
-def test_generic_yes_no_prose_is_not_a_semantic_answer() -> None:
-    plant = {
-        "doc_id": "policy",
-        "quote": "Is it?",
-        "question": "Is it?",
-        "question_aliases": [],
-        "target_stances": {"operations": "agree", "risk": "disagree"},
-        "document_text": "Is it?",
-        "decision": {
-            "actor": "policy owner",
-            "action": "apply the rule",
-            "condition": "during an exception",
-            "anchor_outcome": "preserve the rule",
-            "alternative_outcome": "allow the exception",
-        },
-    }
-
-    assert (
-        question_utility_score(
-            [candidate_for_plant(plant)],
-            [plant],
-            panel_polarization=1.0,
-            question_count=1,
-        )
-        == 0.0
-    )
-
-
-def test_unrelated_evidence_supported_decision_frame_scores_zero() -> None:
-    plant = {
-        "doc_id": "route-policy",
-        "quote": "Dispatchers must pause routes when ice makes travel unsafe.",
-        "type": "ambiguity",
-        "question": (
-            "Should dispatchers pause routes when ice makes travel unsafe "
-            "(yes selects the anchor outcome: pause unsafe routes)?"
-        ),
-        "question_aliases": [],
-        "decision": {
-            "actor": "dispatchers",
-            "action": "pause routes",
-            "condition": "ice unsafe travel",
-            "anchor_outcome": "pause unsafe routes",
-            "alternative_outcome": "allow route operation",
-        },
-        "yes_choice": "anchor",
-        "target_stances": {"operations": "agree", "risk": "disagree"},
-        "alternative_stances": {"operations": "disagree", "risk": "agree"},
-        "decision_value": 1.0,
-        "related_evidence": None,
-        "document_text": (
-            "Dispatchers must pause routes when ice makes travel unsafe. "
-            "A clarified exception may allow route operation. "
-            "Auditors record monthly logs after each review. "
-            "Managers may skip logs during maintenance."
-        ),
-    }
-    exact = candidate_for_plant(plant)
-    unrelated = {
-        **exact,
-        "question": (
-            "Should auditors record monthly logs after review "
-            "(yes selects the anchor outcome: record monthly logs)?"
-        ),
-        "decision": {
-            "actor": "auditors",
-            "action": "record logs",
-            "condition": "monthly review",
-            "anchor_outcome": "record monthly logs",
-            "alternative_outcome": "skip logs maintenance",
-        },
-    }
-
-    assert (
-        question_utility_score(
-            [exact], [plant], panel_polarization=1.0, question_count=1
-        )
-        == 1.0
-    )
-    assert (
-        question_utility_score(
-            [unrelated], [plant], panel_polarization=1.0, question_count=1
-        )
-        == 0.0
-    )
 
 
 def test_ask_task_rejects_find_task_combined_root() -> None:
@@ -1912,62 +1148,6 @@ def test_contradiction_rejects_broad_second_document_evidence() -> None:
     assert state["metrics"]["finding_type_accuracy"] == 1.0
 
 
-def test_find_diagnosis_must_express_its_structured_decision_frame() -> None:
-    env = load_environment()
-    row = dict(env.get_eval_dataset()[0])
-    response = correct_response_from_row(row)
-    gap = next(finding for finding in response["findings"] if finding["type"] == "gap")
-    gap["diagnosis"] = "Should this policy apply?"
-
-    state = score_row(env, row, response)
-
-    assert 0.0 <= state["reward"] < 1.0
-    assert state["metrics"]["finding_localization_recall"] == 1.0
-    assert state["metrics"]["finding_type_accuracy"] == 1.0
-
-
-def test_find_diagnosis_rejects_an_outcome_marker_with_the_other_outcome_text() -> None:
-    env = load_environment()
-    row = dict(env.get_eval_dataset()[0])
-    response = correct_response_from_row(row)
-    for finding in response["findings"]:
-        if "yes selects the anchor outcome" in finding["diagnosis"]:
-            finding["diagnosis"] = finding["diagnosis"].replace(
-                "yes selects the anchor outcome",
-                "yes selects the alternative outcome",
-            )
-        else:
-            finding["diagnosis"] = finding["diagnosis"].replace(
-                "yes selects the alternative outcome",
-                "yes selects the anchor outcome",
-            )
-
-    assert score_row(env, row, response)["reward"] == 0.0
-
-
-def test_find_diagnosis_allows_a_consistent_reversed_orientation() -> None:
-    env = load_environment()
-    row = dict(env.get_eval_dataset()[0])
-    response = correct_response_from_row(row)
-    for finding in response["findings"]:
-        decision = finding["decision"]
-        original_choice = (
-            "anchor"
-            if "yes selects the anchor outcome" in finding["diagnosis"]
-            else "alternative"
-        )
-        reversed_choice = "alternative" if original_choice == "anchor" else "anchor"
-        finding["diagnosis"] = (
-            f"Should {decision['actor']} {decision['action']} when "
-            f"{decision['condition']}, choosing between "
-            f"{decision['anchor_outcome']} and {decision['alternative_outcome']} "
-            f"(yes selects the {reversed_choice} outcome: "
-            f"{decision[f'{reversed_choice}_outcome']})?"
-        )
-
-    assert score_row(env, row, response)["reward"] == 1.0
-
-
 def test_ask_rewards_top_k_selection_over_lower_value_issue() -> None:
     env = load_environment(task="elicit-ask", question_count=2)
     plants = planted_questions_from_row(dict(env.get_eval_dataset()[0]))
@@ -2003,25 +1183,25 @@ def test_default_k1_target_changes_when_visible_faction_values_change() -> None:
     )
 
     first_access_score = question_utility_score(
-        [semantic_contract_candidate("ambiguity", first_panel_plants[0])],
+        [candidate_for_plant(first_panel_plants[0])],
         first_panel_plants,
         panel_polarization=1.0,
         question_count=1,
     )
     first_safety_score = question_utility_score(
-        [semantic_contract_candidate("gap", first_panel_plants[1])],
+        [candidate_for_plant(first_panel_plants[1])],
         first_panel_plants,
         panel_polarization=1.0,
         question_count=1,
     )
     second_access_score = question_utility_score(
-        [semantic_contract_candidate("ambiguity", second_panel_plants[0])],
+        [candidate_for_plant(second_panel_plants[0])],
         second_panel_plants,
         panel_polarization=1.0,
         question_count=1,
     )
     second_safety_score = question_utility_score(
-        [semantic_contract_candidate("gap", second_panel_plants[1])],
+        [candidate_for_plant(second_panel_plants[1])],
         second_panel_plants,
         panel_polarization=1.0,
         question_count=1,
@@ -2381,25 +1561,31 @@ def test_overlapping_plants_use_one_to_one_matching() -> None:
         "A prompt and complete response should resolve each request."
     )
     planted = [
-        {
-            "doc_id": "policy",
-            "quote": "Requests should receive a prompt and complete response.",
-            "type": "ambiguity",
-            "document_text": document_text,
-        },
-        {
-            "doc_id": "policy",
-            "quote": "A prompt and complete response should resolve each request.",
-            "type": "ambiguity",
-            "document_text": document_text,
-        },
+        complete_find_contract(
+            {
+                "doc_id": "policy",
+                "quote": "Requests should receive a prompt and complete response.",
+                "type": "ambiguity",
+                "document_text": document_text,
+            }
+        ),
+        complete_find_contract(
+            {
+                "doc_id": "policy",
+                "quote": "A prompt and complete response should resolve each request.",
+                "type": "ambiguity",
+                "document_text": document_text,
+            }
+        ),
     ]
     candidate = [
-        {
-            "doc_id": "policy",
-            "quote": "Requests should receive a prompt and complete response.",
-            "type": "ambiguity",
-        }
+        complete_find_contract(
+            {
+                "doc_id": "policy",
+                "quote": "Requests should receive a prompt and complete response.",
+                "type": "ambiguity",
+            }
+        )
     ]
 
     result = match_findings(candidate, planted)
@@ -2412,30 +1598,38 @@ def test_overlapping_plants_use_one_to_one_matching() -> None:
 def test_matching_finds_global_maximum_instead_of_greedy_local_choice() -> None:
     document_text = "alpha beta gamma delta epsilon zeta"
     planted = [
-        {
-            "doc_id": "policy",
-            "quote": "alpha beta gamma delta epsilon",
-            "type": "ambiguity",
-            "document_text": document_text,
-        },
-        {
-            "doc_id": "policy",
-            "quote": "beta gamma delta epsilon zeta",
-            "type": "ambiguity",
-            "document_text": document_text,
-        },
+        complete_find_contract(
+            {
+                "doc_id": "policy",
+                "quote": "alpha beta gamma delta epsilon",
+                "type": "ambiguity",
+                "document_text": document_text,
+            }
+        ),
+        complete_find_contract(
+            {
+                "doc_id": "policy",
+                "quote": "beta gamma delta epsilon zeta",
+                "type": "ambiguity",
+                "document_text": document_text,
+            }
+        ),
     ]
     candidates = [
-        {
-            "doc_id": "policy",
-            "quote": "alpha beta gamma delta epsilon zeta",
-            "type": "ambiguity",
-        },
-        {
-            "doc_id": "policy",
-            "quote": "alpha beta gamma delta epsilon",
-            "type": "ambiguity",
-        },
+        complete_find_contract(
+            {
+                "doc_id": "policy",
+                "quote": "alpha beta gamma delta epsilon zeta",
+                "type": "ambiguity",
+            }
+        ),
+        complete_find_contract(
+            {
+                "doc_id": "policy",
+                "quote": "alpha beta gamma delta epsilon",
+                "type": "ambiguity",
+            }
+        ),
     ]
 
     result = match_findings(candidates, planted)
@@ -2476,16 +1670,22 @@ def test_quote_match_requires_substantial_contiguous_plant_coverage(
 ) -> None:
     document_text = f"before {anchor} after"
     planted = [
-        {
-            "doc_id": "policy",
-            "quote": anchor,
-            "type": "ambiguity",
-            "document_text": document_text,
-        }
+        complete_find_contract(
+            {
+                "doc_id": "policy",
+                "quote": anchor,
+                "type": "ambiguity",
+                "document_text": document_text,
+            }
+        )
     ]
 
     result = match_findings(
-        [{"doc_id": "policy", "quote": candidate, "type": "ambiguity"}],
+        [
+            complete_find_contract(
+                {"doc_id": "policy", "quote": candidate, "type": "ambiguity"}
+            )
+        ],
         planted,
     )
 
@@ -2495,26 +1695,34 @@ def test_quote_match_requires_substantial_contiguous_plant_coverage(
 def test_tiny_fragment_cannot_turn_partial_output_credit_into_a_second_match() -> None:
     document_text = "alpha beta gamma delta epsilon. lima mike november oscar papa."
     planted = [
-        {
-            "doc_id": "policy",
-            "quote": "alpha beta gamma delta epsilon",
-            "type": "ambiguity",
-            "document_text": document_text,
-        },
-        {
-            "doc_id": "policy",
-            "quote": "lima mike november oscar papa",
-            "type": "gap",
-            "document_text": document_text,
-        },
+        complete_find_contract(
+            {
+                "doc_id": "policy",
+                "quote": "alpha beta gamma delta epsilon",
+                "type": "ambiguity",
+                "document_text": document_text,
+            }
+        ),
+        complete_find_contract(
+            {
+                "doc_id": "policy",
+                "quote": "lima mike november oscar papa",
+                "type": "gap",
+                "document_text": document_text,
+            }
+        ),
     ]
     candidates = [
-        {
-            "doc_id": "policy",
-            "quote": "alpha beta gamma delta epsilon",
-            "type": "ambiguity",
-        },
-        {"doc_id": "policy", "quote": "lima mike", "type": "gap"},
+        complete_find_contract(
+            {
+                "doc_id": "policy",
+                "quote": "alpha beta gamma delta epsilon",
+                "type": "ambiguity",
+            }
+        ),
+        complete_find_contract(
+            {"doc_id": "policy", "quote": "lima mike", "type": "gap"}
+        ),
     ]
 
     result = match_findings(candidates, planted)
@@ -2537,7 +1745,11 @@ def test_tiny_fragment_cannot_turn_partial_output_credit_into_a_second_match() -
 
 
 def test_duplicate_candidate_is_counted_as_false_positive() -> None:
-    planted = [{"doc_id": "policy", "quote": "respond promptly", "type": "ambiguity"}]
+    planted = [
+        complete_find_contract(
+            {"doc_id": "policy", "quote": "respond promptly", "type": "ambiguity"}
+        )
+    ]
 
     result = match_findings([planted[0], planted[0]], planted)
 
@@ -2551,12 +1763,14 @@ def test_duplicate_candidate_is_counted_as_false_positive() -> None:
 def test_overlapping_span_hedge_cannot_improve_any_shaped_stage() -> None:
     document_text = "Teams respond promptly when a documented safety risk is active."
     planted = [
-        {
-            "doc_id": "policy",
-            "quote": "respond promptly when a documented safety risk is active",
-            "type": "ambiguity",
-            "document_text": document_text,
-        }
+        complete_find_contract(
+            {
+                "doc_id": "policy",
+                "quote": "respond promptly when a documented safety risk is active",
+                "type": "ambiguity",
+                "document_text": document_text,
+            }
+        )
     ]
     exact = [dict(planted[0])]
     hedged = [
@@ -3017,6 +2231,24 @@ def candidate_for_plant(
     }
 
 
+def complete_find_contract(item: dict[str, Any]) -> dict[str, Any]:
+    """Attach the smallest complete authored Find contract to a span fixture."""
+
+    decision = {
+        "actor": "the policy owner",
+        "action": "clarify the documented decision",
+        "condition": "the documented condition applies",
+        "anchor_outcome": "retain the documented outcome",
+        "alternative_outcome": "adopt the clarified alternative",
+    }
+    return {
+        **item,
+        "diagnosis": "Should the policy owner clarify the documented decision?",
+        "decision": decision,
+        "decision_aliases": {field: [value] for field, value in decision.items()},
+    }
+
+
 def semantic_contract_plant(issue_type: str) -> dict[str, Any]:
     """Return a compact authored oracle for decision-semantics regressions."""
 
@@ -3042,7 +2274,6 @@ def semantic_contract_plant(issue_type: str) -> dict[str, Any]:
             "type": issue_type,
             "question": question,
             "diagnosis": question,
-            "question_aliases": [],
             "decision": {
                 "actor": "dispatchers",
                 "action": "pause a route",
@@ -3097,7 +2328,6 @@ def semantic_contract_plant(issue_type: str) -> dict[str, Any]:
             "type": issue_type,
             "question": question,
             "diagnosis": question,
-            "question_aliases": [],
             "decision": {
                 "actor": "duty coordinator",
                 "action": "transfer a delayed load",
@@ -3150,7 +2380,6 @@ def semantic_contract_plant(issue_type: str) -> dict[str, Any]:
             "type": issue_type,
             "question": question,
             "diagnosis": question,
-            "question_aliases": [],
             "decision": {
                 "actor": "staff",
                 "action": "deliver resident notices",

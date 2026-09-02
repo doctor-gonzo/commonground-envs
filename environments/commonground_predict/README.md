@@ -11,8 +11,8 @@ artifact and model evidence before publication.
 The task is best understood as **semantic-conditioned matrix completion**.
 Statement text now causally selects a policy dimension, and latent cluster
 profiles determine vote propensity on that dimension. The visible vote matrix
-still carries substantial signal: a prompt-observable 5-NN comparator scores
-0.891. Results therefore do not by themselves establish policy understanding,
+still carries substantial signal: the smoothed neighbor-frequency comparator
+earns 0.881 probability reward and 0.900 accuracy. Results therefore do not by themselves establish policy understanding,
 human-preference validity, or general collective-preference reasoning.
 
 This environment is associated with [Context Engine](https://contextengine.sh),
@@ -77,54 +77,25 @@ keys are rejected rather than recovered.
 - `vote_accuracy`, metric only: exact argmax accuracy over masked cells.
 - `brier`, metric only: conventional three-class squared error divided by two,
   bounded to `[0,1]`.
-- `original_snapshot_visible_prior_brier`, metric only: loss of the class-prior
-  forecast built from the original full task's visible matrix. Both native and
-  legacy interfaces emit this evaluator-side reference loss. It is held fixed
-  across prompt ablations and is not observable to a text-only agent.
-- Brier skill versus uniform, derived in the release analysis: improvement
-  over the distribution-free uniform-probability reference. Release analysis
-  also derives snapshot-prior skill as
-  `1 - pooled model Brier / pooled snapshot-prior Brier`, with equal task
-  weights and the ratio recomputed inside every bootstrap resample. A zero
-  pooled reference loss makes this score undefined and fails analysis. In
-  either skill measure, 0 equals its named reference, 1 is perfect, and a
-  negative value is worse than that reference.
+- `original_snapshot_visible_prior_brier`, metric only: loss of a visible-matrix
+  class prior, held fixed across prompt ablations.
+- Brier skill against uniform or the train-split empirical prior: `0` equals the
+  named reference, `1` is perfect, and a negative value is worse.
 
 Exact model-free results on the bundled 100-row candidate evaluation split:
 
-| Comparator class | Comparator | probability reward | vote_accuracy | normalized Brier | Brier skill vs uniform | Brier skill vs snapshot prior |
+| Comparator class | Comparator | probability reward | vote_accuracy | normalized Brier | Brier skill vs uniform | Brier skill vs empirical prior |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
-| No-input | Uniform probability | 0.667 | 0.590 | 0.333 | 0.000 | -0.210 |
-| Prompt-observable matrix-only | Per-snapshot visible class prior | 0.725 | 0.588 | 0.275 | 0.174 | 0.000 |
-| Evaluation-corpus visible (transductive) | Global visible class prior | 0.717 | 0.590 | 0.283 | 0.150 | -0.028 |
-| Train-split no-text | Global empirical class prior | 0.669 | 0.166 | 0.331 | 0.008 | -0.200 |
-| Train-split text-only | Bag-of-words vote probabilities | 0.401 | 0.244 | 0.599 | -0.796 | -1.174 |
-| No-input | Always agree | 0.590 | 0.590 | 0.410 | -0.230 | -0.488 |
-| Prompt-observable matrix-only | Per-statement visible majority | 0.581 | 0.581 | 0.419 | -0.256 | -0.520 |
-| Prompt-observable matrix-only | Per-statement visible class frequencies | 0.760 | 0.581 | 0.240 | 0.279 | 0.128 |
-| Prompt-observable matrix-only | Nearest participant (1-NN) | 0.819 | 0.819 | 0.181 | 0.456 | 0.342 |
-| Prompt-observable matrix-only | Five-neighbor vote | 0.891 | 0.891 | 0.109 | 0.674 | 0.605 |
-| Prompt-observable matrix-only | Five-neighbor vote frequencies | 0.889 | 0.891 | 0.111 | 0.666 | 0.596 |
-| Prompt-observable matrix-only | Distance-weighted 5-NN with smoothing | 0.881 | 0.900 | 0.119 | 0.643 | 0.568 |
-| Held-out-label diagnostic | Per-snapshot best constant | 0.631 | 0.631 | 0.369 | -0.106 | -0.339 |
-| Generator diagnostic | Latent cluster-pattern replay | 0.916 | 0.916 | 0.084 | 0.749 | 0.696 |
+| No-input | Uniform probability | 0.667 | 0.590 | 0.333 | 0.000 | -0.008 |
+| Train-split no-text | Global empirical class prior | 0.669 | 0.166 | 0.331 | 0.008 | 0.000 |
+| Prompt-observable matrix-only | Per-statement visible class frequencies | 0.760 | 0.581 | 0.240 | 0.279 | 0.274 |
+| Prompt-observable matrix-only | Smoothed distance-weighted 5-neighbor frequencies | 0.881 | 0.900 | 0.119 | 0.643 | 0.640 |
 
-Uniform already earns `2/3` probability reward under normalized three-class
-Brier, so raw reward must be interpreted against a named reference. The
-original-snapshot prior uses only the current full task's visible matrix and is
-the non-transductive evaluator-side climatology for the second skill column. It
-remains the common comparator in text-only mode even though that agent cannot
-observe the matrix. That column uses the same pooled-loss ratio as release
-analysis rather than averaging unstable per-task ratios. By contrast, the
-evaluation-corpus prior is explicitly
-transductive because it pools visible votes across evaluation snapshots; the
-clean train-split prior adds almost no skill, and the train-split text-only model
-performs poorly across the held-out generator profile. Strong per-snapshot matrix
-neighbors show that visible collaborative structure dominates the current
-corpus. The last two rows are diagnostics, not floors: one reads held-out labels
-and one replays hidden generator state. Calibrated matrix factorization and
-item-item/spectral models remain recommended before claiming a distinct
-language contribution.
+Uniform already earns `2/3` reward under normalized three-class Brier, so raw
+reward must be interpreted against a named reference. The two stronger
+prompt-visible references show that matrix structure carries substantial signal.
+Prompt-view ablations and a fresh private generator are still required before
+claiming that policy text contributes transferable information.
 
 In the historical exact-artifact 0.5 study, Claude Sonnet 4.5, Gemini 2.5
 Flash, GPT-4.1, and Qwen3 30B A3B Instruct achieved probability rewards of

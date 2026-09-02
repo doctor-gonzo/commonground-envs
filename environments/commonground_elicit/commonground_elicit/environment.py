@@ -18,9 +18,9 @@ from commonground_scenarios import (
     is_yes_no_question,
     validate_scenario,
 )
-from commonground_scenarios.generator import ACTOR_SUPPORT_REASON, SEMANTIC_SCOPES
+from commonground_scenarios.generator import ACTOR_SUPPORT_REASON
 from commonground_scenarios.templates import VALUE_DIMENSIONS
-from commonground_scenarios.validation import PASS_THRESHOLD, YES_NO_AUXILIARIES
+from commonground_scenarios.validation import PASS_THRESHOLD
 from commonground_score import (
     cluster_separation,
     vote_entropy,
@@ -59,110 +59,11 @@ DECISION_FRAME_FIELDS = frozenset(
         "alternative_outcome",
     }
 )
-_SEMANTIC_STOPWORDS = frozenset(
-    {
-        "a",
-        "an",
-        "and",
-        "are",
-        "at",
-        "be",
-        "between",
-        "by",
-        "can",
-        "for",
-        "from",
-        "has",
-        "have",
-        "in",
-        "is",
-        "it",
-        "of",
-        "on",
-        "or",
-        "should",
-        "that",
-        "the",
-        "this",
-        "to",
-        "than",
-        "unless",
-        "when",
-        "whenever",
-        "whether",
-        "who",
-        "with",
-        "rather",
-    }
-)
-_YES_NO_AUXILIARY_TOKENS = frozenset(
-    auxiliary.casefold() for auxiliary in YES_NO_AUXILIARIES
-)
-_SEMANTIC_EQUIVALENTS = {
-    "allow": "permit",
-    "allowed": "permit",
-    "allows": "permit",
-    "authorise": "permit",
-    "authorize": "permit",
-    # Deterministic active/passive normalization for common policy actions.
-    # Keep this explicit: an open-ended stemmer would conflate unrelated
-    # authored concepts and make the semantic gate harder to audit.
-    "approved": "approve",
-    "choosing": "choose",
-    "defined": "define",
-    "disclosed": "disclose",
-    "issued": "issue",
-    "permitted": "permit",
-    "pausing": "pause",
-    "immediately": "immediate",
-    "removal": "remove",
-    "removed": "remove",
-    "released": "release",
-    "prohibit": "forbid",
-    "prohibited": "forbid",
-    "prevent": "forbid",
-    "prevents": "forbid",
-    "require": "must",
-    "required": "must",
-    "requires": "must",
-    "used": "use",
-}
-_QUESTION_INFERENCE_TOKENS = frozenset({"choose", "make", "permit", "wait"})
-_POLARITY_TOKENS = frozenset(
-    {
-        "!",
-        "!=",
-        "cannot",
-        "no",
-        "neither",
-        "never",
-        "nor",
-        "not",
-        "lack",
-        "lacking",
-        "lacks",
-        "without",
-        "~",
-        "¬",
-        "≠",
-    }
-)
 _TOKEN_PATTERN = re.compile(
     r"(?:!=|<=|>=|==)|[!~](?=\s*[^\W_])|-(?=\s*\d)|[^\W_]+|"
     r"[¬≠≤≥=<>±+\N{MINUS SIGN}%$€£¥∉∈∧\N{LOGICAL OR}]",
     flags=re.UNICODE,
 )
-_ORIENTATION_MARKER_PATTERN = re.compile(
-    r"\byes\s+selects\s+the\s+(anchor|alternative)\s+outcome\b",
-    flags=re.IGNORECASE,
-)
-_NEGATION_CONTRACTION_PATTERN = re.compile(r"\b[^\W_]+n['\u2019]t\b", re.IGNORECASE)
-_NEGATING_VERB_PATTERN = re.compile(
-    r"\b(?:avoid(?:s|ed|ing)?|refus(?:e|es|ed|ing)|declin(?:e|es|ed|ing))\b",
-    re.IGNORECASE,
-)
-_FAIL_TO_PATTERN = re.compile(r"\bfail(?:s|ed|ing)?\s+to\b", re.IGNORECASE)
-_SUBMITTED_SLOT_PRECISION_THRESHOLD = 0.75
 
 
 class _DuplicateJsonKeyError(ValueError):
@@ -755,11 +656,7 @@ def scenario_to_row(
             "doc_id": plant["doc_id"],
             "quote": plant["anchor_quote"],
             "type": plant["type"],
-            "diagnosis": _oriented_decision_question(
-                str(plant["canonical_question"]),
-                _canonical_decision_frame(plant, documents),
-                str(plant["canonical_yes_choice"]),
-            ),
+            "diagnosis": str(plant["canonical_question"]),
             "decision": _canonical_decision_frame(plant, documents),
             "decision_aliases": copy.deepcopy(plant["decision_aliases"]),
             "related_evidence": plant["related_evidence"],
@@ -785,21 +682,8 @@ def scenario_to_row(
             "doc_id": plant["doc_id"],
             "quote": plant["anchor_quote"],
             "type": plant["type"],
-            "question": _oriented_decision_question(
-                str(plant["canonical_question"]),
-                _canonical_decision_frame(plant, documents),
-                str(plant["canonical_yes_choice"]),
-            ),
-            "question_aliases": [
-                _oriented_decision_question(
-                    str(alias),
-                    _canonical_decision_frame(plant, documents),
-                    str(plant["canonical_yes_choice"]),
-                )
-                for alias in plant["canonical_question_aliases"]
-            ],
+            "question": str(plant["canonical_question"]),
             "decision": _canonical_decision_frame(plant, documents),
-            "decision_aliases": copy.deepcopy(plant["decision_aliases"]),
             "value_weights": {
                 dimension: float(plant["value_weights"][dimension])
                 for dimension in VALUE_DIMENSIONS
@@ -899,23 +783,6 @@ def _canonical_decision_frame(
     if decision is None:
         raise ValueError("planted issue is missing its authored decision frame")
     return decision
-
-
-def _oriented_decision_question(
-    question: str, decision: Mapping[str, str], yes_choice: str
-) -> str:
-    """Make the scored yes-side explicit instead of inferring polarity from prose."""
-
-    outcome_field = (
-        "anchor_outcome" if yes_choice == "anchor" else "alternative_outcome"
-    )
-    stem = question.strip().removesuffix("?").strip()
-    if not _decision_stem_expresses_core(stem, decision):
-        stem = (
-            f"Should {decision['actor']} {decision['action']} when "
-            f"{decision['condition']}"
-        )
-    return f"{stem} (yes selects the {yes_choice} outcome: {decision[outcome_field]})?"
 
 
 def build_document_view(
@@ -1200,8 +1067,7 @@ def render_prompt(
             f"The root may also include exactly {question_count} optional {question_object_label} for the logged weight-zero companion metric. Omitting or malformed companion questions never changes the findings reward.",
             "Phrase each question as yes/no: agree means that faction predicts yes, disagree means no, and pass means no position.",
             "Set yes_choice to anchor when yes preserves or applies the primary quoted rule; set it to alternative when yes favors a clarification, fallback, or the second conflicting rule.",
-            "For every finding and question, fill all five decision fields from the visible documents. The prose must express that same actor, action, condition, and the outcome designated by yes_choice.",
-            'Because findings have no yes_choice field, end each diagnosis with "(yes selects the anchor outcome: <anchor_outcome>)" or "(yes selects the alternative outcome: <alternative_outcome>)".',
+            "For every finding and question, fill all five decision fields from the visible documents. Those structured fields carry the scored decision meaning; diagnosis and question prose are presentation fields and must have valid yes/no form.",
             "For contradictions, related_evidence must quote the second conflicting rule. For other finding types it must be null.",
         ]
     )
@@ -1236,7 +1102,7 @@ def render_ask_prompt(
         "Rank candidates by utility = decision_value * ((1 - panel_polarization) + panel_polarization * disagreement). decision_value = min(1, 4 * (RMS(alternative_preference) * ((max(alternative_preference) - min(alternative_preference)) / 2))^2). disagreement is the mean of (a) normalized three-label Shannon entropy and (b) the fraction of unordered faction pairs with different labels.",
         f"This row uses panel_polarization={panel_polarization:.6g} and pass_threshold={PASS_THRESHOLD:.6g}. Select the {question_count} highest-utility candidate profile(s).",
         "Copy the exact supporting passage into quote and classify its issue type. For contradictions, also copy the second conflicting rule into related_evidence; otherwise related_evidence must be null.",
-        "Copy the selected profile's complete decision object into the response. Ground it in the visible documents; the yes/no prose must express that same actor, action, condition, and the outcome designated by yes_choice. Generic questions receive no semantic credit.",
+        "Copy the selected profile's complete decision object into the response. Ground it in the visible documents. The structured object and explicit yes_choice carry the scored meaning; the question text is a presentation field and must have valid yes/no form.",
         "",
         "Stakeholder factions:",
     ]
@@ -1660,6 +1526,8 @@ def _parse_questions_list(raw_questions: Any) -> list[dict[str, Any]] | None:
             for field in ("doc_id", "quote", "type", "question", "yes_choice")
         ):
             return None
+        if not is_yes_no_question(raw_question["question"]):
+            return None
         if raw_question["type"] not in FINDING_TYPES:
             return None
         if raw_question["yes_choice"] not in {"anchor", "alternative"}:
@@ -1723,21 +1591,16 @@ def _parse_decision_frame(raw_decision: Any) -> dict[str, str] | None:
 
 
 def _accepted_decision_aliases(
-    plant: Mapping[str, Any], reference: Mapping[str, str]
-) -> dict[str, tuple[str, ...]]:
-    """Return validated per-slot concepts, defaulting to the canonical frame.
-
-    Older local rows may not carry explicit aliases.  The fallback preserves
-    their exact semantics while 0.6 rows can accept authored source-language
-    alternatives without permitting a concept to move into another slot.
-    """
+    plant: Mapping[str, Any],
+) -> dict[str, tuple[str, ...]] | None:
+    """Return the explicitly authored Find aliases or fail closed."""
 
     raw_aliases = plant.get("decision_aliases")
     if (
         not isinstance(raw_aliases, Mapping)
         or set(raw_aliases) != DECISION_FRAME_FIELDS
     ):
-        return {field: (reference[field],) for field in DECISION_FRAME_FIELDS}
+        return None
     aliases: dict[str, tuple[str, ...]] = {}
     for field in DECISION_FRAME_FIELDS:
         raw_field_aliases = raw_aliases[field]
@@ -1746,14 +1609,14 @@ def _accepted_decision_aliases(
             or isinstance(raw_field_aliases, str)
             or not raw_field_aliases
         ):
-            return {name: (reference[name],) for name in DECISION_FRAME_FIELDS}
+            return None
         accepted = tuple(
             alias.strip()
             for alias in raw_field_aliases
             if isinstance(alias, str) and alias.strip()
         )
         if len(accepted) != len(raw_field_aliases):
-            return {name: (reference[name],) for name in DECISION_FRAME_FIELDS}
+            return None
         aliases[field] = accepted
     return aliases
 
@@ -1857,40 +1720,109 @@ def _candidate_plant_grounding(
     candidate: Mapping[str, Any],
     plant: Mapping[str, Any],
 ) -> float | None:
-    """Match a generated question to one planted issue using visible evidence."""
+    """Match one Ask response through its public structured contract.
+
+    Ask publishes the complete canonical decision profile.  Its reward therefore
+    binds the submitted structure to that public profile and treats the free-form
+    question only as a yes/no presentation field. Hidden authored aliases belong
+    to Find's discovery contract; neither task infers meaning with fuzzy prose.
+    """
 
     if not _candidate_plant_evidence_match(candidate, plant):
         return None
     candidate_question = str(candidate.get("question", ""))
     if not is_yes_no_question(candidate_question):
         return None
-    semantic_score = question_decision_similarity(
-        candidate_question,
-        plant,
-        candidate_decision=candidate.get("decision"),
-        yes_choice=str(candidate.get("yes_choice", "")),
-    )
-    if semantic_score <= 0:
+    if candidate.get("yes_choice") not in {"anchor", "alternative"}:
         return None
-    return semantic_score
+    if not _ask_decision_matches_public_profile(candidate.get("decision"), plant):
+        return None
+    return 1.0
 
 
 def _candidate_plant_evidence_match(
     candidate: Mapping[str, Any],
     plant: Mapping[str, Any],
 ) -> bool:
-    """Match only the exact public issue evidence, before semantic scoring."""
+    """Match one exact public issue passage, before semantic scoring."""
 
     if candidate.get("doc_id") != plant.get("doc_id"):
         return False
     if plant.get("type") is not None and candidate.get("type") != plant.get("type"):
         return False
-    if not _related_evidence_matches(candidate, plant):
+    if not _ask_related_evidence_matches(candidate, plant):
         return False
-    candidate_quote = str(candidate.get("quote", ""))
-    planted_quote = str(plant.get("quote", ""))
-    document_text = str(plant.get("document_text", ""))
-    return candidate_quote == planted_quote and candidate_quote in document_text
+    return _ask_evidence_span_matches(
+        str(candidate.get("quote", "")),
+        str(plant.get("quote", "")),
+        str(plant.get("document_text", "")),
+    )
+
+
+def _ask_related_evidence_matches(
+    candidate: Mapping[str, Any], plant: Mapping[str, Any]
+) -> bool:
+    """Apply the same bounded passage contract to contradiction evidence."""
+
+    expected = plant.get("related_evidence")
+    actual = candidate.get("related_evidence")
+    if "related_evidence" not in plant:
+        return True
+    if plant.get("type") != "contradiction":
+        return actual is None and expected is None
+    if not isinstance(expected, Mapping) or not isinstance(actual, Mapping):
+        return False
+    return actual.get("doc_id") == expected.get(
+        "doc_id"
+    ) and _ask_evidence_span_matches(
+        str(actual.get("quote", "")),
+        str(expected.get("quote", "")),
+        str(plant.get("related_document_text", expected.get("quote", ""))),
+    )
+
+
+def _ask_evidence_span_matches(
+    candidate_quote: str,
+    reference_quote: str,
+    document_text: str,
+) -> bool:
+    """Accept only the complete authored sentence rendered in the document.
+
+    Unicode compatibility, case, and whitespace do not change identity.  Token
+    overlap, punctuation deletion, fragments, inferred semicolon clauses, and
+    appended support text do.  This keeps the Ask answer key authored rather
+    than allowing a later lexical-normalization change to select a new span.
+    """
+
+    candidate = _normalize_contract_text(candidate_quote)
+    reference = _normalize_contract_text(reference_quote)
+    document = _normalize_contract_text(document_text)
+    return bool(
+        candidate and reference and candidate == reference and reference in document
+    )
+
+
+def _ask_decision_matches_public_profile(
+    candidate_decision: Any,
+    plant: Mapping[str, Any],
+) -> bool:
+    """Bind Ask to the exact canonical decision object exposed in its prompt."""
+
+    submitted = _parse_decision_frame(candidate_decision)
+    reference = _parse_decision_frame(plant.get("decision"))
+    if submitted is None or reference is None:
+        return False
+    return all(
+        _normalize_contract_text(submitted[field])
+        == _normalize_contract_text(reference[field])
+        for field in DECISION_FRAME_FIELDS
+    )
+
+
+def _normalize_contract_text(text: str) -> str:
+    """Apply representation-neutral normalization to human-authored text."""
+
+    return " ".join(unicodedata.normalize("NFKC", text).casefold().split())
 
 
 def question_decision_similarity(
@@ -1898,16 +1830,13 @@ def question_decision_similarity(
     plant: Mapping[str, Any],
     *,
     candidate_decision: Any = None,
-    yes_choice: str | None = None,
 ) -> float:
-    """Match a declared decision frame and require the prose to express it.
+    """Validate Find's public structured diagnosis contract.
 
-    The scorer never compares against a single hidden canonical sentence.
-    Instead, it checks five simulator-defined semantic slots against visible
-    evidence and the reference decision concepts, then checks that the
-    submitted yes/no prose contains the declared core and the outcome named by
-    ``yes_choice``. This blocks polarity flips, generic questions, and unrelated
-    evidence-word dumps without introducing a one-sentence answer key.
+    The free-form diagnosis is only a yes/no presentation field. Semantic
+    credit comes from the submitted five-slot decision frame. Each slot must
+    equal one explicitly authored alias after Unicode, case, and whitespace
+    normalization; there is no fuzzy prose matcher.
     """
 
     if not is_yes_no_question(question):
@@ -1918,417 +1847,22 @@ def question_decision_similarity(
     reference = _parse_decision_frame(plant.get("decision"))
     if reference is None:
         return 0.0
-    aliases = _accepted_decision_aliases(plant, reference)
-    if not _decision_frame_matches_reference(
-        submitted,
-        reference,
-        aliases,
-        mandatory_condition_tokens=_mandatory_condition_scope_tokens(plant, reference),
-    ):
+    aliases = _accepted_decision_aliases(plant)
+    if aliases is None:
         return 0.0
-    evidence_score = _decision_frame_evidence_score(submitted, plant, aliases)
-    if evidence_score <= 0:
-        return 0.0
-    if not _prose_expresses_decision(question, submitted, yes_choice=yes_choice):
-        return 0.0
-    return evidence_score
-
-
-def _decision_frame_matches_reference(
-    submitted: Mapping[str, str],
-    reference: Mapping[str, str],
-    aliases: Mapping[str, Sequence[str]],
-    *,
-    mandatory_condition_tokens: frozenset[str],
-) -> bool:
-    """Require the submitted frame to recover the simulator's decision concepts.
-
-    Slot prose is not matched verbatim, but actor, action, and condition retain
-    their separate meanings. Bidirectional per-slot coverage blocks swapping or
-    repeating one evidence phrase across every field, while still permitting
-    concise paraphrases through the narrow normalization table.
-    """
-
-    submitted_core_tokens = [
-        _semantic_tokens(submitted[field]) for field in ("actor", "action", "condition")
-    ]
-    if len(set(submitted_core_tokens)) != len(submitted_core_tokens):
-        return False
-    for field in (
-        "actor",
-        "action",
-        "condition",
-        "anchor_outcome",
-        "alternative_outcome",
-    ):
-        reference_threshold = 0.5
-        submitted_threshold = _SUBMITTED_SLOT_PRECISION_THRESHOLD
-        accepted = aliases.get(field, (reference[field],))
-        if not any(
-            _decision_slot_matches_alias(
-                submitted[field],
-                alias,
-                reference_threshold=reference_threshold,
-                submitted_threshold=submitted_threshold,
-            )
-            for alias in accepted
-        ):
-            return False
-        # Regression guard: a generated scope suffix changes the decision.
-        # Whole-slot fuzzy overlap must not let a plausible unscoped condition
-        # erase the suffix shared by the source quote and authored reference.
-        if field == "condition" and not mandatory_condition_tokens <= _semantic_tokens(
-            submitted[field]
-        ):
-            return False
-    return True
-
-
-def _decision_slot_matches_alias(
-    submitted: str,
-    alias: str,
-    *,
-    reference_threshold: float,
-    submitted_threshold: float,
-) -> bool:
-    """Accept omissions and normalized synonyms, but no unauthored concepts."""
-
-    submitted_tokens = _semantic_tokens(submitted)
-    alias_tokens = _semantic_tokens(alias)
-    return (
-        _bidirectional_concept_coverage(
-            submitted_tokens,
-            alias_tokens,
-            reference_threshold=reference_threshold,
-            submitted_threshold=submitted_threshold,
-        )
-        # Regression guard: an otherwise matching slot cannot append a second,
-        # unsupported action such as selling records or firing a driver. Any
-        # legitimate source wording with new concept tokens needs an explicit
-        # authored alias instead of inheriting credit from lexical overlap.
-        and submitted_tokens <= alias_tokens
-        and _polarity_compatible(submitted, alias)
-    )
-
-
-def _mandatory_condition_scope_tokens(
-    plant: Mapping[str, Any], reference: Mapping[str, str]
-) -> frozenset[str]:
-    """Recover a generated scope suffix shared verbatim with visible evidence."""
-
-    if not isinstance(plant.get("decision_aliases"), Mapping):
-        return frozenset()
-    normalized_condition = _normalized_text(reference["condition"])
-    visible_quote_tokens = _semantic_tokens(str(plant.get("quote", "")))
-    for scope in SEMANTIC_SCOPES:
-        if scope is None:
-            continue
-        normalized_scope = _normalized_text(scope)
-        scope_tokens = _semantic_tokens(scope)
-        if (
-            normalized_condition.endswith(normalized_scope)
-            and scope_tokens <= visible_quote_tokens
-        ):
-            return scope_tokens
-    return frozenset()
-
-
-def _bidirectional_concept_coverage(
-    submitted: set[str] | frozenset[str],
-    reference: set[str] | frozenset[str],
-    *,
-    reference_threshold: float,
-    submitted_threshold: float,
-) -> bool:
-    if not submitted or not reference:
-        return False
-    overlap = len(submitted & reference)
-    return (
-        overlap / len(reference) >= reference_threshold
-        and overlap / len(submitted) >= submitted_threshold
-    )
-
-
-def _semantic_tokens(text: str) -> frozenset[str]:
-    return frozenset(
-        _normalize_semantic_token(token)
-        for token in normalized_tokens(text)
-        if token not in _SEMANTIC_STOPWORDS
-        and token not in _YES_NO_AUXILIARY_TOKENS
-        and any(character.isalnum() for character in token)
-    )
-
-
-def _polarity_signature(text: str) -> tuple[str, ...]:
-    """Return explicit meaning-reversing markers, retaining multiplicity."""
-
-    normalized = _normalize_negating_phrases(text)
-    return tuple(
-        "neg" for token in normalized_tokens(normalized) if token in _POLARITY_TOKENS
-    )
-
-
-def _normalize_negating_phrases(text: str) -> str:
-    """Map explicit and lexical negators to one deterministic marker token."""
-
-    normalized = _NEGATION_CONTRACTION_PATTERN.sub(" not ", text)
-    normalized = _FAIL_TO_PATTERN.sub(" not ", normalized)
-    return _NEGATING_VERB_PATTERN.sub(" not ", normalized)
-
-
-def _polarity_compatible(left: str, right: str) -> bool:
-    """Reject a paraphrase that adds, removes, or swaps explicit negation."""
-
-    return _polarity_signature(left) == _polarity_signature(right)
-
-
-def _normalize_semantic_token(token: str) -> str:
-    normalized = _SEMANTIC_EQUIVALENTS.get(token, token)
-    if len(normalized) > 4 and normalized.endswith("ies"):
-        return normalized[:-3] + "y"
-    if (
-        len(normalized) > 4
-        and normalized.endswith("s")
-        and not normalized.endswith(("ss", "us", "is"))
-    ):
-        return normalized[:-1]
-    return normalized
-
-
-def _evidence_support(candidate: str, evidence: str) -> float:
-    candidate_tokens = _semantic_tokens(candidate)
-    evidence_tokens = _semantic_tokens(evidence)
-    if not candidate_tokens or not evidence_tokens:
-        return 0.0
-    return len(candidate_tokens & evidence_tokens) / len(candidate_tokens)
-
-
-def _decision_frame_evidence_score(
-    decision: Mapping[str, str],
-    plant: Mapping[str, Any],
-    aliases: Mapping[str, Sequence[str]],
-) -> float:
-    primary_text = " ".join(
-        (
-            str(plant.get("document_text", "")),
-            str(plant.get("quote", plant.get("anchor_quote", ""))),
-        )
-    )
-    related = plant.get("related_evidence")
-    related_document_text = plant.get("related_document_text")
-    related_text = " ".join(
-        (
-            related_document_text if isinstance(related_document_text, str) else "",
-            str(related.get("quote", "")) if isinstance(related, Mapping) else "",
-        )
-    )
-    # Validate the response's own slot text against source passages.  The
-    # alias table only defines acceptable concepts; using aliases as the
-    # evidence probe would allow a response to append an unsupported negation
-    # while inheriting the canonical alias's source support.
-    all_evidence = " ".join((primary_text, related_text))
-    alternative_evidence = (
-        related_text if _semantic_tokens(related_text) else primary_text
-    )
-    evidence_by_field = {
-        "actor": all_evidence,
-        "action": all_evidence,
-        "condition": all_evidence,
-        "anchor_outcome": primary_text,
-        "alternative_outcome": alternative_evidence,
-    }
-    for field, evidence in evidence_by_field.items():
-        submitted_threshold = _SUBMITTED_SLOT_PRECISION_THRESHOLD
-        matching_aliases = [
-            alias
-            for alias in aliases.get(field, (decision[field],))
-            if _decision_slot_matches_alias(
-                decision[field],
-                alias,
-                reference_threshold=0.5,
-                submitted_threshold=submitted_threshold,
-            )
-        ]
-        alias_support = max(
-            (_evidence_support(alias, evidence) for alias in matching_aliases),
-            default=0.0,
-        )
-        # Some authored concepts describe what the visible policy fails to
-        # specify and therefore have only partial (or no literal) passage
-        # support. Whenever the authored concept is observable, require the
-        # response's own slot text to retain that evidence support rather than
-        # inheriting it from the alias table.
-        if alias_support > 0 and _evidence_support(decision[field], evidence) < min(
-            0.4, alias_support
-        ):
+    for field in DECISION_FRAME_FIELDS:
+        submitted_text = _normalize_contract_text(submitted[field])
+        accepted = {
+            _normalize_contract_text(alias)
+            for alias in aliases.get(field, (reference[field],))
+        }
+        if submitted_text not in accepted:
             return 0.0
-    if _semantic_tokens(decision["anchor_outcome"]) == _semantic_tokens(
-        decision["alternative_outcome"]
-    ):
+    if _normalize_contract_text(
+        submitted["anchor_outcome"]
+    ) == _normalize_contract_text(submitted["alternative_outcome"]):
         return 0.0
     return 1.0
-
-
-def _prose_expresses_decision(
-    prose: str,
-    decision: Mapping[str, str],
-    *,
-    yes_choice: str | None,
-) -> bool:
-    marker_matches = list(_ORIENTATION_MARKER_PATTERN.finditer(prose))
-    if len(marker_matches) > 1:
-        return False
-    declared_choice: str | None = None
-    declared_outcome_text = ""
-    stem = prose
-    if marker_matches:
-        marker_match = marker_matches[0]
-        declared_choice = marker_match.group(1).casefold()
-        stem = prose[: marker_match.start()]
-        declared_outcome_text = prose[marker_match.end() :].lstrip(" :")
-
-    if not _decision_stem_expresses_core(stem, decision):
-        return False
-
-    selected_choice = yes_choice if yes_choice in {"anchor", "alternative"} else None
-    if declared_choice is not None:
-        if selected_choice is not None and declared_choice != selected_choice:
-            return False
-        selected_choice = declared_choice
-    if selected_choice is None:
-        return False
-    opposite = "alternative" if selected_choice == "anchor" else "anchor"
-    selected_outcome = decision[f"{selected_choice}_outcome"]
-    opposite_outcome = decision[f"{opposite}_outcome"]
-
-    core_text = " ".join(decision[field] for field in ("actor", "action", "condition"))
-    stem_polarity = _polarity_signature(stem)
-    allowed_stem_polarities = {
-        _polarity_signature(core_text),
-        _polarity_signature(f"{core_text} {selected_outcome}"),
-        _polarity_signature(
-            f"{core_text} {decision['anchor_outcome']} "
-            f"{decision['alternative_outcome']}"
-        ),
-    }
-    if stem_polarity not in allowed_stem_polarities:
-        return False
-
-    outcome_prose = declared_outcome_text if declared_choice is not None else stem
-    outcome_tokens = _semantic_tokens(outcome_prose)
-    selected_tokens = _semantic_tokens(selected_outcome)
-    if not _bidirectional_concept_coverage(
-        outcome_tokens,
-        selected_tokens,
-        reference_threshold=0.5,
-        submitted_threshold=0.4 if declared_choice is not None else 0.2,
-    ):
-        return False
-    # The orientation tail is part of the response's semantic contract, not a
-    # comment channel. Extra outcome concepts must be explicitly represented by
-    # the submitted decision frame instead of riding on a matching phrase.
-    if declared_choice is not None and not outcome_tokens <= selected_tokens:
-        return False
-    if not _polarity_compatible(outcome_prose, selected_outcome):
-        return False
-    return _semantic_similarity(outcome_prose, selected_outcome) > _semantic_similarity(
-        outcome_prose, opposite_outcome
-    )
-
-
-def _semantic_similarity(left: str, right: str) -> float:
-    """Return unordered semantic-token F1 for disambiguating outcome prose."""
-
-    left_tokens = _semantic_tokens(left)
-    right_tokens = _semantic_tokens(right)
-    if not left_tokens or not right_tokens:
-        return 0.0
-    return 2 * len(left_tokens & right_tokens) / (len(left_tokens) + len(right_tokens))
-
-
-def _decision_stem_expresses_core(stem: str, decision: Mapping[str, str]) -> bool:
-    """Require actor, action, and condition in the pre-marker question stem."""
-
-    stem_tokens = _semantic_tokens(stem)
-    if len(stem_tokens) < 3:
-        return False
-    supported_tokens = frozenset().union(
-        *(_semantic_tokens(decision[field]) for field in DECISION_FRAME_FIELDS)
-    )
-    # The structured frame is the response's explicit semantic contract. A
-    # question may omit detail, but it may not append an unsupported action and
-    # inherit credit from its otherwise valid actor/action/condition. Genuine
-    # source-language alternatives belong in the submitted frame and authored
-    # alias table, keeping this check deterministic and auditable.
-    if not stem_tokens - supported_tokens <= _QUESTION_INFERENCE_TOKENS:
-        return False
-    for field in ("actor", "action", "condition"):
-        concept_tokens = _semantic_tokens(decision[field])
-        overlap = len(stem_tokens & concept_tokens)
-        if not concept_tokens or overlap < min(2, len(concept_tokens)):
-            return False
-        if overlap / len(concept_tokens) < 0.4:
-            return False
-    return _stem_core_polarity_is_slot_consistent(stem, decision)
-
-
-def _stem_core_polarity_is_slot_consistent(
-    stem: str, decision: Mapping[str, str]
-) -> bool:
-    """Bind each explicit core negator to its nearest semantic slot.
-
-    Comparing only the total number of negators lets a response move ``not``
-    from a condition to an action while preserving aggregate polarity.  Core
-    fields are already required separately above, so their field-specific
-    tokens provide deterministic anchors for assigning each visible negator.
-    """
-
-    fields = ("actor", "action", "condition")
-    field_tokens = {field: _semantic_tokens(decision[field]) for field in fields}
-    position_tokens = tuple(
-        _normalize_semantic_token(token)
-        for token in normalized_tokens(_normalize_negating_phrases(stem))
-    )
-    field_positions: dict[str, tuple[int, ...]] = {}
-    for field in fields:
-        other_tokens = set().union(
-            *(field_tokens[other] for other in fields if other != field)
-        )
-        distinctive = field_tokens[field] - other_tokens
-        positions = tuple(
-            index for index, token in enumerate(position_tokens) if token in distinctive
-        )
-        if not positions:
-            positions = tuple(
-                index
-                for index, token in enumerate(position_tokens)
-                if token in field_tokens[field]
-            )
-        if not positions:
-            return False
-        field_positions[field] = positions
-
-    assigned = dict.fromkeys(fields, 0)
-    for index, token in enumerate(position_tokens):
-        if token not in _POLARITY_TOKENS:
-            continue
-        distances = {
-            field: min(abs(index - position) for position in positions)
-            for field, positions in field_positions.items()
-        }
-        nearest_distance = min(distances.values())
-        nearest_fields = [
-            field
-            for field, distance in distances.items()
-            if distance == nearest_distance
-        ]
-        if len(nearest_fields) != 1:
-            return False
-        assigned[nearest_fields[0]] += 1
-
-    return all(
-        assigned[field] == len(_polarity_signature(decision[field])) for field in fields
-    )
 
 
 def _stances_for_yes_choice(
@@ -2338,21 +1872,7 @@ def _stances_for_yes_choice(
 
     alternative = plant.get("alternative_stances", {})
     if not isinstance(alternative, Mapping) or not alternative:
-        canonical = plant.get("target_stances", {})
-        canonical_choice = str(plant.get("yes_choice", "alternative"))
-        if not isinstance(canonical, Mapping) or not canonical:
-            return {}
-        if yes_choice == canonical_choice:
-            return {
-                str(faction_id): str(stance) for faction_id, stance in canonical.items()
-            }
-        if yes_choice not in {"anchor", "alternative"}:
-            return {}
-        inverse = {"agree": "disagree", "disagree": "agree", "pass": "pass"}
-        return {
-            str(faction_id): inverse.get(str(stance), "")
-            for faction_id, stance in canonical.items()
-        }
+        return {}
     if yes_choice == "alternative":
         return {
             str(faction_id): str(stance) for faction_id, stance in alternative.items()
@@ -2373,11 +1893,6 @@ def panel_disagreement(target_stances: Mapping[str, str]) -> float:
         STANCE_TO_VOTE[stance] for stance in target_stances.values()
     ]
     return float((vote_entropy(votes) + cluster_separation(votes)) / 2)
-
-
-def _normalized_text(text: str) -> str:
-    normalized = unicodedata.normalize("NFKC", text).casefold()
-    return " ".join(_TOKEN_PATTERN.findall(normalized))
 
 
 async def finding_f1(
@@ -2769,7 +2284,7 @@ def _finding_diagnosis_matches(
 ) -> bool:
     diagnosis = str(candidate.get("diagnosis", ""))
     if not plant.get("diagnosis"):
-        return True
+        return False
     return (
         is_yes_no_question(diagnosis)
         and question_decision_similarity(
