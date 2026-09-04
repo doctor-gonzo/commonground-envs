@@ -9,9 +9,9 @@ synthetic group data:
   gaps in organizational documents, or selects the highest-value clarification
   candidate and predicts faction stances.
 
-Version 0.5.0 is the current public Hub release. This repository contains the
-unpublished 0.6.0 candidate. No 0.6 hosted study or public artifact is claimed
-yet.
+Version 0.6.0 is the current public Hub release. Its exact-artifact model
+study, artifact hashes, and version-pinned public evaluation records are in
+the [0.6.0 evaluation report](docs/evaluation-report-0.6.0.md).
 
 All bundled rows are synthetic and all release answer keys are public. The
 environments are suitable for reproducible open training and evaluation, not a
@@ -114,12 +114,12 @@ selection results can demonstrate.
 
 ## Evaluation status
 
-The 0.6 candidate remains unpublished until the clean local artifact gate and
-release checklist pass. A frozen exact-artifact model study is needed for new
-model-result claims, and genuinely fresh transfer evidence is needed for
-generalization or training claims; neither is required to verify the environment
-contract. Those later steps are defined in the
-[0.6 evaluation plan](docs/evaluation-plan-0.6.0.md). Historical results remain available in the
+The 0.6.0 release passed the local artifact gate and release checklist, and its
+frozen exact-artifact model study is published in the
+[0.6.0 evaluation report](docs/evaluation-report-0.6.0.md), following the
+[0.6 evaluation plan](docs/evaluation-plan-0.6.0.md). Genuinely fresh transfer
+evidence is still needed for generalization or training claims. Historical
+results remain available in the
 [0.5.0 evaluation report](docs/evaluation-report-0.5.0.md) and earlier reports,
 but are not 0.6 evidence.
 
@@ -136,13 +136,14 @@ subject to the separate fail-closed rules in
 
 ## Release and license
 
-The public 0.5.0 Hub listings are:
+The public 0.6.0 Hub listings are:
 
 - [`charliethompson/commonground-predict`](https://app.primeintellect.ai/dashboard/environments/charliethompson/commonground-predict)
 - [`charliethompson/commonground-elicit`](https://app.primeintellect.ai/dashboard/environments/charliethompson/commonground-elicit)
 
-Do not treat those listings as 0.6 until the versioned release process is
-completed. See the [public release checklist](docs/public-release-checklist.md).
+Exact 0.6.0 Hub version IDs are Predict `b9rznmh0i1bmeeb176j7q2gp` and
+Elicit `yff9k0yxhxm9smvaqhelrs1i`; content hashes are in the evaluation
+report. See the [public release checklist](docs/public-release-checklist.md).
 
 Repository code is [Apache-2.0](LICENSE). Predict's adapted synthetic Context
 Engine demo fixture remains MPL-2.0 and is covered by its packaged notice.

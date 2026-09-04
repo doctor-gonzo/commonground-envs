@@ -1,7 +1,8 @@
 # Common Ground 0.6.0 evaluation plan
 
-Status: unpublished candidate. Local verification is release-blocking. Hosted
-inference, Hub publication, and training studies are separate later stages.
+Status: published 0.6.0. Local verification passed, the complete exact-artifact
+model study is reported in `evaluation-report-0.6.0.md`, and the Hub
+publication is complete. Training studies remain a separate later stage.
 
 ## 1. Freeze the candidate
 

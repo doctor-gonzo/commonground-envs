@@ -2,10 +2,11 @@
 
 All notable changes to this project are documented in this file.
 
-## 0.6.0 - Unreleased candidate
+## 0.6.0 - 2026-09-04
 
-- Align all four distributions at version 0.6.0 while keeping the candidate
-  unpublished until its clean local artifact and release checks pass.
+- Align all four distributions at version 0.6.0; publish the exact artifacts
+  after the clean local artifact gate, the complete exact-artifact model
+  study, and the release checklist passed.
 - Keep Predict's exact masked-cell response contract and proper
   `1 - normalized Brier` reward; reject malformed/non-finite probabilities and
   retain accuracy, Brier, and named-reference Brier skill as diagnostics.
