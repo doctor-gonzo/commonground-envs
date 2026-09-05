@@ -1,8 +1,8 @@
 # Public release checklist
 
-This checklist describes later 0.6 publication. Running local verification does
-not authorize a Git push, PyPI upload, Hub push, visibility change, or public
-evaluation upload.
+This checklist describes Common Ground publication. Running local verification
+does not authorize a Git push, PyPI upload, Hub push, visibility change, or
+public evaluation upload.
 
 ## 1. Freeze and verify source
 
@@ -27,6 +27,8 @@ publication.
 - [ ] Exact instance, policy-semantic, and TF-IDF split checks pass.
 - [ ] Model-free summaries have reachable exact ceilings and no top-one ties.
 - [ ] READMEs, dataset card, methodology, changelog, and version strings agree.
+- [ ] Hub-bundled READMEs name the intended version, link any cited evidence to
+      its exact artifact version, and contain no stale pre-release status text.
 - [ ] No secrets, live human data, private study fixtures, or generated local
       outputs are included.
 

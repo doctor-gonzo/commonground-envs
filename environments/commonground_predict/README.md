@@ -1,12 +1,11 @@
 # commonground-predict
 
-`commonground-predict` 0.6.0 is an unreleased deterministic Verifiers candidate
-for probabilistic masked-vote prediction over synthetic stakeholder panels. It
-has no judge model: reward is computed locally against eight masked cells per
-snapshot. Version 0.5.0 remains the current public artifact and its results are
-historical evidence only. Version 0.6 tightens probability parsing, fixes a
-canonical tie order, and adds same-task prompt ablations; it requires fresh
-artifact and model evidence before publication.
+`commonground-predict` 0.6.1 is a deterministic Verifiers environment for
+probabilistic masked-vote prediction over synthetic stakeholder panels. It has
+no judge model: reward is computed locally against eight masked cells per
+snapshot. Version 0.6.1 is a documentation-only corrective successor to 0.6.0;
+the task implementation, corpus, prompt contract, and scorer are
+behavior-identical.
 
 The task is best understood as **semantic-conditioned matrix completion**.
 Statement text now causally selects a policy dimension, and latent cluster
@@ -28,7 +27,7 @@ IDs, a visible vote matrix (`1` agree, `-1` disagree, `0` pass, `null` unseen),
 masked-cell coordinates, hidden labels, planted clusters, and synthetic
 provenance.
 
-| Split | Rows | Generator family | Statement bank | Candidate JSONL SHA-256 |
+| Split | Rows | Generator family | Statement bank | JSONL SHA-256 |
 | --- | ---: | --- | ---: | --- |
 | `train` | 200 | `train-random-mixture-v2` | 30 training-only statements | `61a512f686f91b5df641ff11ed7376c5a9e01af4ed3909992c24fbdb64e42ce6` |
 | `eval` | 100 | `heldout-archetype-threshold-v2` | 20 evaluation-only statements | `f45da41f10567044b14bbb8fcb01d1f11e1fe514035a0beb1374a52adf454d0f` |
@@ -85,7 +84,7 @@ as a decoding constraint; it does not change the task or scoring contract.
 - Brier skill against uniform or the train-split empirical prior: `0` equals the
   named reference, `1` is perfect, and a negative value is worse.
 
-Exact model-free results on the bundled 100-row candidate evaluation split:
+Exact model-free results on the bundled 100-row evaluation split:
 
 | Comparator class | Comparator | probability reward | vote_accuracy | normalized Brier | Brier skill vs uniform | Brier skill vs empirical prior |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
@@ -100,15 +99,16 @@ prompt-visible references show that matrix structure carries substantial signal.
 Prompt-view ablations and a fresh private generator are still required before
 claiming that policy text contributes transferable information.
 
-In the historical exact-artifact 0.5 study, Claude Sonnet 4.5, Gemini 2.5
-Flash, GPT-4.1, and Qwen3 30B A3B Instruct achieved probability rewards of
-0.808, 0.773, 0.735, and 0.700 respectively across 100 tasks and five
-rollouts. All means exceed the 0.667 uniform reference and all pairwise
-task-clustered intervals exclude zero; all remain below the strongest
-matrix-only comparators. Those scores do not attest 0.6. No 0.6 model or
-ablation result is claimed yet, and no 0.6 training-utility evidence exists.
-See the [0.5.0 evaluation report](https://github.com/doctor-gonzo/commonground-envs/blob/master/docs/evaluation-report-0.5.0.md)
-and the [0.6.0 evaluation plan](https://github.com/doctor-gonzo/commonground-envs/blob/master/docs/evaluation-plan-0.6.0.md).
+In the behavior-identical exact-artifact 0.6.0 study, Kimi K2 Instruct,
+Gemini 2.5 Flash, GPT-4.1, and Qwen3 30B A3B Instruct achieved probability
+rewards of 0.761, 0.739, 0.724, and 0.706 respectively across 100 tasks and
+five rollouts. All means exceed the 0.667 uniform reference and remain below
+the strongest matrix-only comparator. GPT-4.1 prompt-view ablations show that
+shuffling statement text did not lower reward, so the study does not establish
+use of statement semantics beyond the visible vote matrix. The public records
+remain pinned to immutable 0.6.0 artifacts and are not relabeled as 0.6.1
+evidence. See the
+[0.6.0 evaluation report](https://github.com/doctor-gonzo/commonground-envs/blob/master/docs/evaluation-report-0.6.0.md).
 
 ## Usage
 

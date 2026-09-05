@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.6.1 - 2026-09-04
+
+- Correct the Hub-facing Predict and Elicit READMEs so they no longer describe
+  the published 0.6 release as an unpublished candidate or claim that 0.5.0 is
+  current.
+- Align all four distributions at 0.6.1 while leaving task implementations,
+  corpora, prompts, and scorers behavior-identical to 0.6.0.
+- Attribute the existing exact-artifact study and public evaluation records to
+  immutable 0.6.0 artifacts rather than relabeling them as 0.6.1 evidence.
+- Add a release regression that rejects stale candidate-status language in the
+  READMEs packaged for Prime Hub.
+
 ## 0.6.0 - 2026-09-04
 
 - Align all four distributions at version 0.6.0; publish the exact artifacts

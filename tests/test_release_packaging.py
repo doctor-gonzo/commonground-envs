@@ -12,7 +12,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 REPOSITORY_URL = "https://github.com/doctor-gonzo/commonground-envs"
-RELEASE_VERSION = "0.6.0"
+RELEASE_VERSION = "0.6.1"
 PROJECTS = {
     "commonground-predict": (
         ROOT / "environments" / "commonground_predict",
@@ -60,6 +60,13 @@ EXPECTED_ENVIRONMENT_DESCRIPTIONS = {
     ),
 }
 
+FORBIDDEN_RELEASE_STATUS_PHRASES = (
+    "unreleased",
+    "unpublished",
+    "remains the current public artifact",
+    "no 0.6 model or ablation result is claimed",
+)
+
 
 def test_workspace_distributions_share_release_version_and_exact_family_pins() -> None:
     root_document = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
@@ -89,6 +96,31 @@ def test_workspace_distributions_share_release_version_and_exact_family_pins() -
     assert root_document["project"]["dependencies"] == [
         f"commonground-scenarios=={RELEASE_VERSION}"
     ]
+
+
+@pytest.mark.parametrize(
+    ("distribution", "project"),
+    tuple(
+        (distribution, PROJECTS[distribution])
+        for distribution in EXPECTED_ENVIRONMENT_DESCRIPTIONS
+    ),
+)
+def test_release_readmes_do_not_ship_stale_candidate_status(
+    distribution: str,
+    project: tuple[Path, str, str, list[str]],
+) -> None:
+    project_dir, _, expected_version, _ = project
+    readme = (project_dir / "README.md").read_text(encoding="utf-8")
+    normalized = readme.casefold()
+    normalized_words = " ".join(normalized.split())
+
+    assert expected_version in readme
+    assert "evaluation-report-0.6.0.md" in readme
+    assert "not relabeled as 0.6.1 evidence" in normalized_words
+    for phrase in FORBIDDEN_RELEASE_STATUS_PHRASES:
+        assert phrase not in normalized, (
+            f"{distribution}: README contains stale release status {phrase!r}"
+        )
 
 
 @pytest.mark.parametrize(("distribution", "project"), PROJECTS.items())

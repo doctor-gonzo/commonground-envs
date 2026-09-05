@@ -9,9 +9,12 @@ synthetic group data:
   gaps in organizational documents, or selects the highest-value clarification
   candidate and predicts faction stances.
 
-Version 0.6.0 is the current public Hub release. Its exact-artifact model
-study, artifact hashes, and version-pinned public evaluation records are in
-the [0.6.0 evaluation report](docs/evaluation-report-0.6.0.md).
+Version 0.6.1 is a documentation-only corrective successor to the public
+0.6.0 release. Its task implementations, corpora, prompts, and scorers are
+unchanged. The exact-artifact model study and its version-pinned public
+evaluation records remain 0.6.0 evidence and are documented in the
+[0.6.0 evaluation report](docs/evaluation-report-0.6.0.md); they are not
+relabeled as 0.6.1 runs.
 
 All bundled rows are synthetic and all release answer keys are public. The
 environments are suitable for reproducible open training and evaluation, not a
@@ -23,10 +26,10 @@ contamination-resistant leaderboard or evidence about real human preferences.
 
 | Distribution | Version | Responsibility |
 | --- | ---: | --- |
-| `commonground-score` | 0.6.0 | Shared vote statistics and proper probability scoring. |
-| `commonground-scenarios` | 0.6.0 | Shared synthetic scenario model, generation, schema, and validation. |
-| `commonground-predict` | 0.6.0 | Thin Predict Taskset/Harness and legacy adapter. |
-| `commonground-elicit` | 0.6.0 | Thin Find/Ask Taskset/Harness and legacy adapter. |
+| `commonground-score` | 0.6.1 | Shared vote statistics and proper probability scoring. |
+| `commonground-scenarios` | 0.6.1 | Shared synthetic scenario model, generation, schema, and validation. |
+| `commonground-predict` | 0.6.1 | Thin Predict Taskset/Harness and legacy adapter. |
+| `commonground-elicit` | 0.6.1 | Thin Find/Ask Taskset/Harness and legacy adapter. |
 
 The environments expose native Verifiers v1 plugins and legacy
 `SingleTurnEnv` adapters backed by the same rows and scorers.
@@ -114,14 +117,15 @@ selection results can demonstrate.
 
 ## Evaluation status
 
-The 0.6.0 release passed the local artifact gate and release checklist, and its
-frozen exact-artifact model study is published in the
+The behavior-identical 0.6.0 task release passed the local artifact gate and
+release checklist. Its frozen exact-artifact model study is published in the
 [0.6.0 evaluation report](docs/evaluation-report-0.6.0.md), following the
-[0.6 evaluation plan](docs/evaluation-plan-0.6.0.md). Genuinely fresh transfer
-evidence is still needed for generalization or training claims. Historical
-results remain available in the
-[0.5.0 evaluation report](docs/evaluation-report-0.5.0.md) and earlier reports,
-but are not 0.6 evidence.
+[0.6 evaluation plan](docs/evaluation-plan-0.6.0.md). Version 0.6.1 corrects
+only release metadata, dependency manifests, and bundled documentation, so no
+new model study is claimed. Genuinely fresh transfer evidence is still needed
+for generalization or training claims. Historical results remain available in
+the [0.5.0 evaluation report](docs/evaluation-report-0.5.0.md) and earlier
+reports.
 
 ## Context Engine and human data
 
@@ -136,14 +140,15 @@ subject to the separate fail-closed rules in
 
 ## Release and license
 
-The public 0.6.0 Hub listings are:
+The Hub listings are:
 
 - [`charliethompson/commonground-predict`](https://app.primeintellect.ai/dashboard/environments/charliethompson/commonground-predict)
 - [`charliethompson/commonground-elicit`](https://app.primeintellect.ai/dashboard/environments/charliethompson/commonground-elicit)
 
-Exact 0.6.0 Hub version IDs are Predict `b9rznmh0i1bmeeb176j7q2gp` and
-Elicit `yff9k0yxhxm9smvaqhelrs1i`; content hashes are in the evaluation
-report. See the [public release checklist](docs/public-release-checklist.md).
+The evidence-pinned 0.6.0 Hub version IDs are Predict
+`b9rznmh0i1bmeeb176j7q2gp` and Elicit `yff9k0yxhxm9smvaqhelrs1i`; their
+content hashes are in the evaluation report. See the
+[public release checklist](docs/public-release-checklist.md).
 
 Repository code is [Apache-2.0](LICENSE). Predict's adapted synthetic Context
 Engine demo fixture remains MPL-2.0 and is covered by its packaged notice.

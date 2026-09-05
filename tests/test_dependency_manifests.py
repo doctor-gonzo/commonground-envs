@@ -11,7 +11,7 @@ from types import ModuleType
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-RELEASE_VERSION = "0.6.0"
+RELEASE_VERSION = "0.6.1"
 
 
 def _load_manifest_script() -> ModuleType:

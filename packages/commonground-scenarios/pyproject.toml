@@ -1,6 +1,6 @@
 [project]
 name = "commonground-scenarios"
-version = "0.6.0"
+version = "0.6.1"
 description = "Deterministic planted-scenario generation for Common Ground environments."
 authors = [{ name = "Common Ground contributors" }]
 license = "Apache-2.0"

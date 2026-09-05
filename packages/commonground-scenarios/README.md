@@ -18,7 +18,7 @@ prose-polishing callback, but no model client or network path is built into the
 package, and validation requires every planted anchor to survive polishing.
 
 Training and held-out template registries and v6 template/layout-profile labels
-are disjoint. The 0.6 candidate contains 100 training and 100 held-out rows.
+are disjoint. The 0.6 release family contains 100 training and 100 held-out rows.
 The generator assigns opaque document/faction IDs, varies visible layout and
 faction count/order, prints round-trip-exact faction values in prompt-visible
 summaries, and records question polarity, continuous preference-trade-off

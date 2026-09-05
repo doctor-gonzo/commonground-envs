@@ -3,7 +3,7 @@
 ## Current release boundary
 
 Every dataset bundled with the environments is synthetic, including the public
-0.5.0 release and the 0.6.0 candidate. The open packages contain their
+0.5.0 and 0.6.0 releases. The open packages contain their
 evaluation answers and are intended for reproducible development and training,
 not contamination-resistant leaderboards. No file may be described or
 published as a human-data split merely because it passes automated validation.
