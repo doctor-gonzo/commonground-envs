@@ -745,6 +745,12 @@ def snapshot_to_task_data(
     }
     public_snapshot = copy.deepcopy(dict(snapshot))
     public_snapshot.pop("held_out", None)
+    # Exported comment counts and PCA cluster centers come from the unmasked
+    # matrix; with the visible votes, either one reveals the masked answers.
+    public_snapshot.pop("stats", None)
+    for cluster in public_snapshot["clusters"]:
+        if isinstance(cluster, dict) and "center" in cluster:
+            cluster["center"] = []
     return PredictionTaskData(
         idx=index,
         name=str(snapshot["session_id"]),

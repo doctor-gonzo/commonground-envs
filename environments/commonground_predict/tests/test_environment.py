@@ -328,6 +328,24 @@ def test_load_environment_builds_ce_demo_split_from_env(monkeypatch: Any) -> Non
     assert state["metrics"]["original_snapshot_visible_prior_brier"] > 0.0
 
 
+def test_ce_demo_task_snapshots_omit_values_derived_from_unmasked_votes() -> None:
+    source = json.loads(BUNDLED_CE_DEMO_PATH.read_text(encoding="utf-8"))
+    assert "stats" in source
+    assert all(cluster["center"] for cluster in source["clusters"])
+
+    native_row = task_rows(load_environment(split="ce-demo", masked_vote_count=8))[0]
+    legacy_row = load_legacy_environment(split="ce-demo", masked_vote_count=8)
+    legacy_snapshot = json.loads(legacy_row.get_eval_dataset()[0]["snapshot"])
+
+    assert len(native_row["answer"]) == 8
+    for snapshot in (native_row["snapshot"], legacy_snapshot):
+        assert "stats" not in snapshot
+        assert [cluster["center"] for cluster in snapshot["clusters"]] == [[], []]
+        assert [cluster["member_indices"] for cluster in snapshot["clusters"]] == [
+            cluster["member_indices"] for cluster in source["clusters"]
+        ]
+
+
 def test_load_environment_rejects_unmasked_ce_demo_by_default() -> None:
     data_path = DATA_DIR / "eval_ce_demo.jsonl"
 
