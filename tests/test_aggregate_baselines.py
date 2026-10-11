@@ -1231,3 +1231,15 @@ def test_cli_prints_markdown_and_optionally_writes_csv(
     assert rows[1]["vote_accuracy_mean"] == "0.6666666666666666"
     assert rows[1]["brier_mean"] == "0.3333333333333333"
     assert rows[1]["prompt_mode"] == "full"
+
+
+def test_load_json_lines_keeps_unicode_line_separators_inside_strings(
+    tmp_path: Path,
+) -> None:
+    traces = tmp_path / "traces.jsonl"
+    reply = "Done.\u2028Next\u2029step\u0085end"
+    # verifiers writes traces with pydantic, which leaves these characters raw.
+    row = json.dumps({"last_reply": reply}, ensure_ascii=False)
+    traces.write_text(row + "\n", encoding="utf-8")
+
+    assert aggregate.load_json_lines(traces) == [{"last_reply": reply}]

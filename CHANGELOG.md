@@ -16,6 +16,9 @@ All notable changes to this project are documented in this file.
   and state which fields the exporter derived rather than copied.
 - Omit exported comment `stats` and PCA cluster centers from Predict task
   snapshots; both come from the unmasked matrix and reveal masked votes.
+- Split JSONL rows only at line ends in human intake, both environment
+  loaders, and the analysis scripts, so strings containing U+2028, U+2029,
+  or U+0085 (left raw by `JSON.stringify` and pydantic) load.
 
 ## 0.6.1 - 2026-09-04
 

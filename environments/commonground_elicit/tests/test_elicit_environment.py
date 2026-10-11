@@ -1015,6 +1015,20 @@ def test_configured_are_question_is_valid_and_scorable(tmp_path: Path) -> None:
     assert score_row(env, row, correct_response_from_row(row))["reward"] > 0.0
 
 
+def test_loader_keeps_unicode_line_separators_inside_rows(tmp_path: Path) -> None:
+    scenario = generate_scenario(8200, HELDOUT_TEMPLATES[0])
+    scenario["organization"]["name"] += "\u2028Holdings\u2029Group\u0085Trust"
+    data_path = tmp_path / "separators.jsonl"
+    data_path.write_text(
+        json.dumps(scenario, ensure_ascii=False, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    env = load_environment(task="elicit-ask", question_count=1, data_path=data_path)
+
+    assert len(env.get_eval_dataset()) == 1
+
+
 def test_configured_short_yes_no_question_and_anchor_are_scorable(
     tmp_path: Path,
 ) -> None:

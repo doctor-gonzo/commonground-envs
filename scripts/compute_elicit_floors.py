@@ -26,9 +26,11 @@ RANDOM_SEED = 20260831
 
 
 def load_scenarios(path: Path) -> list[dict[str, Any]]:
+    # Rows end only at "\n"; splitlines() would also break JSON strings that
+    # contain U+2028, U+2029, or U+0085.
     scenarios = [
         json.loads(line)
-        for line in path.read_text(encoding="utf-8").splitlines()
+        for line in path.read_text(encoding="utf-8").split("\n")
         if line.strip()
     ]
     if not scenarios:

@@ -1308,7 +1308,9 @@ def load_template_clusters(path: Path) -> dict[int, str]:
     """Map JSONL row indices to declared base-template identifiers."""
 
     labels: dict[int, str] = {}
-    for index, line in enumerate(path.read_text(encoding="utf-8").splitlines()):
+    # Rows end only at "\n"; splitlines() would also break JSON strings that
+    # contain U+2028, U+2029, or U+0085.
+    for index, line in enumerate(path.read_text(encoding="utf-8").split("\n")):
         if not line.strip():
             continue
         scenario = json.loads(line)

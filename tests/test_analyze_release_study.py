@@ -764,3 +764,13 @@ def test_template_cluster_loader_uses_row_order(tmp_path: Path) -> None:
         1: "template-a",
         2: "template-b",
     }
+
+
+def test_load_template_clusters_keeps_unicode_line_separators_inside_strings(
+    tmp_path: Path,
+) -> None:
+    split = tmp_path / "split.jsonl"
+    row = {"provenance": {"template_id": "template-a"}, "note": "a\u2028b\u0085c"}
+    split.write_text(json.dumps(row, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    assert analysis_module.load_template_clusters(split) == {0: "template-a"}

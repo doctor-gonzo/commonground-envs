@@ -331,6 +331,50 @@ def test_ingest_accepts_real_export_and_writes_manifest_without_touching_bundled
     assert (DATA_DIR / "eval_ce_demo.jsonl").read_bytes() == demo_before
 
 
+def test_ingest_keeps_unicode_line_separators_inside_json_strings(
+    tmp_path: Path,
+) -> None:
+    snapshot = valid_real_snapshot()
+    text = "Fund the pilot.\u2028Review it.\u2029Publish it.\u0085Done."
+    snapshot["statements"][0]["text"] = text
+    source = tmp_path / "export.jsonl"
+    # JavaScript's JSON.stringify leaves these characters unescaped.
+    source.write_text(json.dumps(snapshot, ensure_ascii=False) + "\n", encoding="utf-8")
+    output = tmp_path / "eval_real.jsonl"
+
+    result = ingest_main(
+        [str(source), "--output", str(output), "--manifest", str(tmp_path / "m.json")]
+    )
+
+    assert result == 0
+    assert json.loads(output.read_text(encoding="utf-8"))["statements"][0]["text"] == (
+        text
+    )
+
+
+def test_ingest_treats_crlf_and_lone_cr_as_row_ends(tmp_path: Path) -> None:
+    session_ids = ["real-session-a", "real-session-b", "real-session-c"]
+    rows = []
+    for session_id in session_ids:
+        snapshot = valid_real_snapshot()
+        snapshot["session_id"] = session_id
+        rows.append(json.dumps(snapshot))
+    source = tmp_path / "export.jsonl"
+    # Rows are separated by CRLF and then by a lone CR, not only terminated.
+    source.write_bytes(
+        (rows[0] + "\r\n" + rows[1] + "\r" + rows[2] + "\n").encode("utf-8")
+    )
+    output = tmp_path / "eval_real.jsonl"
+
+    result = ingest_main(
+        [str(source), "--output", str(output), "--manifest", str(tmp_path / "m.json")]
+    )
+
+    assert result == 0
+    accepted = output.read_text(encoding="utf-8").split("\n")
+    assert [json.loads(row)["session_id"] for row in accepted if row] == session_ids
+
+
 @pytest.mark.parametrize(
     ("unsafe_text", "label"),
     [

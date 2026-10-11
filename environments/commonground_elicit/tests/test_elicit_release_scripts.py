@@ -284,3 +284,13 @@ def test_minimal_model_free_baselines_and_corpus_diagnostics(tmp_path: Path) -> 
 
 def read_jsonl(path: Path) -> list[dict[str, Any]]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+
+def test_load_scenarios_keeps_unicode_line_separators_inside_strings(
+    tmp_path: Path,
+) -> None:
+    split = tmp_path / "split.jsonl"
+    row = {"scenario_id": "a\u2028b\u2029c\u0085d"}
+    split.write_text(json.dumps(row, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    assert floors.load_scenarios(split) == [row]

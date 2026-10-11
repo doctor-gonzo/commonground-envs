@@ -57,7 +57,15 @@ def ingest_files(
     for source_index, input_path in enumerate(input_paths):
         try:
             input_bytes = input_path.read_bytes()
-            lines = input_bytes.decode("utf-8").splitlines()
+            # End rows at \n, \r\n, or \r like the text-mode loaders, but never
+            # inside JSON strings, which splitlines() breaks at U+2028, U+2029,
+            # or U+0085. Raw CRs cannot occur inside JSON strings.
+            lines = (
+                input_bytes.decode("utf-8")
+                .replace("\r\n", "\n")
+                .replace("\r", "\n")
+                .split("\n")
+            )
         except (OSError, UnicodeError) as error:
             errors.append(f"{input_path}: unable to read input: {error}")
             continue

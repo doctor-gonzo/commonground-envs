@@ -358,6 +358,21 @@ def test_load_environment_rejects_unmasked_ce_demo_by_default() -> None:
     assert "pre-masked data" in message
 
 
+def test_load_environment_keeps_unicode_line_separators_inside_rows(
+    tmp_path: Path,
+) -> None:
+    snapshot = orientation_snapshot()
+    snapshot["statements"][0]["text"] = "Statement\u2028A\u2029B\u0085C"
+    data_path = tmp_path / "separators.jsonl"
+    data_path.write_text(
+        json.dumps(snapshot, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+
+    row = task_rows(load_environment(data_path=data_path))[0]
+
+    assert row["snapshot"]["statements"][0]["text"] == "Statement\u2028A\u2029B\u0085C"
+
+
 def test_load_environment_rejects_transposed_votes(tmp_path: Path) -> None:
     snapshot = orientation_snapshot()
     snapshot["votes"] = [

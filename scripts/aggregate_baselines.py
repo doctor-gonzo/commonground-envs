@@ -1598,8 +1598,10 @@ def load_json_object(path: Path) -> dict[str, Any]:
 
 def load_json_lines(path: Path) -> list[dict[str, Any]]:
     outputs: list[dict[str, Any]] = []
+    # Rows end only at "\n"; splitlines() would also break JSON strings that
+    # contain U+2028, U+2029, or U+0085.
     for line_number, line in enumerate(
-        path.read_text(encoding="utf-8").splitlines(), start=1
+        path.read_text(encoding="utf-8").split("\n"), start=1
     ):
         if not line.strip():
             continue

@@ -315,3 +315,25 @@ def test_predict_floor_cli_omits_missing_train_cleanly(tmp_path: Path) -> None:
         "brier_skill_vs_empirical_prior" not in metrics
         for metrics in report["floors"].values()
     )
+
+
+def test_load_snapshot_rows_keeps_unicode_line_separators_inside_strings(
+    tmp_path: Path,
+) -> None:
+    snapshot = {
+        "session_id": "separator-test",
+        "statements": [
+            {"index": 0, "text": "Fund\u2028the\u2029pilot\u0085now"},
+            {"index": 1, "text": "Publish"},
+        ],
+        "participants": ["p0", "p1"],
+        "votes": [[1, None], [-1, 0]],
+        "masked_cells": [[0, 1]],
+        "held_out": {"0,1": 1},
+        "clusters": [0, 1],
+        "meta": {"synthetic": True},
+    }
+    split = tmp_path / "split.jsonl"
+    split.write_text(json.dumps(snapshot, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    assert floors_module.load_snapshot_rows(split) == [snapshot]
