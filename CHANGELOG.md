@@ -11,6 +11,9 @@ All notable changes to this project are documented in this file.
 - Require explicit human-intake destinations, refuse any destination inside
   a checkout of this repository, ignore `eval_real*` outputs, and make
   release checks reject shipped non-Python files that are not allowlisted.
+- Correct the Predict `ce-demo` NOTICE: pin the Context Engine exporter
+  revision that reproduces the import byte for byte and the two later edits,
+  and state which fields the exporter derived rather than copied.
 
 ## 0.6.1 - 2026-09-04
 

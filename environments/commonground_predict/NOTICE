@@ -16,18 +16,34 @@ Source SHA-256:
 Distributed fixture SHA-256:
 f459c6bb2524806e17648fae737a8aae18b58402a81de9b4d4920b23ee7eb909
 
-Initial Common Ground import commit:
-67267c93457252b6bcb730818933e8a94f1332c2
-
 Transformation identifier: commonground-ce-demo-v1
 
-The adaptation projects the source fixture's statements, participant votes,
-cluster assignments, and summary statistics into the Common Ground prediction
-snapshot schema and adds empty evaluation-mask fields plus synthetic provenance
-metadata. The immutable import commit and the source/distributed hashes above
-identify the complete transformation boundary. The distributed fixture remains
-licensed under the Mozilla Public License, Version 2.0. The complete MPL-2.0
-text is included as LICENSES/MPL-2.0.txt.
+The fixture was produced in three recorded steps:
+
+1. Context Engine's CommonGround exporter,
+   client/src/utilities/survey/commongroundExport.ts at revision
+   4cd3919fd0acdca1b184fe7d81d8435860dc2928, was run on the source with
+   sessionId ce-demo, seed 42, and kAnonymity 5, and its result was written
+   as JSON.stringify output plus a newline. Rerunning it reproduces the file
+   in initial Common Ground import commit
+   67267c93457252b6bcb730818933e8a94f1332c2 byte for byte.
+2. Common Ground commit c748a64013326aa626688a6420a0cdb7feef2609 transposed
+   the vote matrix to participant-major order.
+3. Common Ground commit cab5028565bb217120b0061aceba17cc57706def relabeled
+   the metadata as source ce-demo-authored and synthetic true.
+
+The exporter keeps the source's 30 binary statements, copies their participant
+votes exactly, and replaces participant identifiers with positional
+pseudonyms. It recomputes per-statement vote counts from those votes. Its own
+seeded PCA and k-means clustering derive the two participant clusters, their
+centers, and comment extremity; divisiveness repeats extremity. None of these
+derived values come from the source's group assignments or summary
+statistics. The exporter also adds empty evaluation-mask fields and
+provenance metadata.
+
+The distributed fixture remains licensed under the
+Mozilla Public License, Version 2.0. The complete MPL-2.0 text is included as
+LICENSES/MPL-2.0.txt.
 
 This attribution does not imply endorsement by the Context Engine project or
 its contributors.

@@ -258,7 +258,14 @@ def test_predict_notice_pins_demo_fixture_provenance_and_content() -> None:
         "f459c6bb2524806e17648fae737a8aae18b58402a81de9b4d4920b23ee7eb909"
     )
     assert fixture_sha256 in notice
-    assert "67267c93457252b6bcb730818933e8a94f1332c2" in notice
+    assert "client/src/utilities/survey/commongroundExport.ts" in notice
+    for commit in (
+        "4cd3919fd0acdca1b184fe7d81d8435860dc2928",
+        "67267c93457252b6bcb730818933e8a94f1332c2",
+        "c748a64013326aa626688a6420a0cdb7feef2609",
+        "cab5028565bb217120b0061aceba17cc57706def",
+    ):
+        assert commit in notice
     assert "Mozilla Public License, Version 2.0" in notice
 
 
