@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented in this file.
 
+## Unreleased
+
+- Detect human-snapshot identifiers that end a sentence or touch CJK and
+  other non-Latin text, and keep the identifier scan linear on long runs.
+
 ## 0.6.1 - 2026-09-04
 
 - Correct the Hub-facing Predict and Elicit READMEs so they no longer describe

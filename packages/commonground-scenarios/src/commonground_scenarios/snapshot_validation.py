@@ -61,22 +61,31 @@ COMMENT_STAT_FIELDS = frozenset(
     }
 )
 
+# Boundaries use ASCII word characters, so identifiers touching CJK or other
+# non-Latin text still match; only ENS names may be Unicode. Each lookbehind
+# covers its pattern's own token characters, so a long run cannot restart the
+# scan at every offset. A sentence-ending period may follow an identifier; a
+# period that continues the token (a longer domain or dotted number) may not.
 _EMAIL_PATTERN = re.compile(
-    r"(?<![\w.+-])[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}(?![\w.-])",
-    re.IGNORECASE,
+    r"(?<![\w.%+-])[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}(?![\w-]|\.[\w-])",
+    re.ASCII | re.IGNORECASE,
 )
 _EVM_PATTERN = re.compile(r"(?<![0-9a-f])0x[0-9a-f]{40}(?![0-9a-f])", re.I)
-_ENS_PATTERN = re.compile(r"(?<![\w@.])[\w-]+(?:\.[\w-]+)*\.eth\b", re.I)
+_ENS_PATTERN = re.compile(r"(?<![\w@.-])[\w-]+(?:\.[\w-]+)*\.eth(?![A-Za-z0-9_])", re.I)
 _PHONE_PATTERN = re.compile(
-    r"(?<!\w)(?:\+?[1-9]\d{7,14}|(?:\+?1[-. ]?)?\(?[2-9]\d{2}\)?[-. ]\d{3}[-. ]\d{4})(?!\w)"
+    r"(?<!\w)(?:\+?[1-9]\d{7,14}|(?:\+?1[-. ]?)?\(?[2-9]\d{2}\)?[-. ]\d{3}[-. ]\d{4})(?!\w)",
+    re.ASCII,
 )
-_IPV4_CANDIDATE_PATTERN = re.compile(r"(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?![\w.])")
+_IPV4_CANDIDATE_PATTERN = re.compile(
+    r"(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?!\w|\.\d)", re.ASCII
+)
 _IPV6_CANDIDATE_PATTERN = re.compile(
-    r"(?<![\w:])(?:[0-9a-f]{0,4}:){2,7}[0-9a-f]{0,4}(?![\w:])", re.I
+    r"(?<![\w:])(?:[0-9a-f]{0,4}:){2,7}[0-9a-f]{0,4}(?![\w:])", re.ASCII | re.I
 )
 _HONORIFIC_NAME_PATTERN = re.compile(
     r"\b(?:Mr|Mrs|Ms|Miss|Mx|Dr|Prof)\.?\s+[A-Z][A-Za-z'\N{RIGHT SINGLE QUOTATION MARK}-]+"
-    r"(?:\s+[A-Z][A-Za-z'\N{RIGHT SINGLE QUOTATION MARK}-]+)?\b"
+    r"(?:\s+[A-Z][A-Za-z'\N{RIGHT SINGLE QUOTATION MARK}-]+)?\b",
+    re.ASCII,
 )
 _SEMVER_PATTERN = re.compile(
     r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)"
@@ -84,6 +93,9 @@ _SEMVER_PATTERN = re.compile(
     r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
 )
 _SOURCE_COMMIT_PATTERN = re.compile(r"[0-9a-f]{40}")
+# Unicode whitespace that NFKC keeps, such as U+2028, would not match the
+# ASCII \s that separates honorifics from names. ASCII whitespace stays.
+_UNICODE_WHITESPACE_PATTERN = re.compile(r"[^\S \t\n\r\f\v]")
 
 
 class HumanSnapshotValidationError(ValueError):
@@ -93,7 +105,9 @@ class HumanSnapshotValidationError(ValueError):
 def find_direct_identifier(text: str) -> str | None:
     """Return the detected direct-identifier category, if any."""
 
-    normalized = unicodedata.normalize("NFKC", text)
+    normalized = _UNICODE_WHITESPACE_PATTERN.sub(
+        " ", unicodedata.normalize("NFKC", text)
+    )
     for label, pattern in (
         ("email", _EMAIL_PATTERN),
         ("EVM address", _EVM_PATTERN),

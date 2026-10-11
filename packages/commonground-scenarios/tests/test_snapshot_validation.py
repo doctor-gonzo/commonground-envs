@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import time
 
 import pytest
 from commonground_scenarios import (
@@ -97,12 +98,20 @@ def test_human_snapshot_contract_requires_explicit_schema_version() -> None:
     ("text", "category"),
     [
         ("Contact person@example.org", "email"),
+        ("Contact person@example.org.", "email"),
+        ("请联系person@example.org谢谢", "email"),
         (f"Wallet 0x{'a' * 40}", "EVM address"),
         ("Delegate person.eth", "ENS name"),
         ("Call +14165550199", "phone number"),
+        ("电话+14165550199", "phone number"),
         ("Origin 192.0.2.4", "IP address"),
+        ("Origin 192.0.2.4.", "IP address"),
+        ("服务器192.0.2.4在线", "IP address"),
         ("Origin 2001:db8::4", "IP address"),
         ("Approved by Dr Alice Example", "honorific-name"),
+        ("请Dr Alice Example批准", "honorific-name"),
+        ("Approved by Dr\u2028Alice Example", "honorific-name"),
+        ("请联系alice.eth谢谢", "ENS name"),
     ],
 )
 def test_direct_identifier_detector_covers_publication_risks(
@@ -111,11 +120,27 @@ def test_direct_identifier_detector_covers_publication_risks(
     assert find_direct_identifier(text) == category
 
 
-@pytest.mark.parametrize("text", ["Review dated 2026-08-26", "Version 1.2.0"])
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Review dated 2026-08-26",
+        "Version 1.2.0",
+        "Room 212\n555 1234 is booked",
+        "Version 1.2.3.4.5",
+    ],
+)
 def test_direct_identifier_detector_avoids_common_metadata_false_positives(
     text: str,
 ) -> None:
     assert find_direct_identifier(text) is None
+
+
+def test_direct_identifier_scan_stays_linear_on_long_runs() -> None:
+    started = time.perf_counter()
+    for character in "-%.@+1":
+        assert find_direct_identifier(character * 200_000) is None
+    # Quadratic lookbehinds took minutes here; linear scans take milliseconds.
+    assert time.perf_counter() - started < 5
 
 
 @pytest.mark.parametrize(
