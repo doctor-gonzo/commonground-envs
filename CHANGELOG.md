@@ -8,6 +8,9 @@ All notable changes to this project are documented in this file.
   other non-Latin text, and keep the identifier scan linear on long runs.
 - Flag URLs with a scheme or `www.` prefix, @-handles, and international
   phone numbers written with a leading `+` in human snapshots.
+- Require explicit human-intake destinations, refuse any destination inside
+  a checkout of this repository, ignore `eval_real*` outputs, and make
+  release checks reject shipped non-Python files that are not allowlisted.
 
 ## 0.6.1 - 2026-09-04
 

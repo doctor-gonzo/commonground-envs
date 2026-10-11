@@ -44,6 +44,11 @@ counts, provenance, rights, and privacy-review attestations:
       --output /approved/data/eval_real.jsonl \
       --manifest /approved/data/eval_real.manifest.json
 
+Both destinations are required, and intake refuses any destination inside its
+own checkout or another full checkout of this repository, such as a sibling
+worktree. Release checks also reject any packaged file that is neither Python
+source nor on the release allowlist.
+
 By default any rejected row prevents publication. The --skip-invalid option is
 for operator investigation; it does not waive the review requirements below.
 

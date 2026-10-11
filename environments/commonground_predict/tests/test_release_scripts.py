@@ -5,6 +5,7 @@ import hashlib
 import importlib.util
 import json
 import random
+import shutil
 import sys
 import tomllib
 from pathlib import Path
@@ -572,39 +573,111 @@ def test_ingest_rejects_malformed_json(
 
 
 @pytest.mark.parametrize(
-    "protected_name",
+    "repository_destination",
     [
-        "eval_synthetic.jsonl",
-        "EVAL_SYNTHETIC.JSONL",
-        "eval_ce_demo.jsonl",
-        "EVAL_CE_DEMO.JSONL",
+        DATA_DIR / "eval_ce_demo.jsonl",
+        DATA_DIR / "EVAL_SYNTHETIC.JSONL",
+        DATA_DIR / "eval_real.jsonl",
+        ROOT / "untracked-intake" / "eval_real.jsonl",
     ],
 )
-@pytest.mark.parametrize("protected_option", ["--output", "--manifest"])
-def test_ingest_refuses_protected_split_as_either_destination(
+@pytest.mark.parametrize("destination_option", ["--output", "--manifest"])
+def test_ingest_refuses_any_destination_inside_the_repository(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
-    protected_name: str,
-    protected_option: str,
+    repository_destination: Path,
+    destination_option: str,
 ) -> None:
     source = write_jsonl(tmp_path / "source.jsonl", [valid_real_snapshot()])
-    protected = tmp_path / protected_name
-    protected.write_text("sentinel\n", encoding="utf-8")
-    output = tmp_path / "output.jsonl"
-    manifest = tmp_path / "manifest.json"
+    bundled_before = {path: path.read_bytes() for path in DATA_DIR.iterdir()}
     arguments = [
         str(source),
         "--output",
-        str(output),
+        str(tmp_path / "output.jsonl"),
         "--manifest",
-        str(manifest),
+        str(tmp_path / "manifest.json"),
     ]
-    destination_index = arguments.index(protected_option) + 1
-    arguments[destination_index] = str(protected)
+    destination_index = arguments.index(destination_option) + 1
+    arguments[destination_index] = str(repository_destination)
+    created_by_test = not repository_destination.exists()
 
-    assert ingest_main(arguments) == 1
-    assert protected.read_text(encoding="utf-8") == "sentinel\n"
-    assert "refusing to overwrite protected split" in capsys.readouterr().err
+    try:
+        assert ingest_main(arguments) == 1
+        err = capsys.readouterr().err
+        assert "refusing to write inside a repository checkout" in err
+        assert {path: path.read_bytes() for path in DATA_DIR.iterdir()} == (
+            bundled_before
+        )
+        assert not (ROOT / "untracked-intake").exists()
+    finally:
+        # A guard regression must not leave git-ignored files in the checkout.
+        if created_by_test:
+            repository_destination.unlink(missing_ok=True)
+        shutil.rmtree(ROOT / "untracked-intake", ignore_errors=True)
+
+
+def test_ingest_refuses_other_checkouts_and_symlinked_destinations(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    source = write_jsonl(tmp_path / "source.jsonl", [valid_real_snapshot()])
+    other_checkout = tmp_path / "other-worktree"
+    marker = other_checkout / "environments" / "commonground_predict" / "pyproject.toml"
+    marker.parent.mkdir(parents=True)
+    marker.write_text("", encoding="utf-8")
+    outside_target = tmp_path / "outside" / "target.jsonl"
+    outside_target.parent.mkdir()
+    outside_target.write_text("outside\n", encoding="utf-8")
+    link = other_checkout / "eval_real.jsonl"
+    link.symlink_to(outside_target)
+
+    for destination in (other_checkout / "data" / "eval_real.jsonl", link):
+        arguments = [str(source), "--output", str(destination)]
+        arguments += ["--manifest", str(tmp_path / "manifest.json")]
+        assert ingest_main(arguments) == 1
+
+    assert "refusing to write inside a repository checkout" in capsys.readouterr().err
+    assert link.is_symlink()
+    assert outside_target.read_text(encoding="utf-8") == "outside\n"
+    assert not (other_checkout / "data").exists()
+
+
+def test_ingest_refuses_its_own_checkout_without_the_marker(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A sparse checkout can lack the marker; the script's own root still counts.
+    sparse_root = tmp_path / "sparse-checkout"
+    sparse_root.mkdir()
+    monkeypatch.setattr(ingest_snapshots_module, "ROOT", sparse_root)
+    monkeypatch.setattr(
+        ingest_snapshots_module, "CHECKOUT_MARKER", Path("missing-marker")
+    )
+    source = write_jsonl(tmp_path / "source.jsonl", [valid_real_snapshot()])
+    destination = sparse_root / "scripts" / "eval_real.jsonl"
+
+    result = ingest_main(
+        [
+            str(source),
+            "--output",
+            str(destination),
+            "--manifest",
+            str(tmp_path / "manifest.json"),
+        ]
+    )
+
+    assert result == 1
+    assert "refusing to write inside a repository checkout" in capsys.readouterr().err
+    assert not destination.parent.exists()
+
+
+def test_ingest_requires_explicit_destinations(tmp_path: Path) -> None:
+    source = write_jsonl(tmp_path / "source.jsonl", [valid_real_snapshot()])
+
+    with pytest.raises(SystemExit) as exc_info:
+        ingest_main([str(source)])
+
+    assert exc_info.value.code == 2
 
 
 def test_ingest_refuses_case_only_output_manifest_alias(

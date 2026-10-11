@@ -9,7 +9,7 @@ import sys
 import tarfile
 import tempfile
 import zipfile
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -34,6 +34,9 @@ REPOSITORY_TOOLING = frozenset(
         "aggregate_baselines.py",
         "baseline-sweep.toml",
     }
+)
+SDIST_METADATA_FILES = frozenset(
+    {".gitignore", "PKG-INFO", "README.md", "pyproject.toml"}
 )
 DEPENDENCY_MANIFEST_NAME = "dependency-manifest.txt"
 DEPENDENCY_MANIFEST_PATHS = (
@@ -61,14 +64,6 @@ class WheelTarget:
     legal_files: frozenset[str] = frozenset({"LICENSE"})
 
 
-def _data_files(source_dir: Path, package_name: str) -> frozenset[str]:
-    data_dir = source_dir / package_name / "data"
-    return frozenset(
-        f"{package_name}/data/{source_path.name}"
-        for source_path in data_dir.glob("*.jsonl")
-    )
-
-
 TARGETS = (
     WheelTarget(
         name="commonground-predict",
@@ -82,10 +77,14 @@ TARGETS = (
                 "verifiers==0.3.0",
             }
         ),
-        bundled_files=_data_files(
-            ROOT / "environments" / "commonground_predict", "commonground_predict"
-        )
-        | frozenset({f"commonground_predict/{DEPENDENCY_MANIFEST_NAME}"}),
+        bundled_files=frozenset(
+            {
+                "commonground_predict/data/eval_ce_demo.jsonl",
+                "commonground_predict/data/eval_synthetic.jsonl",
+                "commonground_predict/data/train_synthetic.jsonl",
+                f"commonground_predict/{DEPENDENCY_MANIFEST_NAME}",
+            }
+        ),
         license_expression="Apache-2.0 AND MPL-2.0",
         legal_files=frozenset(
             {
@@ -109,12 +108,11 @@ TARGETS = (
                 "verifiers==0.3.0",
             }
         ),
-        bundled_files=_data_files(
-            ROOT / "environments" / "commonground_elicit", "commonground_elicit"
-        )
-        | frozenset(
+        bundled_files=frozenset(
             {
                 "commonground_elicit/data/README.md",
+                "commonground_elicit/data/eval_synthetic_heldout.jsonl",
+                "commonground_elicit/data/train_synthetic.jsonl",
                 f"commonground_elicit/{DEPENDENCY_MANIFEST_NAME}",
             }
         ),
@@ -147,6 +145,26 @@ def _bundled_source_path(target: WheelTarget, relative_path: str) -> Path:
     raise AssertionError(
         f"{target.name}: bundled source file does not exist: {relative_path}"
     )
+
+
+def _unlisted_files(target: WheelTarget, names: Iterable[str]) -> list[str]:
+    """Return shipped non-Python files that the release allowlist omits."""
+
+    allowed = target.bundled_files | target.legal_files | SDIST_METADATA_FILES
+    return sorted(
+        name for name in names if not name.endswith(".py") and name not in allowed
+    )
+
+
+def _sdist_files(archive: tarfile.TarFile) -> list[str]:
+    """Return sdist file and link paths relative to the project, without src/."""
+
+    # Links are listed too, so a symlinked data file cannot skip the allowlist.
+    return [
+        member.name.split("/", 1)[1].removeprefix("src/")
+        for member in archive.getmembers()
+        if not member.isdir() and "/" in member.name
+    ]
 
 
 def _normalized_requirement(requirement: str) -> str:
@@ -281,6 +299,19 @@ def _inspect_wheel(target: WheelTarget, wheel_path: Path) -> int:
             raise AssertionError(
                 f"{target.name}: release wheel is missing bundled files: {missing_files!r}"
             )
+        unlisted_files = _unlisted_files(
+            target,
+            (
+                name
+                for name in names
+                if not name.endswith("/") and ".dist-info/" not in name
+            ),
+        )
+        if unlisted_files:
+            raise AssertionError(
+                f"{target.name}: release wheel contains unlisted files: "
+                f"{unlisted_files!r}"
+            )
         for relative_path in target.bundled_files:
             if (
                 wheel.read(relative_path)
@@ -307,6 +338,11 @@ def _inspect_wheel(target: WheelTarget, wheel_path: Path) -> int:
 def _inspect_sdist(target: WheelTarget, sdist_path: Path) -> None:
     with tarfile.open(sdist_path, "r:gz") as archive:
         members = {member.name: member for member in archive.getmembers()}
+        unlisted_files = _unlisted_files(target, _sdist_files(archive))
+        if unlisted_files:
+            raise AssertionError(
+                f"{target.name}: sdist contains unlisted files: {unlisted_files!r}"
+            )
         for relative_path in target.legal_files:
             legal_names = sorted(
                 name for name in members if name.endswith(f"/{relative_path}")

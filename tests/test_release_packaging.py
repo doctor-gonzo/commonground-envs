@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
+import io
 import shutil
 import subprocess
 import sys
+import tarfile
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -332,3 +335,62 @@ def test_built_release_artifacts_pass_policy_checks(tmp_path: Path) -> None:
     )
     assert len(list(artifact_dir.glob("*.whl"))) == 4
     assert len(list(artifact_dir.glob("*.tar.gz"))) == 4
+
+
+def test_release_gate_rejects_unlisted_package_files(tmp_path: Path) -> None:
+    release_checker = _load_release_checker()
+    targets = {target.name: target for target in release_checker.TARGETS}
+    predict = targets["commonground-predict"]
+    wheel_files = {
+        *predict.bundled_files,
+        "commonground_predict/environment.py",
+        "commonground_predict/data/eval_real.jsonl",
+        "commonground_predict/human_export.json",
+        "commonground_predict/extra/rows.csv",
+        "commonground_predict/rows.JSONL",
+    }
+
+    assert release_checker._unlisted_files(predict, wheel_files) == [
+        "commonground_predict/data/eval_real.jsonl",
+        "commonground_predict/extra/rows.csv",
+        "commonground_predict/human_export.json",
+        "commonground_predict/rows.JSONL",
+    ]
+
+    sdist_path = tmp_path / "commonground_scenarios-0.6.1.tar.gz"
+    with tarfile.open(sdist_path, "w:gz") as archive:
+        for name in (
+            "PKG-INFO",
+            "LICENSE",
+            "src/commonground_scenarios/validation.py",
+            "src/commonground_scenarios/schema/scenario.schema.json",
+            "src/commonground_scenarios/eval_real.manifest.json",
+        ):
+            member = tarfile.TarInfo(f"commonground_scenarios-0.6.1/{name}")
+            archive.addfile(member, io.BytesIO(b""))
+        link = tarfile.TarInfo(
+            "commonground_scenarios-0.6.1/src/commonground_scenarios/human.jsonl"
+        )
+        link.type = tarfile.SYMTYPE
+        link.linkname = "/approved/private/human_export.jsonl"
+        archive.addfile(link)
+    with tarfile.open(sdist_path, "r:gz") as archive:
+        sdist_files = release_checker._sdist_files(archive)
+
+    assert release_checker._unlisted_files(
+        targets["commonground-scenarios"], sdist_files
+    ) == [
+        "commonground_scenarios/eval_real.manifest.json",
+        "commonground_scenarios/human.jsonl",
+    ]
+
+
+def _load_release_checker() -> Any:
+    script_path = ROOT / "scripts" / "check_release_wheel.py"
+    spec = importlib.util.spec_from_file_location("check_release_wheel", script_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"unable to load {script_path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module

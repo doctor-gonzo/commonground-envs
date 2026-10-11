@@ -21,12 +21,9 @@ from commonground_scenarios.snapshot_validation import (
 )
 
 ROOT = Path(__file__).resolve().parents[1]
-DATA_DIR = (
-    ROOT / "environments" / "commonground_predict" / "commonground_predict" / "data"
-)
-DEFAULT_OUTPUT = DATA_DIR / "eval_real.jsonl"
-DEFAULT_MANIFEST = DATA_DIR / "eval_real.manifest.json"
-PROTECTED_SPLITS = {"eval_synthetic.jsonl", "eval_ce_demo.jsonl"}
+# Full checkouts of this repository, such as other worktrees, have this file;
+# ROOT also covers this script's own checkout when it is sparse.
+CHECKOUT_MARKER = Path("environments") / "commonground_predict" / "pyproject.toml"
 MAX_INPUT_LINE_BYTES = 4 * 1024 * 1024
 MANIFEST_VERSION = 2
 
@@ -120,11 +117,12 @@ def write_outputs(
     output_path: Path,
     manifest_path: Path,
 ) -> None:
-    protected_names = {name.casefold() for name in PROTECTED_SPLITS}
+    # Human outputs stay outside every checkout of this repository so no commit
+    # or package build can pick them up before review.
     for destination in (output_path, manifest_path):
-        if destination.name.casefold() in protected_names:
+        if _inside_checkout(destination):
             raise ValueError(
-                f"refusing to overwrite protected split: {destination.name}"
+                f"refusing to write inside a repository checkout: {destination}"
             )
     if str(output_path.resolve()).casefold() == str(manifest_path.resolve()).casefold():
         raise ValueError("output and manifest paths must be different")
@@ -177,6 +175,19 @@ def write_outputs(
                 temporary_path.unlink(missing_ok=True)
 
 
+def _inside_checkout(path: Path) -> bool:
+    """Return whether writing path would place a file in a repository checkout."""
+
+    # os.replace swaps a final symlink instead of following it, so check the
+    # directory that receives the file rather than the link's target.
+    directory = path.parent.resolve()
+    return any(
+        (candidate / CHECKOUT_MARKER).is_file()
+        or (candidate.exists() and candidate.samefile(ROOT))
+        for candidate in (directory, *directory.parents)
+    )
+
+
 def _write_temporary(destination: Path, content: str) -> Path:
     with tempfile.NamedTemporaryFile(
         mode="w",
@@ -221,8 +232,18 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="write valid rows despite rejected inputs",
     )
-    parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
-    parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
+    parser.add_argument(
+        "--output",
+        type=Path,
+        required=True,
+        help="accepted JSONL destination outside this repository",
+    )
+    parser.add_argument(
+        "--manifest",
+        type=Path,
+        required=True,
+        help="manifest destination outside this repository",
+    )
     return parser
 
 
