@@ -72,9 +72,17 @@ _EMAIL_PATTERN = re.compile(
 )
 _EVM_PATTERN = re.compile(r"(?<![0-9a-f])0x[0-9a-f]{40}(?![0-9a-f])", re.I)
 _ENS_PATTERN = re.compile(r"(?<![\w@.-])[\w-]+(?:\.[\w-]+)*\.eth(?![A-Za-z0-9_])", re.I)
+_URL_PATTERN = re.compile(r"(?<![\w.@/-])(?:https?://|www\.)[^\s<>\"']+", re.A | re.I)
+_HANDLE_PATTERN = re.compile(r"(?<![\w@])@[A-Za-z_][A-Za-z0-9_.]*[A-Za-z0-9_]", re.A)
 _PHONE_PATTERN = re.compile(
     r"(?<!\w)(?:\+?[1-9]\d{7,14}|(?:\+?1[-. ]?)?\(?[2-9]\d{2}\)?[-. ]\d{3}[-. ]\d{4})(?!\w)",
     re.ASCII,
+)
+# Dots are not separators here, so signed decimals are not read as numbers.
+# The atomic group commits to one split of each digit run; without it,
+# adversarial digit runs backtrack through every possible grouping.
+_INTERNATIONAL_PHONE_CANDIDATE_PATTERN = re.compile(
+    r"(?<![\w+])\+[1-9]\d{0,3}(?>[- ]?\(?\d{1,4}\)?){2,6}(?!\w)", re.ASCII
 )
 _IPV4_CANDIDATE_PATTERN = re.compile(
     r"(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?!\w|\.\d)", re.ASCII
@@ -112,22 +120,35 @@ def find_direct_identifier(text: str) -> str | None:
         ("email", _EMAIL_PATTERN),
         ("EVM address", _EVM_PATTERN),
         ("ENS name", _ENS_PATTERN),
+        ("URL", _URL_PATTERN),
+        ("social handle", _HANDLE_PATTERN),
         ("phone number", _PHONE_PATTERN),
         ("honorific-name", _HONORIFIC_NAME_PATTERN),
     ):
         if pattern.search(normalized):
             return label
-    for label, pattern in (
-        ("IP address", _IPV4_CANDIDATE_PATTERN),
-        ("IP address", _IPV6_CANDIDATE_PATTERN),
+    for label, pattern, is_identifier in (
+        ("phone number", _INTERNATIONAL_PHONE_CANDIDATE_PATTERN, _is_phone_number),
+        ("IP address", _IPV4_CANDIDATE_PATTERN, _is_ip_address),
+        ("IP address", _IPV6_CANDIDATE_PATTERN, _is_ip_address),
     ):
-        for candidate in pattern.findall(normalized):
-            try:
-                ipaddress.ip_address(candidate)
-            except ValueError:
-                continue
+        if any(is_identifier(candidate) for candidate in pattern.findall(normalized)):
             return label
     return None
+
+
+def _is_phone_number(candidate: str) -> bool:
+    # A greedy match can absorb a number that follows the phone number, so
+    # only short runs are dismissed.
+    return sum(character.isdigit() for character in candidate) >= 8
+
+
+def _is_ip_address(candidate: str) -> bool:
+    try:
+        ipaddress.ip_address(candidate)
+    except ValueError:
+        return False
+    return True
 
 
 def contains_direct_identifier(text: str) -> bool:

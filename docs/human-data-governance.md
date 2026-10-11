@@ -50,9 +50,12 @@ for operator investigation; it does not waive the review requirements below.
 ## Human review is mandatory
 
 The identifier scanner detects several high-confidence shapes, including email,
-EVM and ENS addresses, phone numbers, IP addresses, and honorific-prefixed
-names. It cannot establish anonymity, consent, legal authority, or the absence
-of indirect identification. Before publication, an accountable reviewer must:
+EVM and ENS addresses, URLs with a scheme or www prefix, @-handles, phone
+numbers (unbroken digit runs, North American formats, and international
+numbers with a leading + and space or hyphen separators), IP addresses, and
+honorific-prefixed names. It cannot establish anonymity, consent, legal
+authority, or the absence of indirect identification. Before publication, an
+accountable reviewer must:
 
 1. verify the consent record and redistribution authority outside this
    repository;

@@ -6,6 +6,8 @@ All notable changes to this project are documented in this file.
 
 - Detect human-snapshot identifiers that end a sentence or touch CJK and
   other non-Latin text, and keep the identifier scan linear on long runs.
+- Flag URLs with a scheme or `www.` prefix, @-handles, and international
+  phone numbers written with a leading `+` in human snapshots.
 
 ## 0.6.1 - 2026-09-04
 
