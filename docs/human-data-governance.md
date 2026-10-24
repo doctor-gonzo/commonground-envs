@@ -36,6 +36,11 @@ commonground_scenarios.validate_human_snapshot:
   canonical direct-identifiers, free-text, and participant-pseudonyms checks
   are recorded.
 
+The packaged JSON Schema's contextEngineSnapshot definition is a structural
+summary for exporters. validate_human_snapshot is authoritative and also
+requires exact JSON integers (5, not 5.0), positional pseudonyms, and counts
+that match the votes.
+
 The intake command rebuilds each accepted row from an allowlist and writes a
 versioned manifest containing the output SHA-256, input hashes, source lines,
 counts, provenance, rights, and privacy-review attestations:

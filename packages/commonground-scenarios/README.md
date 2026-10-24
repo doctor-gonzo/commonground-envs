@@ -56,6 +56,6 @@ validator. It is not used by the bundled data; see
 for its separate review requirements.
 
 The packaged Draft 2020-12 schema has the stable identifier
-`urn:commonground:schema:scenario:5`, requires
+`urn:commonground:schema:scenario:6`, requires
 `persona_panel.vote_rule: value-composition-v2`, and is available through
 `load_scenario_schema()`.

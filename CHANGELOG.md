@@ -25,6 +25,10 @@ All notable changes to this project are documented in this file.
   keeping the last value.
 - Raise the human-intake row limit to 16 MiB so the largest vote matrix the
   validator accepts is not rejected as too long first.
+- Match the packaged schema's exporter-version pattern to the validator's
+  semantic-version rule, revise the schema id to
+  `urn:commonground:schema:scenario:6`, and document that the validator is
+  authoritative.
 
 ## 0.6.1 - 2026-09-04
 

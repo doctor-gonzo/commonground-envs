@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:commonground:schema:scenario:5",
+  "$id": "urn:commonground:schema:scenario:6",
   "title": "Common Ground planted policy scenario",
   "type": "object",
   "additionalProperties": false,
@@ -104,7 +104,7 @@
     }
   ],
   "$defs": {
-    "identifier": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"},
+    "identifier": {"type": "string", "pattern": "^[a-z][a-z0-9-]*(?![\\s\\S])"},
     "faction": {
       "type": "object",
       "additionalProperties": false,
@@ -253,7 +253,7 @@
           "minItems": 5,
           "maxItems": 10000,
           "uniqueItems": true,
-          "items": {"type": "string", "pattern": "^p[0-9]{3,}$"}
+          "items": {"type": "string", "pattern": "^p[0-9]{3,}(?![\\s\\S])"}
         },
         "votes": {"type": "array", "minItems": 5, "maxItems": 10000, "items": {"type": "array", "minItems": 1, "maxItems": 1000, "items": {"enum": [-1, 0, 1, null]}}},
         "masked_cells": {"type": "array", "maxItems": 0},
@@ -268,7 +268,7 @@
             "required": ["id", "members", "member_indices", "center"],
             "properties": {
               "id": {"type": "integer"},
-              "members": {"type": "array", "minItems": 5, "items": {"type": "string", "pattern": "^p[0-9]{3,}$"}},
+              "members": {"type": "array", "minItems": 5, "items": {"type": "string", "pattern": "^p[0-9]{3,}(?![\\s\\S])"}},
               "member_indices": {"type": "array", "minItems": 5, "items": {"type": "integer", "minimum": 0}},
               "center": {"type": "array", "maxItems": 0}
             }
@@ -312,8 +312,8 @@
             "consent_scope": {"const": "public-benchmark"},
             "redistribution_rights_approved": {"const": true},
             "schema_version": {"const": "commonground-human-snapshot-v2"},
-            "exporter_version": {"type": "string", "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)([-+][0-9A-Za-z.-]+)?$"},
-            "source_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+            "exporter_version": {"type": "string", "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?(\\+[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?(?![\\s\\S])"},
+            "source_commit": {"type": "string", "pattern": "^[0-9a-f]{40}(?![\\s\\S])"},
             "privacy_review": {
               "type": "object",
               "additionalProperties": false,

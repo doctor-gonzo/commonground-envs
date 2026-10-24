@@ -879,7 +879,7 @@ def test_packaged_json_schema_names_every_top_level_field() -> None:
     schema = load_scenario_schema()
 
     assert schema["$schema"] == "https://json-schema.org/draft/2020-12/schema"
-    assert schema["$id"] == "urn:commonground:schema:scenario:5"
+    assert schema["$id"] == "urn:commonground:schema:scenario:6"
     assert set(schema["required"]) == {
         "scenario_id",
         "organization",
@@ -1048,6 +1048,57 @@ def test_human_path_still_enforces_value_composed_target_stances() -> None:
         ScenarioValidationError, match="target_stances do not match question polarity"
     ):
         validate_scenario(scenario)
+
+
+@pytest.mark.parametrize(
+    "exporter_version",
+    [
+        "1.2.3",
+        "1.2.3-rc.1",
+        "1.2.3+build.5",
+        "1.2.3-rc.1+build.5",
+        "1.2.3-.",
+        "1.2.3-rc..1",
+        "01.2.3",
+        "1.2",
+        "1.2.3\n",
+        "1.2.3\u0661",
+        "1\uff12.0.0",
+    ],
+)
+def test_schema_and_manual_validator_agree_on_exporter_versions(
+    exporter_version: str,
+) -> None:
+    schema_validator = Draft202012Validator(
+        load_scenario_schema(), format_checker=FormatChecker()
+    )
+    scenario = as_human_scenario(generate_scenario(42, TRAIN_TEMPLATES[0]))
+    scenario["human_feedback"]["meta"]["exporter_version"] = exporter_version
+
+    try:
+        validate_scenario(scenario)
+    except ScenarioValidationError:
+        validator_accepts = False
+    else:
+        validator_accepts = True
+
+    assert validator_accepts == (not list(schema_validator.iter_errors(scenario)))
+
+
+@pytest.mark.parametrize("field", ["scenario_id", "source_commit"])
+def test_schema_and_manual_validator_reject_a_trailing_newline(field: str) -> None:
+    schema_validator = Draft202012Validator(
+        load_scenario_schema(), format_checker=FormatChecker()
+    )
+    scenario = as_human_scenario(generate_scenario(42, TRAIN_TEMPLATES[0]))
+    if field == "scenario_id":
+        scenario["scenario_id"] += "\n"
+    else:
+        scenario["human_feedback"]["meta"]["source_commit"] = "a" * 40 + "\n"
+
+    with pytest.raises(ScenarioValidationError):
+        validate_scenario(scenario)
+    assert list(schema_validator.iter_errors(scenario))
 
 
 def test_schema_and_manual_validator_share_integral_number_semantics() -> None:

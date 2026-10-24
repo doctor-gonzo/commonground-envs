@@ -101,7 +101,8 @@ _HONORIFIC_NAME_PATTERN = re.compile(
 _SEMVER_PATTERN = re.compile(
     r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)"
     r"(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
-    r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
+    r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?",
+    re.ASCII,
 )
 _SOURCE_COMMIT_PATTERN = re.compile(r"[0-9a-f]{40}")
 # Unicode whitespace that NFKC keeps, such as U+2028, would not match the
