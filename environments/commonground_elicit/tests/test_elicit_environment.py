@@ -1015,6 +1015,17 @@ def test_configured_are_question_is_valid_and_scorable(tmp_path: Path) -> None:
     assert score_row(env, row, correct_response_from_row(row))["reward"] > 0.0
 
 
+def test_loader_rejects_scenarios_with_repeated_json_keys(tmp_path: Path) -> None:
+    scenario = generate_scenario(8200, HELDOUT_TEMPLATES[0])
+    data_path = tmp_path / "duplicate.jsonl"
+    data_path.write_text(
+        json.dumps(scenario)[:-1] + ',"organization":{}}\n', encoding="utf-8"
+    )
+
+    with pytest.raises(ValueError, match="duplicate JSON key 'organization'"):
+        load_environment(task="elicit-ask", question_count=1, data_path=data_path)
+
+
 def test_loader_keeps_unicode_line_separators_inside_rows(tmp_path: Path) -> None:
     scenario = generate_scenario(8200, HELDOUT_TEMPLATES[0])
     scenario["organization"]["name"] += "\u2028Holdings\u2029Group\u0085Trust"

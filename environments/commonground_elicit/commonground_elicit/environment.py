@@ -568,7 +568,7 @@ def load_scenarios(path: Path) -> list[dict[str, Any]]:
         if not line.strip():
             continue
         try:
-            scenario = json.loads(line)
+            scenario = json.loads(line, object_pairs_hook=_reject_duplicate_json_keys)
             validate_scenario(scenario)
         except (json.JSONDecodeError, TypeError, ValueError) as error:
             raise ValueError(

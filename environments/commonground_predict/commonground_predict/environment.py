@@ -16,6 +16,8 @@ from typing import Any, Literal, Never
 import verifiers as legacy_vf
 import verifiers.v1 as vf
 from commonground_scenarios import (
+    HUMAN_GOVERNANCE_FIELDS,
+    HUMAN_SNAPSHOT_SOURCE,
     HumanSnapshotValidationError,
     validate_human_snapshot,
 )
@@ -303,11 +305,19 @@ def load_snapshots(
     ):
         if not line.strip():
             continue
-        snapshot = json.loads(line)
-        if (
-            isinstance(snapshot, Mapping)
-            and isinstance(snapshot.get("meta"), Mapping)
-            and snapshot["meta"].get("synthetic") is False
+        try:
+            snapshot = json.loads(line, object_pairs_hook=_reject_duplicate_json_keys)
+        except _DuplicateJsonKeyError as error:
+            raise ValueError(
+                f"invalid snapshot at {path}:{line_number}: {error}"
+            ) from error
+        meta = snapshot.get("meta") if isinstance(snapshot, Mapping) else None
+        # Any human marker gets the human checks, so a mislabeled export cannot
+        # skip them by also saying synthetic: true or by respelling its source.
+        if isinstance(meta, Mapping) and (
+            meta.get("synthetic") is False
+            or _names_context_engine_source(meta.get("source"))
+            or not HUMAN_GOVERNANCE_FIELDS.isdisjoint(meta)
         ):
             try:
                 snapshot = validate_human_snapshot(snapshot)
@@ -334,6 +344,12 @@ def load_snapshots(
             "or provide pre-masked data"
         )
     return snapshots
+
+
+def _names_context_engine_source(source: Any) -> bool:
+    if not isinstance(source, str):
+        return False
+    return source.strip().casefold().replace("_", "-") == HUMAN_SNAPSHOT_SOURCE
 
 
 def validate_snapshot_dimensions(

@@ -4,7 +4,9 @@ from importlib.metadata import PackageNotFoundError, version
 
 from commonground_scenarios.generator import generate_scenario, scenario_to_bytes
 from commonground_scenarios.snapshot_validation import (
+    HUMAN_GOVERNANCE_FIELDS,
     HUMAN_SNAPSHOT_SCHEMA_VERSION,
+    HUMAN_SNAPSHOT_SOURCE,
     HumanSnapshotValidationError,
     contains_direct_identifier,
     find_direct_identifier,
@@ -31,7 +33,9 @@ except PackageNotFoundError:  # pragma: no cover - source tree without installat
 
 __all__ = [
     "HELDOUT_TEMPLATES",
+    "HUMAN_GOVERNANCE_FIELDS",
     "HUMAN_SNAPSHOT_SCHEMA_VERSION",
+    "HUMAN_SNAPSHOT_SOURCE",
     "TRAIN_TEMPLATES",
     "DomainTemplate",
     "HumanSnapshotValidationError",

@@ -11,6 +11,7 @@ from typing import Any
 
 MIN_K_ANONYMITY = 5
 HUMAN_SNAPSHOT_SCHEMA_VERSION = "commonground-human-snapshot-v2"
+HUMAN_SNAPSHOT_SOURCE = "context-engine-session"
 MAX_PARTICIPANTS = 10_000
 MAX_STATEMENTS = 1_000
 MAX_VOTE_CELLS = 1_000_000
@@ -43,6 +44,8 @@ META_FIELDS = frozenset(
         "privacy_review",
     }
 )
+# Meta fields that only human snapshots carry; synthetic rows never set them.
+HUMAN_GOVERNANCE_FIELDS = META_FIELDS - {"synthetic", "k_anonymity", "source", "seed"}
 PRIVACY_REVIEW_FIELDS = frozenset({"attested", "reviewed_at", "checks"})
 REQUIRED_PRIVACY_CHECKS = frozenset(
     {"direct-identifiers", "participant-pseudonyms", "free-text"}
@@ -277,9 +280,9 @@ def _validate_meta(value: Any) -> dict[str, Any]:
         raise HumanSnapshotValidationError(
             f"meta.k_anonymity must be at least {MIN_K_ANONYMITY}"
         )
-    if meta["source"] != "context-engine-session":
+    if meta["source"] != HUMAN_SNAPSHOT_SOURCE:
         raise HumanSnapshotValidationError(
-            'meta.source must equal "context-engine-session"'
+            f'meta.source must equal "{HUMAN_SNAPSHOT_SOURCE}"'
         )
     if type(meta["seed"]) is not int:
         raise HumanSnapshotValidationError("meta.seed must be an integer")
@@ -313,7 +316,7 @@ def _validate_meta(value: Any) -> dict[str, Any]:
     return {
         "synthetic": False,
         "k_anonymity": k_anonymity,
-        "source": "context-engine-session",
+        "source": HUMAN_SNAPSHOT_SOURCE,
         "seed": meta["seed"],
         "consent_scope": "public-benchmark",
         "redistribution_rights_approved": True,

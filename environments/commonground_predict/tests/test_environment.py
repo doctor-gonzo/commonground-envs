@@ -485,6 +485,43 @@ def test_custom_human_path_validates_then_applies_deterministic_masking(
     assert len(rows[0]["snapshot"]["masked_cells"]) == 2
 
 
+@pytest.mark.parametrize(
+    "claim", ["synthetic-flag", "respelled-source", "governance-fields"]
+)
+def test_rows_claiming_context_engine_origin_get_human_checks(
+    tmp_path: Path, claim: str
+) -> None:
+    snapshot = human_snapshot()
+    snapshot["meta"]["synthetic"] = True
+    if claim == "respelled-source":
+        # Only the source names Context Engine; no governance field is present.
+        snapshot["meta"] = {
+            "synthetic": True,
+            "source": " Context_Engine_Session",
+            "k_anonymity": 5,
+            "seed": 42,
+        }
+    elif claim == "governance-fields":
+        snapshot["meta"]["source"] = "seeded-generator"
+    data_path = write_snapshot_jsonl(tmp_path, snapshot)
+
+    with pytest.raises(ValueError, match="human snapshot governance validation failed"):
+        list(load_environment(data_path=data_path, masked_vote_count=1))
+
+
+def test_loader_rejects_rows_with_repeated_json_keys(tmp_path: Path) -> None:
+    snapshot = human_snapshot()
+    synthetic_meta = json.dumps({"synthetic": True, "k_anonymity": 5})
+    data_path = tmp_path / "duplicate.jsonl"
+    data_path.write_text(
+        json.dumps(snapshot)[:-1] + ',"meta":' + synthetic_meta + "}\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="duplicate JSON key 'meta'"):
+        list(load_environment(data_path=data_path, masked_vote_count=1))
+
+
 def test_custom_human_path_enforces_shared_governance_metadata(
     tmp_path: Path,
 ) -> None:
