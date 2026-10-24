@@ -1,6 +1,6 @@
 # commonground-elicit dataset card
 
-The bundled 0.6 release family contains two deterministic synthetic JSONL splits:
+The bundled 0.7 release family contains two deterministic synthetic JSONL splits:
 
 - `train_synthetic.jsonl`: 100 scenarios from four train templates.
 - `eval_synthetic_heldout.jsonl`: 100 scenarios from twenty disjoint held-out

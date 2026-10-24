@@ -2,31 +2,39 @@
 
 All notable changes to this project are documented in this file.
 
-## Unreleased
+## 0.7.0 - 2026-10-24
 
+- Align all four distributions at 0.7.0. Corpora, prompts, and answer keys
+  are unchanged from 0.6, raw JSON replies score as before, and the 0.6.0
+  study remains 0.6.0 evidence rather than being relabeled.
 - Detect human-snapshot identifiers that end a sentence or touch CJK and
   other non-Latin text, and keep the identifier scan linear on long runs.
-- Flag URLs with a scheme or `www.` prefix, @-handles, and international
-  phone numbers written with a leading `+` in human snapshots.
+- Flag `http(s)://` and `www.` URLs, @-handles, and international phone
+  numbers written with a leading `+` in human snapshots.
 - Require explicit human-intake destinations, refuse any destination inside
   a checkout of this repository, ignore `eval_real*` outputs, and make
   release checks reject shipped non-Python files that are not allowlisted.
 - Correct the Predict `ce-demo` NOTICE: pin the Context Engine exporter
   revision that reproduces the import byte for byte and the two later edits,
   and state which fields the exporter derived rather than copied.
-- Omit exported comment `stats` and PCA cluster centers from Predict task
+- Drop exported comment `stats` and blank PCA cluster centers in Predict task
   snapshots; both come from the unmasked matrix and reveal masked votes.
 - Split JSONL rows only at line ends in human intake, both environment
   loaders, and the analysis scripts, so strings containing U+2028, U+2029,
   or U+0085 (left raw by `JSON.stringify` and pydantic) load.
-- Run Predict's human-data checks on any row that claims a Context Engine
-  session source, not only on rows marked `synthetic: false`.
-- Reject human-intake rows with duplicate JSON keys instead of silently
-  keeping the last value.
+- Run Predict's human-data checks on any row whose source is
+  `context-engine-session` (ignoring case, surrounding spaces, and `_` versus
+  `-`) or that carries a human governance field (`consent_scope`,
+  `redistribution_rights_approved`, `schema_version`, `exporter_version`,
+  `source_commit`, or `privacy_review`), not only on rows marked
+  `synthetic: false`, and reject repeated JSON keys in the Predict and
+  Elicit loaders.
+- Reject human-intake rows with duplicate JSON keys or integers too long to
+  parse, instead of keeping the last value or crashing.
 - Raise the human-intake row limit to 16 MiB so the largest vote matrix the
   validator accepts is not rejected as too long first.
-- Match the packaged schema's exporter-version pattern to the validator's
-  semantic-version rule, revise the schema id to
+- Make the packaged schema agree with the validator on exporter versions,
+  ASCII digits, and trailing newlines, revise the schema id to
   `urn:commonground:schema:scenario:6`, and document that the validator is
   authoritative.
 - Document that the `ce-demo` split needs `masked_vote_count` and that a
@@ -34,16 +42,17 @@ All notable changes to this project are documented in this file.
 - Resolve the release check's `--output-dir`, so a relative path no longer
   breaks the fresh-install step.
 - Refuse a directory, pipe, or other special file as a human-intake
-  destination, and remove the temporary backup file whenever backing up an
-  existing output fails.
+  destination, remove intake's temporary files whenever a backup copy or
+  write fails, and roll back a half-finished publish even when interrupted.
 - Write intake's backup of a previous output through the open file it was
   created with, instead of reopening it by name, so another user who can
   rename files in the output directory cannot redirect the copy. Backups no
   longer copy the old file's permissions, so after a failed publish the
   previous output and manifest come back owner-only, like new ones.
-- Accept exactly one Markdown code fence around a Predict or Elicit JSON
-  reply. Prompts still ask for bare JSON, raw replies score exactly as
-  before, and prose or a second fence still fails.
+- Accept a Predict or Elicit JSON reply wrapped in one fence that opens with
+  three backticks, optionally tagged `json`. Prompts still ask for bare JSON,
+  raw replies score exactly as before, and prose, a second fence, or other
+  fence styles still fail.
 
 ## 0.6.1 - 2026-09-04
 

@@ -1,9 +1,9 @@
 # commonground-elicit
 
-`commonground-elicit` 0.6.1 is a deterministic Verifiers environment for two
-related tasks over synthetic organizational documents. Version 0.6.1 is a
-documentation-only corrective successor to 0.6.0; the task implementation,
-corpora, prompt contracts, and scorers are behavior-identical:
+`commonground-elicit` 0.7.0 is a deterministic Verifiers environment for two
+related tasks over synthetic organizational documents. Version 0.7.0 keeps the
+0.6 corpora, prompts, and answers; raw JSON replies score exactly as in 0.6.0,
+and a reply wrapped in one code fence is now parsed. The tasks are:
 
 - `find`: locate and classify material ambiguities, contradictions, and gaps.
 - `elicit-ask`: choose the most consequential clarification candidate and
@@ -178,10 +178,11 @@ Legacy callers may use `load_environment` with the same task arguments.
 
 ## Scientific limits
 
-The behavior-identical exact-artifact 0.6.0 study evaluated four model
-families on 100 tasks with five rollouts per task. Strict Find F1 ranged from
+The exact-artifact 0.6.0 study evaluated four model families on 100 tasks
+with five rollouts per task. Strict Find F1 ranged from
 0.219 to 0.515 and Ask utility from 0.158 to 0.294. Those public records remain
-pinned to immutable 0.6.0 artifacts and are not relabeled as 0.6.1 evidence.
+pinned to immutable 0.6.0 artifacts and are not relabeled as 0.7.0 evidence:
+0.7.0 also parses fenced replies, so these are 0.6.0 results.
 See the
 [0.6.0 evaluation report](https://github.com/doctor-gonzo/commonground-envs/blob/master/docs/evaluation-report-0.6.0.md)
 for methods, component diagnostics, recovery disclosures, and limitations.

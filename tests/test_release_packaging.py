@@ -15,7 +15,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 REPOSITORY_URL = "https://github.com/doctor-gonzo/commonground-envs"
-RELEASE_VERSION = "0.6.1"
+RELEASE_VERSION = "0.7.0"
 PROJECTS = {
     "commonground-predict": (
         ROOT / "environments" / "commonground_predict",
@@ -119,7 +119,7 @@ def test_release_readmes_do_not_ship_stale_candidate_status(
 
     assert expected_version in readme
     assert "evaluation-report-0.6.0.md" in readme
-    assert "not relabeled as 0.6.1 evidence" in normalized_words
+    assert "not relabeled as 0.7.0 evidence" in normalized_words
     for phrase in FORBIDDEN_RELEASE_STATUS_PHRASES:
         assert phrase not in normalized, (
             f"{distribution}: README contains stale release status {phrase!r}"
@@ -364,7 +364,7 @@ def test_release_gate_rejects_unlisted_package_files(tmp_path: Path) -> None:
         "commonground_predict/rows.JSONL",
     ]
 
-    sdist_path = tmp_path / "commonground_scenarios-0.6.1.tar.gz"
+    sdist_path = tmp_path / "commonground_scenarios-0.7.0.tar.gz"
     with tarfile.open(sdist_path, "w:gz") as archive:
         for name in (
             "PKG-INFO",
@@ -373,10 +373,10 @@ def test_release_gate_rejects_unlisted_package_files(tmp_path: Path) -> None:
             "src/commonground_scenarios/schema/scenario.schema.json",
             "src/commonground_scenarios/eval_real.manifest.json",
         ):
-            member = tarfile.TarInfo(f"commonground_scenarios-0.6.1/{name}")
+            member = tarfile.TarInfo(f"commonground_scenarios-0.7.0/{name}")
             archive.addfile(member, io.BytesIO(b""))
         link = tarfile.TarInfo(
-            "commonground_scenarios-0.6.1/src/commonground_scenarios/human.jsonl"
+            "commonground_scenarios-0.7.0/src/commonground_scenarios/human.jsonl"
         )
         link.type = tarfile.SYMTYPE
         link.linkname = "/approved/private/human_export.jsonl"

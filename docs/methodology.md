@@ -1,6 +1,6 @@
 # Methodology and benchmark scope
 
-Common Ground 0.6 is a synthetic benchmark family with two constructs. Predict
+Common Ground 0.7 is a synthetic benchmark family with two constructs. Predict
 tests calibrated masked-vote prediction. Elicit tests grounded policy-issue
 identification and deterministic clarification-candidate selection. Neither
 construct is evidence about actual human preferences or organizational value.

@@ -1,11 +1,11 @@
 # commonground-predict
 
-`commonground-predict` 0.6.1 is a deterministic Verifiers environment for
+`commonground-predict` 0.7.0 is a deterministic Verifiers environment for
 probabilistic masked-vote prediction over synthetic stakeholder panels. It has
 no judge model: reward is computed locally against eight masked cells per
-snapshot. Version 0.6.1 is a documentation-only corrective successor to 0.6.0;
-the task implementation, corpus, prompt contract, and scorer are
-behavior-identical.
+snapshot. Version 0.7.0 keeps the 0.6 corpus, prompts, and answers; raw JSON
+replies score exactly as in 0.6.0, and a reply wrapped in one code fence is now
+parsed.
 
 The task is best understood as **semantic-conditioned matrix completion**.
 Statement text now causally selects a policy dimension, and latent cluster
@@ -17,7 +17,7 @@ human-preference validity, or general collective-preference reasoning.
 This environment is associated with [Context Engine](https://contextengine.sh),
 which can structure stakeholder statements and votes into auditable preference
 maps. A planned governed export path could let consenting individuals and
-groups retain, license, or sell derived preference datasets. Version 0.6
+groups retain, license, or sell derived preference datasets. Version 0.7
 contains no live participant data and no live-data exporter.
 
 ## Data
@@ -101,15 +101,16 @@ prompt-visible references show that matrix structure carries substantial signal.
 Prompt-view ablations and a fresh private generator are still required before
 claiming that policy text contributes transferable information.
 
-In the behavior-identical exact-artifact 0.6.0 study, Kimi K2 Instruct,
+In the exact-artifact 0.6.0 study, Kimi K2 Instruct,
 Gemini 2.5 Flash, GPT-4.1, and Qwen3 30B A3B Instruct achieved probability
 rewards of 0.761, 0.739, 0.724, and 0.706 respectively across 100 tasks and
 five rollouts. All means exceed the 0.667 uniform reference and remain below
 the strongest matrix-only comparator. GPT-4.1 prompt-view ablations show that
 shuffling statement text did not lower reward, so the study does not establish
 use of statement semantics beyond the visible vote matrix. The public records
-remain pinned to immutable 0.6.0 artifacts and are not relabeled as 0.6.1
-evidence. See the
+remain pinned to immutable 0.6.0 artifacts and are not relabeled as 0.7.0
+evidence: 0.7.0 scores raw JSON replies the same way but also parses fenced
+ones, so these are 0.6.0 results. See the
 [0.6.0 evaluation report](https://github.com/doctor-gonzo/commonground-envs/blob/master/docs/evaluation-report-0.6.0.md).
 
 ## Usage
@@ -136,7 +137,11 @@ misaligns statement text with matrix columns. A repository checkout also
 provides the tracked multi-mode
 [`configs/eval/predict-ablation.toml`](https://github.com/doctor-gonzo/commonground-envs/blob/master/configs/eval/predict-ablation.toml);
 that root-level file is not bundled in the environment package.
-Non-synthetic custom rows must pass the separate fail-closed
+Custom rows that say `synthetic: false`, whose source is
+`context-engine-session`, or that carry a human governance field
+(`consent_scope`, `redistribution_rights_approved`, `schema_version`,
+`exporter_version`, `source_commit`, or `privacy_review`) must pass the
+separate fail-closed
 [human-data governance contract](https://github.com/doctor-gonzo/commonground-envs/blob/master/docs/human-data-governance.md).
 
 Public answer keys make this useful for open training but unsuitable for a

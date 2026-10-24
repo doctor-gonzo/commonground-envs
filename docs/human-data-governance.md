@@ -41,6 +41,12 @@ summary for exporters. validate_human_snapshot is authoritative and also
 requires exact JSON integers (5, not 5.0), positional pseudonyms, and counts
 that match the votes.
 
+Predict applies this contract to any custom row that says synthetic is false,
+whose source is context-engine-session (ignoring case, surrounding spaces, and
+underscores versus hyphens), or that carries one of the governance fields
+consent_scope, redistribution_rights_approved, schema_version,
+exporter_version, source_commit, or privacy_review.
+
 The intake command rebuilds each accepted row from an allowlist and writes a
 versioned manifest containing the output SHA-256, input hashes, source lines,
 counts, provenance, rights, and privacy-review attestations:
@@ -60,7 +66,7 @@ for operator investigation; it does not waive the review requirements below.
 ## Human review is mandatory
 
 The identifier scanner detects several high-confidence shapes, including email,
-EVM and ENS addresses, URLs with a scheme or www prefix, @-handles, phone
+EVM and ENS addresses, http(s) and www. URLs, @-handles, phone
 numbers (unbroken digit runs, North American formats, and international
 numbers with a leading + and space or hyphen separators), IP addresses, and
 honorific-prefixed names. It cannot establish anonymity, consent, legal
