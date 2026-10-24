@@ -392,6 +392,17 @@ def test_release_gate_rejects_unlisted_package_files(tmp_path: Path) -> None:
     ]
 
 
+def test_release_gate_resolves_a_relative_output_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    release_checker = _load_release_checker()
+    monkeypatch.chdir(tmp_path)
+
+    args = release_checker.build_parser().parse_args(["--output-dir", "artifacts"])
+
+    assert args.output_dir == tmp_path.resolve() / "artifacts"
+
+
 def _load_release_checker() -> Any:
     script_path = ROOT / "scripts" / "check_release_wheel.py"
     spec = importlib.util.spec_from_file_location("check_release_wheel", script_path)

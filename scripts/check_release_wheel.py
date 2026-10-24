@@ -604,9 +604,11 @@ def _build_and_check(output_dir: Path) -> list[str]:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
+    # Later steps run uv with cwd=output_dir and also pass output_dir as a path,
+    # so a relative directory would resolve twice.
     parser.add_argument(
         "--output-dir",
-        type=Path,
+        type=lambda value: Path(value).resolve(),
         help="Retain the exact verified wheels and source distributions here.",
     )
     return parser

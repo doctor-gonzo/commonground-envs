@@ -31,6 +31,8 @@ All notable changes to this project are documented in this file.
   authoritative.
 - Document that the `ce-demo` split needs `masked_vote_count` and that a
   human snapshot's `source_commit` names the Context Engine exporter commit.
+- Resolve the release check's `--output-dir`, so a relative path no longer
+  breaks the fresh-install step.
 
 ## 0.6.1 - 2026-09-04
 
