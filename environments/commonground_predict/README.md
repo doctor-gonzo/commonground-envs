@@ -122,7 +122,9 @@ uv run eval commonground-predict \
   --env.taskset.prompt-mode matrix-only -m MODEL --no-push
 ```
 
-`split` accepts `eval`, `train`, or `ce-demo`. `data_path` or
+`split` accepts `eval`, `train`, or `ce-demo`. The `ce-demo` fixture ships
+unmasked, so it also needs `masked_vote_count`, for example
+`--env.taskset.masked-vote-count 8` to match the other splits. `data_path` or
 `COMMONGROUND_DATA_PATH` overrides the bundled split. `masked_vote_count`
 deterministically remasks known votes; `min_cluster_count` filters rows.
 `prompt_mode` accepts `full`, `matrix-only`, `text-only`, or `shuffled-text`.

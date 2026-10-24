@@ -30,8 +30,8 @@ commonground_scenarios.validate_human_snapshot:
 - consent_scope is public-benchmark;
 - redistribution_rights_approved is true;
 - schema_version is exactly commonground-human-snapshot-v2, exporter_version is
-  a semantic version, and source_commit is a pinned lowercase 40-character Git
-  commit;
+  a semantic version, and source_commit is the lowercase 40-character Context
+  Engine commit of the exporter that produced the row;
 - privacy_review.attested is true, reviewed_at is a valid date, and the
   canonical direct-identifiers, free-text, and participant-pseudonyms checks
   are recorded.

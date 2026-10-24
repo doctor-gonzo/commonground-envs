@@ -29,6 +29,8 @@ All notable changes to this project are documented in this file.
   semantic-version rule, revise the schema id to
   `urn:commonground:schema:scenario:6`, and document that the validator is
   authoritative.
+- Document that the `ce-demo` split needs `masked_vote_count` and that a
+  human snapshot's `source_commit` names the Context Engine exporter commit.
 
 ## 0.6.1 - 2026-09-04
 
