@@ -21,6 +21,8 @@ All notable changes to this project are documented in this file.
   or U+0085 (left raw by `JSON.stringify` and pydantic) load.
 - Run Predict's human-data checks on any row that claims a Context Engine
   session source, not only on rows marked `synthetic: false`.
+- Reject human-intake rows with duplicate JSON keys instead of silently
+  keeping the last value.
 
 ## 0.6.1 - 2026-09-04
 

@@ -596,6 +596,60 @@ def test_ingest_rejects_nonstandard_json_constants(
     assert "non-standard JSON constant is not allowed: NaN" in capsys.readouterr().err
 
 
+def test_ingest_rejects_duplicate_json_keys(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    snapshot = valid_real_snapshot()
+    shadowed = json.dumps({"synthetic": True})
+    source = tmp_path / "export.jsonl"
+    source.write_text(
+        '{"meta":' + shadowed + "," + json.dumps(snapshot)[1:] + "\n", encoding="utf-8"
+    )
+
+    result = ingest_main(
+        [
+            str(source),
+            "--output",
+            str(tmp_path / "output.jsonl"),
+            "--manifest",
+            str(tmp_path / "manifest.json"),
+        ]
+    )
+
+    assert result == 1
+    assert "duplicate JSON key: 'meta'" in capsys.readouterr().err
+    assert not (tmp_path / "output.jsonl").exists()
+
+
+def test_ingest_skips_a_row_with_an_integer_too_long_to_parse(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    oversized = json.dumps(valid_real_snapshot()).replace(
+        '"seed": 42', '"seed": ' + "1" * 5_000
+    )
+    second = valid_real_snapshot()
+    second["session_id"] = "real-session-b"
+    source = tmp_path / "export.jsonl"
+    source.write_text(oversized + "\n" + json.dumps(second) + "\n", encoding="utf-8")
+    output = tmp_path / "output.jsonl"
+
+    result = ingest_main(
+        [
+            str(source),
+            "--skip-invalid",
+            "--output",
+            str(output),
+            "--manifest",
+            str(tmp_path / "manifest.json"),
+        ]
+    )
+
+    assert result == 0
+    assert f"rejected: {source}:1:" in capsys.readouterr().err
+    accepted = [json.loads(row) for row in output.read_text().split("\n") if row]
+    assert [row["session_id"] for row in accepted] == ["real-session-b"]
+
+
 def test_ingest_rejects_malformed_json(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

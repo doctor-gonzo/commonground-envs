@@ -46,6 +46,17 @@ def _reject_json_constant(value: str) -> None:
     raise SnapshotValidationError(f"non-standard JSON constant is not allowed: {value}")
 
 
+def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    # A repeated key would let the validated value differ from what other JSON
+    # readers of the same export see.
+    value: dict[str, Any] = {}
+    for key, item in pairs:
+        if key in value:
+            raise SnapshotValidationError(f"duplicate JSON key: {key!r}")
+        value[key] = item
+    return value
+
+
 def ingest_files(
     input_paths: Sequence[Path],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str]]:
@@ -80,16 +91,18 @@ def ingest_files(
                 )
                 continue
             try:
-                snapshot = json.loads(line, parse_constant=_reject_json_constant)
+                snapshot = json.loads(
+                    line,
+                    object_pairs_hook=_reject_duplicate_keys,
+                    parse_constant=_reject_json_constant,
+                )
                 validated = validate_snapshot(snapshot)
                 session_id = validated["session_id"]
                 if session_id in seen_session_ids:
                     raise SnapshotValidationError(f"duplicate session_id: {session_id}")
-            except (
-                json.JSONDecodeError,
-                RecursionError,
-                SnapshotValidationError,
-            ) as error:
+            # ValueError covers JSON syntax, contract violations, and integers
+            # past Python's digit limit, so one bad row never aborts the run.
+            except (RecursionError, ValueError) as error:
                 errors.append(f"{input_path}:{line_number}: {error}")
                 continue
 
