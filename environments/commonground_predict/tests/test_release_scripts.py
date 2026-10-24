@@ -4,6 +4,7 @@ import copy
 import hashlib
 import importlib.util
 import json
+import os
 import random
 import shutil
 import sys
@@ -854,6 +855,92 @@ def test_ingest_refuses_case_only_output_manifest_alias(
     assert "output and manifest paths must be different" in capsys.readouterr().err
 
 
+def test_ingest_refuses_a_directory_destination_without_leftovers(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    source = write_jsonl(tmp_path / "source.jsonl", [valid_real_snapshot()])
+    destination_dir = tmp_path / "approved"
+    destination_dir.mkdir()
+
+    result = ingest_main(
+        [
+            str(source),
+            "--output",
+            str(destination_dir),
+            "--manifest",
+            str(tmp_path / "manifest.json"),
+        ]
+    )
+
+    assert result == 1
+    assert "destination is a directory" in capsys.readouterr().err
+    assert sorted(path.name for path in tmp_path.iterdir()) == [
+        "approved",
+        "source.jsonl",
+    ]
+
+
+def test_ingest_removes_its_backup_when_copying_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = write_jsonl(tmp_path / "source.jsonl", [valid_real_snapshot()])
+    output = tmp_path / "output.jsonl"
+    output.write_text("old-output\n", encoding="utf-8")
+
+    def fail_copy(source_path: Path, destination_path: Path) -> None:
+        raise OSError("forced backup copy failure")
+
+    monkeypatch.setattr(ingest_snapshots_module.shutil, "copy2", fail_copy)
+
+    result = ingest_main(
+        [
+            str(source),
+            "--output",
+            str(output),
+            "--manifest",
+            str(tmp_path / "manifest.json"),
+        ]
+    )
+
+    assert result == 1
+    assert output.read_text(encoding="utf-8") == "old-output\n"
+    assert sorted(path.name for path in tmp_path.iterdir()) == [
+        "output.jsonl",
+        "source.jsonl",
+    ]
+
+
+def test_ingest_removes_its_temporary_file_when_writing_fails(tmp_path: Path) -> None:
+    # A lone surrogate cannot be encoded, so the write fails part way.
+    with pytest.raises(UnicodeEncodeError):
+        ingest_snapshots_module._write_temporary(tmp_path / "output.jsonl", "\ud800")
+
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_ingest_writes_temporary_files_through_their_handle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    victim = tmp_path / "victim.txt"
+    victim.write_text("victim\n", encoding="utf-8")
+    real_named_temporary_file = ingest_snapshots_module.tempfile.NamedTemporaryFile
+
+    def swap_name_for_symlink(*args: Any, **kwargs: Any) -> Any:
+        handle = real_named_temporary_file(*args, **kwargs)
+        link = Path(handle.name).with_suffix(".link")
+        link.symlink_to(victim)
+        os.replace(link, handle.name)
+        return handle
+
+    monkeypatch.setattr(
+        ingest_snapshots_module.tempfile, "NamedTemporaryFile", swap_name_for_symlink
+    )
+
+    ingest_snapshots_module._write_temporary(tmp_path / "output.jsonl", "human\n")
+
+    assert victim.read_text(encoding="utf-8") == "victim\n"
+
+
 def test_ingest_rolls_back_output_when_manifest_publish_fails(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -888,6 +975,47 @@ def test_ingest_rolls_back_output_when_manifest_publish_fails(
     assert result == 1
     assert output.read_text(encoding="utf-8") == "old-output\n"
     assert manifest.read_text(encoding="utf-8") == "old-manifest\n"
+
+
+def test_ingest_rolls_back_when_interrupted_between_publish_steps(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = write_jsonl(tmp_path / "source.jsonl", [valid_real_snapshot()])
+    output = tmp_path / "output.jsonl"
+    manifest = tmp_path / "manifest.json"
+    output.write_text("old-output\n", encoding="utf-8")
+    manifest.write_text("old-manifest\n", encoding="utf-8")
+    real_replace = ingest_snapshots_module.os.replace
+    publish_count = 0
+
+    def interrupt_second_publish(source_path: Path, destination_path: Path) -> None:
+        nonlocal publish_count
+        if str(source_path).endswith(".tmp"):
+            publish_count += 1
+            if publish_count == 2:
+                raise KeyboardInterrupt
+        real_replace(source_path, destination_path)
+
+    monkeypatch.setattr(ingest_snapshots_module.os, "replace", interrupt_second_publish)
+
+    with pytest.raises(KeyboardInterrupt):
+        ingest_main(
+            [
+                str(source),
+                "--output",
+                str(output),
+                "--manifest",
+                str(manifest),
+            ]
+        )
+
+    assert output.read_text(encoding="utf-8") == "old-output\n"
+    assert manifest.read_text(encoding="utf-8") == "old-manifest\n"
+    assert sorted(path.name for path in tmp_path.iterdir()) == [
+        "manifest.json",
+        "output.jsonl",
+        "source.jsonl",
+    ]
 
 
 def run_rejected_ingest(tmp_path: Path, snapshot: dict[str, Any]) -> int:

@@ -33,6 +33,8 @@ All notable changes to this project are documented in this file.
   human snapshot's `source_commit` names the Context Engine exporter commit.
 - Resolve the release check's `--output-dir`, so a relative path no longer
   breaks the fresh-install step.
+- Refuse a directory as a human-intake destination, and remove the
+  temporary backup file whenever backing up an existing output fails.
 
 ## 0.6.1 - 2026-09-04
 

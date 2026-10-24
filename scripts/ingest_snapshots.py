@@ -147,6 +147,8 @@ def write_outputs(
             raise ValueError(
                 f"refusing to write inside a repository checkout: {destination}"
             )
+        if destination.is_dir():
+            raise ValueError(f"destination is a directory: {destination}")
     if str(output_path.resolve()).casefold() == str(manifest_path.resolve()).casefold():
         raise ValueError("output and manifest paths must be different")
     if not snapshots:
@@ -183,7 +185,7 @@ def write_outputs(
         try:
             os.replace(output_temporary, output_path)
             os.replace(manifest_temporary, manifest_path)
-        except OSError:
+        except BaseException:
             _restore_destination(output_path, output_backup)
             _restore_destination(manifest_path, manifest_backup)
             raise
@@ -212,16 +214,25 @@ def _inside_checkout(path: Path) -> bool:
 
 
 def _write_temporary(destination: Path, content: str) -> Path:
-    with tempfile.NamedTemporaryFile(
-        mode="w",
-        encoding="utf-8",
-        dir=destination.parent,
-        prefix=f".{destination.name}.",
-        suffix=".tmp",
-        delete=False,
-    ) as temporary_file:
-        temporary_file.write(content)
-        return Path(temporary_file.name)
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=destination.parent,
+            prefix=f".{destination.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as temporary_file:
+            temporary_path = Path(temporary_file.name)
+            # Write through the exclusively created handle; reopening the name
+            # would let a symlink swapped in meanwhile redirect the human data.
+            temporary_file.write(content)
+        return temporary_path
+    except BaseException:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+        raise
 
 
 def _backup_existing(destination: Path) -> Path | None:
@@ -234,7 +245,11 @@ def _backup_existing(destination: Path) -> Path | None:
         delete=False,
     ) as backup_file:
         backup_path = Path(backup_file.name)
-    shutil.copy2(destination, backup_path)
+    try:
+        shutil.copy2(destination, backup_path)
+    except BaseException:
+        backup_path.unlink(missing_ok=True)
+        raise
     return backup_path
 
 
