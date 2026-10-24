@@ -538,12 +538,48 @@ def test_custom_human_path_enforces_shared_governance_metadata(
     assert "redistribution_rights_approved must be true" in message
 
 
-def test_parser_rejects_fenced_json() -> None:
-    parser = PredictionJsonParser()
+@pytest.mark.parametrize(
+    "text",
+    [
+        '```json\n{"predictions":{"0,1":1,"2,3":0}}\n```\n',
+        '```\n{"predictions":{"0,1":1,"2,3":0}}\n```',
+        '```JSON\n{"predictions":{"0,1":1,"2,3":0}}```',
+    ],
+)
+def test_parser_accepts_one_fenced_json_object(text: str) -> None:
+    parsed = PredictionJsonParser().parse(text)
 
-    parsed = parser.parse('```json\n{"predictions":{"0,1":1,"2,3":0}}\n```\n')
+    assert parsed == {"predictions": {"0,1": 1, "2,3": 0}}
 
-    assert parsed == {}
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        'Here you go:\n```json\n{"predictions":{"0,1":1}}\n```',
+        '```json\n{"predictions":{"0,1":1}}\n```\nDone.',
+        '```json\n{"predictions":{"0,1":1}}\n```\n```json\n{"predictions":{}}\n```',
+        '```python\n{"predictions":{"0,1":1}}\n```',
+        '```j\u017fon\n{"predictions":{"0,1":1}}\n```',
+    ],
+)
+def test_parser_rejects_fences_with_prose_or_extra_blocks(text: str) -> None:
+    assert PredictionJsonParser().parse(text) == {}
+
+
+def test_parser_strips_unicode_whitespace_inside_a_fence() -> None:
+    text = '```json\n\u00a0{"predictions":{"0,1":1}}\u3000\n```'
+
+    assert PredictionJsonParser().parse(text) == {"predictions": {"0,1": 1}}
+
+
+def test_one_fenced_exact_forecast_scores_like_raw_json() -> None:
+    env = load_environment()
+    row = task_rows(env)[0]
+
+    raw = score_row(env, row, row["answer"])
+    fenced = score_row(env, row, row["answer"], fence=True)
+
+    assert fenced["reward"] == raw["reward"] == 1.0
 
 
 def test_parser_rejects_prose_wrapped_object() -> None:
@@ -926,19 +962,21 @@ def score_row(
     env: CommonGroundPredictTaskset,
     row: dict[str, Any],
     predictions: dict[str, Any],
+    *,
+    fence: bool = False,
 ) -> dict[str, Any]:
     task = next(task for task in env if task.data.idx == row["idx"])
+    content = json.dumps(
+        {"predictions": probability_predictions(predictions)}, sort_keys=True
+    )
+    if fence:
+        content = f"```json\n{content}\n```"
     trace = vf.Trace(
         task=vf.TraceTask(type=type(task).__name__, data=task.data),
         agent=vf.AgentInfo(config=vf.AgentConfig()),
         nodes=[
             vf.MessageNode(
-                message=vf.AssistantMessage(
-                    content=json.dumps(
-                        {"predictions": probability_predictions(predictions)},
-                        sort_keys=True,
-                    )
-                ),
+                message=vf.AssistantMessage(content=content),
                 sampled=True,
             )
         ],

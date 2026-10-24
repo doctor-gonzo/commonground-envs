@@ -35,6 +35,9 @@ All notable changes to this project are documented in this file.
   breaks the fresh-install step.
 - Refuse a directory as a human-intake destination, and remove the
   temporary backup file whenever backing up an existing output fails.
+- Accept exactly one Markdown code fence around a Predict or Elicit JSON
+  reply. Prompts still ask for bare JSON, raw replies score exactly as
+  before, and prose or a second fence still fails.
 
 ## 0.6.1 - 2026-09-04
 

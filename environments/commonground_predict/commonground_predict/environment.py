@@ -52,6 +52,12 @@ PROMPT_MODES: tuple[PromptMode, ...] = (
 MAX_COMPLETION_CHARS = 65_536
 MAX_JSON_NESTING = 64
 CELL_ID_PATTERN = re.compile(r"(0|[1-9]\d*),(0|[1-9]\d*)")
+# Some providers wrap JSON in one Markdown fence even when the prompt forbids
+# it. Exactly one fence around the whole reply is unwrapped; prose outside it,
+# a second fence, or trailing text still fails.
+FENCED_JSON_PATTERN = re.compile(
+    r"```(?:json)?[ \t]*\r?\n(.*)```", re.ASCII | re.DOTALL | re.IGNORECASE
+)
 
 
 class _DuplicateJsonKeyError(ValueError):
@@ -1154,7 +1160,7 @@ def coerce_class_label(key: Any) -> str | None:
 
 
 def extract_json_object(text: str) -> Any:
-    """Decode exactly one bounded JSON value without parser recovery."""
+    """Decode exactly one bounded JSON value, optionally inside one fence."""
 
     if not isinstance(text, str):
         raise ValueError("completion must be text")
@@ -1164,6 +1170,9 @@ def extract_json_object(text: str) -> Any:
         )
 
     payload = text.strip()
+    fenced = FENCED_JSON_PATTERN.fullmatch(payload)
+    if fenced is not None:
+        payload = fenced.group(1).strip()
     # Validate nesting before decoding. Exact key-set validation cannot detect
     # duplicates after a normal decoder has silently collapsed them, so reject
     # repeats while objects are built.

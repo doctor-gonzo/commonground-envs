@@ -1857,14 +1857,45 @@ def test_quote_overlap_normalizes_unicode_case_and_punctuation() -> None:
     assert overlap == 1.0
 
 
-def test_parser_rejects_fenced_json() -> None:
+def test_parser_accepts_one_fenced_json_object() -> None:
     parser = ElicitJsonParser()
 
     parsed = parser.parse(
         '```json\n{"findings":[{"doc_id":"p","quote":"q","type":"gap"}]}\n```'
     )
 
-    assert parsed == {}
+    assert parsed == {"findings": [{"doc_id": "p", "quote": "q", "type": "gap"}]}
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        'Findings:\n```json\n{"findings":[]}\n```',
+        '```json\n{"findings":[]}\n```\nDone.',
+        '```json\n{"findings":[]}\n```\n```json\n{"findings":[]}\n```',
+        '```j\u017fon\n{"findings":[]}\n```',
+    ],
+)
+def test_parser_rejects_fences_with_prose_or_extra_blocks(text: str) -> None:
+    assert ElicitJsonParser().parse(text) == {}
+
+
+def test_parser_strips_unicode_whitespace_inside_a_fence() -> None:
+    text = '```json\n\u00a0{"findings":[]}\u3000\n```'
+
+    assert ElicitJsonParser().parse(text) == {"findings": []}
+
+
+@pytest.mark.parametrize("task", ["find", "elicit-ask"])
+def test_one_fenced_exact_answer_scores_like_raw_json(task: str) -> None:
+    env = load_environment(task=task)
+    row = dict(env.get_eval_dataset()[0])
+    response = correct_response_from_row(row)
+
+    raw = score_row(env, row, response)["reward"]
+    fenced = score_row(env, row, response, fence=True)["reward"]
+
+    assert fenced == raw > 0.0
 
 
 def test_parser_rejects_multiple_objects_with_findings() -> None:
@@ -2211,12 +2242,15 @@ def score_row(
     env: Any,
     row: dict[str, Any],
     response: dict[str, Any],
+    *,
+    fence: bool = False,
 ) -> dict[str, Any]:
     task = {key: row[key] for key in CANONICAL_TASK_COLUMNS if key in row}
     state = State.for_task(task)
-    state["completion"] = [
-        {"role": "assistant", "content": json.dumps(response, sort_keys=True)}
-    ]
+    content = json.dumps(response, sort_keys=True)
+    if fence:
+        content = f"```json\n{content}\n```"
+    state["completion"] = [{"role": "assistant", "content": content}]
     asyncio.run(env.rubric.score_rollout(state))
     return state
 

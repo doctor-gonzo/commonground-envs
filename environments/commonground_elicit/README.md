@@ -74,10 +74,12 @@ Find deliberately has no decision object, alias table, or hidden lexical
 diagnosis key. The prompt requests complete source sentences so its visible
 instruction matches the scorer's grounding threshold.
 
-The complete response must start with `{` and end with `}` without Markdown or
-prose wrappers. A diagnosis must start with one of the validator's listed
-yes/no auxiliaries (for example `Should`, `Can`, or `May`) and end with one
-question mark.
+The response should be the bare object, starting with `{` and ending with
+`}`. It may instead sit in one fence that opens with three backticks,
+optionally tagged `json`; prose wrappers, a second fence, or other fence
+styles fail. A diagnosis must start with one of the validator's listed yes/no
+auxiliaries (for example `Should`, `Can`, or `May`) and end with one question
+mark.
 
 The optional `reward_mode="shaped"` is the mean of four cumulative stage F1
 scores: localization, type, diagnosis, and final relation. The final relation
@@ -131,9 +133,11 @@ wording cannot affect Ask reward. Opaque IDs and schema keys
 are exact. Ask evidence and decision text normalize only Unicode compatibility,
 case, and whitespace; fragments, padding, punctuation edits, or moved fields do
 not match.
-The complete response must start with `{` and end with `}` without Markdown or
-prose wrappers. Questions use the same auxiliary-first surface rule as Find,
-and supporting passages must be copied without ellipses or omitted words.
+The response should be the bare object, starting with `{` and ending with
+`}`. It may instead sit in one fence that opens with three backticks,
+optionally tagged `json`; prose wrappers, a second fence, or other fence
+styles fail. Questions use the same auxiliary-first surface rule as Find, and
+supporting passages must be copied without ellipses or omitted words.
 
 Logged diagnostics separate schema/format validity, top-one selection,
 grounding, and stance accuracy. They are deterministic synthetic conformance

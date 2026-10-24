@@ -41,6 +41,12 @@ QUOTE_OVERLAP_THRESHOLD = 0.8
 PLANT_COVERAGE_THRESHOLD = 0.9
 QUOTE_PRECISION_THRESHOLD = 0.8
 MAX_COMPLETION_CHARS = 32_768
+# Some providers wrap JSON in one Markdown fence even when the prompt forbids
+# it. Exactly one fence around the whole reply is unwrapped; prose outside it,
+# a second fence, or trailing text still fails.
+FENCED_JSON_PATTERN = re.compile(
+    r"```(?:json)?[ \t]*\r?\n(.*)```", re.ASCII | re.DOTALL | re.IGNORECASE
+)
 MAX_JSON_DEPTH = 32
 MAX_JSON_NODES = 10_000
 VALID_TASKS = frozenset({"find", "elicit-ask"})
@@ -2313,12 +2319,16 @@ def _maximum_weight_sum(weights: Sequence[Sequence[float]]) -> float:
 
 
 def extract_json_object(text: str, *, preferred_key: str) -> Any:
-    """Parse one complete JSON object; prose, fences, arrays, and wrappers fail."""
+    """Parse one JSON object, optionally in one fence; prose and arrays fail."""
 
     del preferred_key
     if not isinstance(text, str) or len(text) > MAX_COMPLETION_CHARS:
         raise ValueError("completion exceeds the JSON parser size limit")
-    parsed = _load_bounded_json(text.strip())
+    payload = text.strip()
+    fenced = FENCED_JSON_PATTERN.fullmatch(payload)
+    if fenced is not None:
+        payload = fenced.group(1).strip()
+    parsed = _load_bounded_json(payload)
     if not isinstance(parsed, dict):
         raise ValueError("completion root must be a JSON object")
     return parsed

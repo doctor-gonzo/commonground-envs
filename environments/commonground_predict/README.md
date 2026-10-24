@@ -66,10 +66,12 @@ pass, then disagree. Completion parsing is bounded. Missing, extra,
 duplicate-normalized, or malformed output receives zero reward; its diagnostic
 Brier loss is 1.0 for non-empty tasks. Numeric strings, booleans, non-finite
 values or totals, and integers too large to convert safely are malformed.
-Markdown fences, prose wrappers, trailing JSON values, and repeated raw object
-keys are rejected rather than recovered.
-The complete response must therefore start with `{` and end with `}` without a
-Markdown fence or prose wrapper. Provider-native JSON-object mode may be used
+Prose wrappers, trailing JSON values, and repeated raw object keys are
+rejected rather than recovered. The prompt asks for the bare object, starting
+with `{` and ending with `}`. Because some providers add a code fence anyway,
+the whole object may sit in one fence that opens with three backticks,
+optionally tagged `json`. Prose outside it, a second fence, or any other fence
+style still fails. Provider-native JSON-object mode may be used
 as a decoding constraint; it does not change the task or scoring contract.
 
 ## Scoring and comparators
