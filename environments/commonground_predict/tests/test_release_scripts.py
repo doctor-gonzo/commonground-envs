@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from commonground_scenarios.snapshot_validation import MAX_VOTE_CELLS
 from verifiers.v1.configs.cli.eval import EvalConfig
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -767,6 +768,62 @@ def test_ingest_refuses_its_own_checkout_without_the_marker(
     assert result == 1
     assert "refusing to write inside a repository checkout" in capsys.readouterr().err
     assert not destination.parent.exists()
+
+
+def test_ingest_accepts_the_largest_valid_vote_matrix(tmp_path: Path) -> None:
+    participant_count = 1_000
+    statement_count = MAX_VOTE_CELLS // participant_count
+    participants = [f"p{index:03d}" for index in range(participant_count)]
+    votes: list[list[int | None]] = [
+        [None] * statement_count for _ in range(participant_count)
+    ]
+    votes[0][0] = 1
+    snapshot = valid_real_snapshot()
+    snapshot.update(
+        statements=[
+            {"index": index, "text": f"Statement {index}"}
+            for index in range(statement_count)
+        ],
+        participants=participants,
+        votes=votes,
+        clusters=[
+            {
+                "id": 0,
+                "members": participants,
+                "member_indices": list(range(participant_count)),
+                "center": [],
+            }
+        ],
+        stats={
+            "comment": [
+                {
+                    "commentIndex": index,
+                    "agrees": int(index == 0),
+                    "disagrees": 0,
+                    "unsure": 0,
+                    "total": int(index == 0),
+                    "responded": int(index == 0),
+                    "extremity": None,
+                    "divisiveness": None,
+                }
+                for index in range(statement_count)
+            ]
+        },
+    )
+    source = write_jsonl(tmp_path / "export.jsonl", [snapshot])
+    assert source.stat().st_size > 4 * 1024 * 1024
+
+    result = ingest_main(
+        [
+            str(source),
+            "--output",
+            str(tmp_path / "output.jsonl"),
+            "--manifest",
+            str(tmp_path / "manifest.json"),
+        ]
+    )
+
+    assert result == 0
 
 
 def test_ingest_requires_explicit_destinations(tmp_path: Path) -> None:

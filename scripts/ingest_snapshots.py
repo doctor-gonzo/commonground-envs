@@ -24,7 +24,9 @@ ROOT = Path(__file__).resolve().parents[1]
 # Full checkouts of this repository, such as other worktrees, have this file;
 # ROOT also covers this script's own checkout when it is sparse.
 CHECKOUT_MARKER = Path("environments") / "commonground_predict" / "pyproject.toml"
-MAX_INPUT_LINE_BYTES = 4 * 1024 * 1024
+# Leaves room for a full MAX_VOTE_CELLS matrix of unseen votes (about 5 to 6 MiB
+# serialized) plus statement text; extremely long statements can still exceed it.
+MAX_INPUT_LINE_BYTES = 16 * 1024 * 1024
 MANIFEST_VERSION = 2
 
 # Compatibility aliases for callers of the original intake module. The

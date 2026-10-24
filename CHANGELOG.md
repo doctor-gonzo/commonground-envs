@@ -23,6 +23,8 @@ All notable changes to this project are documented in this file.
   session source, not only on rows marked `synthetic: false`.
 - Reject human-intake rows with duplicate JSON keys instead of silently
   keeping the last value.
+- Raise the human-intake row limit to 16 MiB so the largest vote matrix the
+  validator accepts is not rejected as too long first.
 
 ## 0.6.1 - 2026-09-04
 
