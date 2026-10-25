@@ -2,6 +2,19 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.7.1 - 2026-10-25
+
+- Supersede 0.7.0 after its Prime Hub source archives omitted root-level
+  `LICENSE` and `NOTICE` files referenced by the build metadata. The published
+  0.7.0 wheels contain their complete legal files and remain available.
+- Declare the environments' complete legal files under `LICENSES/`, which
+  Prime includes in source archives. Keep the root copies in the repository.
+- Verify that every declared legal file survives Hub source collection and
+  that the resulting pulled-source layout builds a valid wheel.
+- Align all four distributions and exact family pins at 0.7.1. Task code,
+  corpora, prompts, scoring, and third-party dependency versions are unchanged
+  from 0.7.0; no new model evaluation is claimed.
+
 ## 0.7.0 - 2026-10-24
 
 - Align all four distributions at 0.7.0. Corpora, prompts, and answer keys

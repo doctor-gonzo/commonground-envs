@@ -1,10 +1,10 @@
 [project]
 name = "commonground-elicit"
-version = "0.7.0"
+version = "0.7.1"
 description = "Structured policy-issue diagnosis and single-target clarification over synthetic stakeholder scenarios."
 authors = [{ name = "Common Ground contributors" }]
 license = "Apache-2.0"
-license-files = ["LICENSE", "LICENSES/Apache-2.0.txt"]
+license-files = ["LICENSES/Apache-2.0.txt"]
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 keywords = ["social-reasoning", "elicitation", "deterministic", "single-turn"]
@@ -18,8 +18,8 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
-    "commonground-scenarios==0.7.0",
-    "commonground-score==0.7.0",
+    "commonground-scenarios==0.7.1",
+    "commonground-score==0.7.1",
     "datasets>=5.0.1,<6.0.0",
     "verifiers==0.3.0",
 ]

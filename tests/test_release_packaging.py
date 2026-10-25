@@ -15,7 +15,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 REPOSITORY_URL = "https://github.com/doctor-gonzo/commonground-envs"
-RELEASE_VERSION = "0.7.0"
+RELEASE_VERSION = "0.7.1"
 PROJECTS = {
     "commonground-predict": (
         ROOT / "environments" / "commonground_predict",
@@ -119,7 +119,7 @@ def test_release_readmes_do_not_ship_stale_candidate_status(
 
     assert expected_version in readme
     assert "evaluation-report-0.6.0.md" in readme
-    assert "not relabeled as 0.7.0 evidence" in normalized_words
+    assert "not relabeled as 0.7.1 evidence" in normalized_words
     for phrase in FORBIDDEN_RELEASE_STATUS_PHRASES:
         assert phrase not in normalized, (
             f"{distribution}: README contains stale release status {phrase!r}"
@@ -173,11 +173,9 @@ def test_predict_declares_complete_multi_license_boundary() -> None:
     )["project"]
 
     assert metadata["license-files"] == [
-        "LICENSE",
         "LICENSES/Apache-2.0.txt",
         "LICENSES/MPL-2.0.txt",
         "LICENSES/NOTICE.txt",
-        "NOTICE",
     ]
     assert metadata["license"] == "Apache-2.0 AND MPL-2.0"
     assert (project_dir / "LICENSES" / "Apache-2.0.txt").read_bytes() == (
@@ -237,9 +235,40 @@ def test_prime_hub_source_archive_contains_legal_files(
     archive_members = _prime_hub_source_archive_members(project_dir)
 
     assert required_legal_files <= archive_members
+    metadata = tomllib.loads((project_dir / "pyproject.toml").read_text())["project"]
+    assert set(metadata["license-files"]) <= archive_members
     assert (project_dir / "LICENSES" / "Apache-2.0.txt").read_bytes() == (
         project_dir / "LICENSE"
     ).read_bytes()
+
+
+@pytest.mark.parametrize(
+    "environment_name", ["commonground_predict", "commonground_elicit"]
+)
+def test_pulled_hub_source_builds_with_every_declared_license(
+    environment_name: str, tmp_path: Path
+) -> None:
+    project_dir = ROOT / "environments" / environment_name
+    pulled = tmp_path / "pulled"
+    for member in _prime_hub_source_archive_members(project_dir):
+        destination = pulled / member
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(project_dir / member, destination)
+    artifacts = tmp_path / "artifacts"
+    subprocess.run(
+        ["uv", "build", "--wheel", "--out-dir", str(artifacts), str(pulled)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    release_checker = _load_release_checker()
+    target = next(
+        target
+        for target in release_checker.TARGETS
+        if target.name == environment_name.replace("_", "-")
+    )
+    wheel = next(artifacts.glob("*.whl"))
+    release_checker._inspect_wheel(target, wheel)
 
 
 def test_predict_notice_pins_demo_fixture_provenance_and_content() -> None:
@@ -364,7 +393,7 @@ def test_release_gate_rejects_unlisted_package_files(tmp_path: Path) -> None:
         "commonground_predict/rows.JSONL",
     ]
 
-    sdist_path = tmp_path / "commonground_scenarios-0.7.0.tar.gz"
+    sdist_path = tmp_path / "commonground_scenarios-0.7.1.tar.gz"
     with tarfile.open(sdist_path, "w:gz") as archive:
         for name in (
             "PKG-INFO",
@@ -373,10 +402,10 @@ def test_release_gate_rejects_unlisted_package_files(tmp_path: Path) -> None:
             "src/commonground_scenarios/schema/scenario.schema.json",
             "src/commonground_scenarios/eval_real.manifest.json",
         ):
-            member = tarfile.TarInfo(f"commonground_scenarios-0.7.0/{name}")
+            member = tarfile.TarInfo(f"commonground_scenarios-0.7.1/{name}")
             archive.addfile(member, io.BytesIO(b""))
         link = tarfile.TarInfo(
-            "commonground_scenarios-0.7.0/src/commonground_scenarios/human.jsonl"
+            "commonground_scenarios-0.7.1/src/commonground_scenarios/human.jsonl"
         )
         link.type = tarfile.SYMTYPE
         link.linkname = "/approved/private/human_export.jsonl"

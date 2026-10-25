@@ -9,13 +9,14 @@ synthetic group data:
   gaps in organizational documents, or selects the highest-value clarification
   candidate and predicts faction stances.
 
-Version 0.7.0 hardens the human-data intake path and the Context Engine
+Version 0.7.1 fixes source-package legal-file references and supersedes 0.7.0.
+It retains 0.7.0's hardening of the human-data intake path and the Context Engine
 provenance record, and also parses a JSON reply wrapped in one code fence. Its
 corpora, prompts, and answer keys are unchanged from 0.6, and raw JSON replies
 score exactly as before. The exact-artifact model study and its version-pinned
 public evaluation records remain 0.6.0 evidence and are documented in the
 [0.6.0 evaluation report](docs/evaluation-report-0.6.0.md); they are not
-relabeled as 0.7.0 runs.
+relabeled as 0.7.1 runs.
 
 All bundled rows are synthetic and all release answer keys are public. The
 environments are suitable for reproducible open training and evaluation, not a
@@ -27,10 +28,10 @@ contamination-resistant leaderboard or evidence about real human preferences.
 
 | Distribution | Version | Responsibility |
 | --- | ---: | --- |
-| `commonground-score` | 0.7.0 | Shared vote statistics and proper probability scoring. |
-| `commonground-scenarios` | 0.7.0 | Shared synthetic scenario model, generation, schema, and validation. |
-| `commonground-predict` | 0.7.0 | Thin Predict Taskset/Harness and legacy adapter. |
-| `commonground-elicit` | 0.7.0 | Thin Find/Ask Taskset/Harness and legacy adapter. |
+| `commonground-score` | 0.7.1 | Shared vote statistics and proper probability scoring. |
+| `commonground-scenarios` | 0.7.1 | Shared synthetic scenario model, generation, schema, and validation. |
+| `commonground-predict` | 0.7.1 | Thin Predict Taskset/Harness and legacy adapter. |
+| `commonground-elicit` | 0.7.1 | Thin Find/Ask Taskset/Harness and legacy adapter. |
 
 The environments expose native Verifiers v1 plugins and legacy
 `SingleTurnEnv` adapters backed by the same rows and scorers.
@@ -121,7 +122,7 @@ selection results can demonstrate.
 The 0.6.0 task release passed the local artifact gate and release checklist.
 Its frozen exact-artifact model study is published in the
 [0.6.0 evaluation report](docs/evaluation-report-0.6.0.md), following the
-[0.6 evaluation plan](docs/evaluation-plan-0.6.0.md). Version 0.7.0 leaves
+[0.6 evaluation plan](docs/evaluation-plan-0.6.0.md). Version 0.7.1 leaves
 corpora, prompts, and raw-JSON scoring unchanged, so no new model study is
 claimed. Fenced replies are now parsed: fencing made 1,358 of the 1,500
 excluded Claude Sonnet 4.5 rollouts score zero (the other 142 were provider

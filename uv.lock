@@ -282,7 +282,7 @@ wheels = [
 
 [[package]]
 name = "commonground-elicit"
-version = "0.7.0"
+version = "0.7.1"
 source = { editable = "environments/commonground_elicit" }
 dependencies = [
     { name = "commonground-scenarios" },
@@ -326,7 +326,7 @@ dev = [
 
 [[package]]
 name = "commonground-predict"
-version = "0.7.0"
+version = "0.7.1"
 source = { editable = "environments/commonground_predict" }
 dependencies = [
     { name = "commonground-scenarios" },
@@ -345,12 +345,12 @@ requires-dist = [
 
 [[package]]
 name = "commonground-scenarios"
-version = "0.7.0"
+version = "0.7.1"
 source = { editable = "packages/commonground-scenarios" }
 
 [[package]]
 name = "commonground-score"
-version = "0.7.0"
+version = "0.7.1"
 source = { editable = "packages/commonground-score" }
 
 [[package]]

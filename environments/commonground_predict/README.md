@@ -1,9 +1,13 @@
 # commonground-predict
 
-`commonground-predict` 0.7.0 is a deterministic Verifiers environment for
+0.7.1 supersedes 0.7.0: package metadata now references the complete legal
+files under `LICENSES/` that Prime includes in its source archive. Use 0.7.1
+when installing from pulled source; 0.7.0 remains available for reproducibility.
+
+`commonground-predict` 0.7.1 is a deterministic Verifiers environment for
 probabilistic masked-vote prediction over synthetic stakeholder panels. It has
 no judge model: reward is computed locally against eight masked cells per
-snapshot. Version 0.7.0 keeps the 0.6 corpus, prompts, and answers; raw JSON
+snapshot. Version 0.7.1 keeps the 0.6 corpus, prompts, and answers; raw JSON
 replies score exactly as in 0.6.0, and a reply wrapped in one code fence is now
 parsed.
 
@@ -108,8 +112,8 @@ five rollouts. All means exceed the 0.667 uniform reference and remain below
 the strongest matrix-only comparator. GPT-4.1 prompt-view ablations show that
 shuffling statement text did not lower reward, so the study does not establish
 use of statement semantics beyond the visible vote matrix. The public records
-remain pinned to immutable 0.6.0 artifacts and are not relabeled as 0.7.0
-evidence: 0.7.0 scores raw JSON replies the same way but also parses fenced
+remain pinned to immutable 0.6.0 artifacts and are not relabeled as 0.7.1
+evidence: 0.7.1 scores raw JSON replies the same way but also parses fenced
 ones, so these are 0.6.0 results. See the
 [0.6.0 evaluation report](https://github.com/doctor-gonzo/commonground-envs/blob/master/docs/evaluation-report-0.6.0.md).
 

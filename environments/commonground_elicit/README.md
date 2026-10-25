@@ -1,7 +1,11 @@
 # commonground-elicit
 
-`commonground-elicit` 0.7.0 is a deterministic Verifiers environment for two
-related tasks over synthetic organizational documents. Version 0.7.0 keeps the
+0.7.1 supersedes 0.7.0: package metadata now references the complete legal
+files under `LICENSES/` that Prime includes in its source archive. Use 0.7.1
+when installing from pulled source; 0.7.0 remains available for reproducibility.
+
+`commonground-elicit` 0.7.1 is a deterministic Verifiers environment for two
+related tasks over synthetic organizational documents. Version 0.7.1 keeps the
 0.6 corpora, prompts, and answers; raw JSON replies score exactly as in 0.6.0,
 and a reply wrapped in one code fence is now parsed. The tasks are:
 
@@ -181,8 +185,8 @@ Legacy callers may use `load_environment` with the same task arguments.
 The exact-artifact 0.6.0 study evaluated four model families on 100 tasks
 with five rollouts per task. Strict Find F1 ranged from
 0.219 to 0.515 and Ask utility from 0.158 to 0.294. Those public records remain
-pinned to immutable 0.6.0 artifacts and are not relabeled as 0.7.0 evidence:
-0.7.0 also parses fenced replies, so these are 0.6.0 results.
+pinned to immutable 0.6.0 artifacts and are not relabeled as 0.7.1 evidence:
+0.7.1 also parses fenced replies, so these are 0.6.0 results.
 See the
 [0.6.0 evaluation report](https://github.com/doctor-gonzo/commonground-envs/blob/master/docs/evaluation-report-0.6.0.md)
 for methods, component diagnostics, recovery disclosures, and limitations.

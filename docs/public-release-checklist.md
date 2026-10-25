@@ -57,18 +57,27 @@ before pushing environments that depend on them.
 Never paste tokens into commands, logs, or repository files. Use hidden input
 or a configured trusted publisher.
 
-## 5. Push private Hub candidates
+## 5. Push and verify Hub candidates
 
-- [ ] Push exact environment versions as `PRIVATE`, without auto-bumping.
-- [ ] Wait for each Hub build action to report success.
+- [ ] For a new listing, push the exact version as `PRIVATE`, without
+      auto-bumping. For an existing public listing, preserve its visibility:
+      omit `--visibility`, which affects all versions of the environment.
+- [ ] Wait for each exposed Hub build action to report success. If the service
+      exposes no action status, record that limitation and require the pulled
+      artifact checks below before tagging or announcing the release.
 - [ ] Pull the exact versions to a fresh directory.
-- [ ] Verify bundled legal files and dependency pins.
+- [ ] Verify bundled legal files and dependency pins. Every `license-files`
+      entry must exist in the pulled source: Predict requires
+      `LICENSES/Apache-2.0.txt`, `LICENSES/MPL-2.0.txt`, and `LICENSES/NOTICE.txt`;
+      Elicit requires `LICENSES/Apache-2.0.txt`. Prime omits root `LICENSE` and
+      `NOTICE` copies; package metadata must not depend on them.
 - [ ] Install/load all tasksets from the pulled artifacts.
 - [ ] Compare Hub content hashes with the release report.
 
 ## 6. Public transition
 
-- [ ] Change visibility only after private verification passes.
+- [ ] For a new private listing, change visibility only after verification
+      passes. Preserve existing public visibility throughout a version update.
 - [ ] Verify anonymous status, pull, install, and taskset loading.
 - [ ] Upload only exact-artifact evaluation records.
 - [ ] Verify public evaluation pages and record their IDs.

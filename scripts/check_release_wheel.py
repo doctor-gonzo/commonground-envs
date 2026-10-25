@@ -67,12 +67,12 @@ class WheelTarget:
 TARGETS = (
     WheelTarget(
         name="commonground-predict",
-        version="0.7.0",
+        version="0.7.1",
         source_dir=ROOT / "environments" / "commonground_predict",
         requirements=frozenset(
             {
-                "commonground-scenarios==0.7.0",
-                "commonground-score==0.7.0",
+                "commonground-scenarios==0.7.1",
+                "commonground-score==0.7.1",
                 "datasets<6.0.0,>=5.0.1",
                 "verifiers==0.3.0",
             }
@@ -88,22 +88,20 @@ TARGETS = (
         license_expression="Apache-2.0 AND MPL-2.0",
         legal_files=frozenset(
             {
-                "LICENSE",
                 "LICENSES/Apache-2.0.txt",
                 "LICENSES/MPL-2.0.txt",
                 "LICENSES/NOTICE.txt",
-                "NOTICE",
             }
         ),
     ),
     WheelTarget(
         name="commonground-elicit",
-        version="0.7.0",
+        version="0.7.1",
         source_dir=ROOT / "environments" / "commonground_elicit",
         requirements=frozenset(
             {
-                "commonground-scenarios==0.7.0",
-                "commonground-score==0.7.0",
+                "commonground-scenarios==0.7.1",
+                "commonground-score==0.7.1",
                 "datasets<6.0.0,>=5.0.1",
                 "verifiers==0.3.0",
             }
@@ -116,18 +114,18 @@ TARGETS = (
                 f"commonground_elicit/{DEPENDENCY_MANIFEST_NAME}",
             }
         ),
-        legal_files=frozenset({"LICENSE", "LICENSES/Apache-2.0.txt"}),
+        legal_files=frozenset({"LICENSES/Apache-2.0.txt"}),
     ),
     WheelTarget(
         name="commonground-scenarios",
-        version="0.7.0",
+        version="0.7.1",
         source_dir=ROOT / "packages" / "commonground-scenarios",
         requirements=frozenset(),
         bundled_files=frozenset({"commonground_scenarios/schema/scenario.schema.json"}),
     ),
     WheelTarget(
         name="commonground-score",
-        version="0.7.0",
+        version="0.7.1",
         source_dir=ROOT / "packages" / "commonground-score",
         requirements=frozenset(),
         bundled_files=frozenset(),
@@ -431,10 +429,10 @@ import commonground_predict
 import commonground_scenarios
 import commonground_score
 
-assert version("commonground-predict") == "0.7.0"
-assert version("commonground-elicit") == "0.7.0"
-assert version("commonground-scenarios") == "0.7.0"
-assert version("commonground-score") == "0.7.0"
+assert version("commonground-predict") == "0.7.1"
+assert version("commonground-elicit") == "0.7.1"
+assert version("commonground-scenarios") == "0.7.1"
+assert version("commonground-score") == "0.7.1"
 
 assert len(commonground_predict.load_taskset().load()) == 100
 assert len(commonground_elicit.load_taskset().load()) == 100
