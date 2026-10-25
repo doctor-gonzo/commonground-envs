@@ -53,6 +53,11 @@ All notable changes to this project are documented in this file.
   three backticks, optionally tagged `json`. Prompts still ask for bare JSON,
   raw replies score exactly as before, and prose, a second fence, or other
   fence styles still fail.
+- Upgrade the locked aiohttp, anyio, certifi, filelock, fsspec, mcp,
+  multidict, opentelemetry-api, pyjwt, and urllib3 versions past the
+  security advisories published since 0.6.1 (yarl moves with aiohttp), and
+  regenerate the bundled exact dependency manifests. Declared dependency
+  ranges are unchanged.
 
 ## 0.6.1 - 2026-09-04
 
