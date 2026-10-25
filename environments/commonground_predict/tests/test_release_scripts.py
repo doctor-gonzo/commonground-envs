@@ -7,6 +7,7 @@ import json
 import os
 import random
 import shutil
+import stat
 import sys
 import tomllib
 from pathlib import Path
@@ -855,27 +856,81 @@ def test_ingest_refuses_case_only_output_manifest_alias(
     assert "output and manifest paths must be different" in capsys.readouterr().err
 
 
-def test_ingest_refuses_a_directory_destination_without_leftovers(
+@pytest.mark.parametrize(
+    "make_destination",
+    [
+        pytest.param(Path.mkdir, id="directory"),
+        pytest.param(
+            getattr(os, "mkfifo", None),
+            id="pipe",
+            marks=pytest.mark.skipif(
+                not hasattr(os, "mkfifo"), reason="needs named pipes"
+            ),
+        ),
+    ],
+)
+@pytest.mark.parametrize("destination_option", ["--output", "--manifest"])
+def test_ingest_refuses_a_non_regular_destination_without_leftovers(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    make_destination: Any,
+    destination_option: str,
+) -> None:
+    source = write_jsonl(tmp_path / "source.jsonl", [valid_real_snapshot()])
+    destination = tmp_path / "approved"
+    make_destination(destination)
+    arguments = [
+        str(source),
+        "--output",
+        str(tmp_path / "output.jsonl"),
+        "--manifest",
+        str(tmp_path / "manifest.json"),
+    ]
+    arguments[arguments.index(destination_option) + 1] = str(destination)
+
+    def refuse_backup(path: Path) -> None:
+        raise AssertionError(f"tried to back up {path}")
+
+    # Fail at once if the refusal regresses; backing up a pipe blocks forever.
+    monkeypatch.setattr(ingest_snapshots_module, "_backup_existing", refuse_backup)
+
+    assert ingest_main(arguments) == 1
+    assert "destination is not a regular file" in capsys.readouterr().err
+    assert sorted(path.name for path in tmp_path.iterdir()) == [
+        "approved",
+        "source.jsonl",
+    ]
+
+
+@pytest.mark.skipif(
+    not hasattr(os, "geteuid") or os.geteuid() == 0,
+    reason="needs a user whose file permissions are enforced",
+)
+def test_ingest_fails_cleanly_on_an_unreadable_destination(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     source = write_jsonl(tmp_path / "source.jsonl", [valid_real_snapshot()])
-    destination_dir = tmp_path / "approved"
-    destination_dir.mkdir()
+    output = tmp_path / "output.jsonl"
+    output.write_text("old-output\n", encoding="utf-8")
+    output.chmod(0)
 
     result = ingest_main(
         [
             str(source),
             "--output",
-            str(destination_dir),
+            str(output),
             "--manifest",
             str(tmp_path / "manifest.json"),
         ]
     )
 
+    output.chmod(0o600)
     assert result == 1
-    assert "destination is a directory" in capsys.readouterr().err
+    assert "Permission denied" in capsys.readouterr().err
+    assert output.read_text(encoding="utf-8") == "old-output\n"
     assert sorted(path.name for path in tmp_path.iterdir()) == [
-        "approved",
+        "output.jsonl",
         "source.jsonl",
     ]
 
@@ -887,10 +942,10 @@ def test_ingest_removes_its_backup_when_copying_fails(
     output = tmp_path / "output.jsonl"
     output.write_text("old-output\n", encoding="utf-8")
 
-    def fail_copy(source_path: Path, destination_path: Path) -> None:
+    def fail_copy(existing_file: Any, backup_file: Any) -> None:
         raise OSError("forced backup copy failure")
 
-    monkeypatch.setattr(ingest_snapshots_module.shutil, "copy2", fail_copy)
+    monkeypatch.setattr(ingest_snapshots_module.shutil, "copyfileobj", fail_copy)
 
     result = ingest_main(
         [
@@ -910,6 +965,23 @@ def test_ingest_removes_its_backup_when_copying_fails(
     ]
 
 
+def test_ingest_removes_its_backup_when_copying_is_interrupted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    output = tmp_path / "output.jsonl"
+    output.write_text("old-output\n", encoding="utf-8")
+
+    def interrupt_copy(existing_file: Any, backup_file: Any) -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(ingest_snapshots_module.shutil, "copyfileobj", interrupt_copy)
+
+    with pytest.raises(KeyboardInterrupt):
+        ingest_snapshots_module._backup_existing(output)
+
+    assert list(tmp_path.iterdir()) == [output]
+
+
 def test_ingest_removes_its_temporary_file_when_writing_fails(tmp_path: Path) -> None:
     # A lone surrogate cannot be encoded, so the write fails part way.
     with pytest.raises(UnicodeEncodeError):
@@ -918,9 +990,19 @@ def test_ingest_removes_its_temporary_file_when_writing_fails(tmp_path: Path) ->
     assert list(tmp_path.iterdir()) == []
 
 
+@pytest.mark.parametrize(
+    "write_file",
+    [
+        lambda output: ingest_snapshots_module._write_temporary(output, "human\n"),
+        lambda output: ingest_snapshots_module._backup_existing(output),
+    ],
+    ids=["temporary", "backup"],
+)
 def test_ingest_writes_temporary_files_through_their_handle(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, write_file: Any
 ) -> None:
+    output = tmp_path / "output.jsonl"
+    output.write_text("old human output\n", encoding="utf-8")
     victim = tmp_path / "victim.txt"
     victim.write_text("victim\n", encoding="utf-8")
     real_named_temporary_file = ingest_snapshots_module.tempfile.NamedTemporaryFile
@@ -936,7 +1018,7 @@ def test_ingest_writes_temporary_files_through_their_handle(
         ingest_snapshots_module.tempfile, "NamedTemporaryFile", swap_name_for_symlink
     )
 
-    ingest_snapshots_module._write_temporary(tmp_path / "output.jsonl", "human\n")
+    write_file(output)
 
     assert victim.read_text(encoding="utf-8") == "victim\n"
 
@@ -949,6 +1031,8 @@ def test_ingest_rolls_back_output_when_manifest_publish_fails(
     manifest = tmp_path / "manifest.json"
     output.write_text("old-output\n", encoding="utf-8")
     manifest.write_text("old-manifest\n", encoding="utf-8")
+    output.chmod(0o644)
+    manifest.chmod(0o644)
     real_replace = ingest_snapshots_module.os.replace
     publish_count = 0
 
@@ -975,6 +1059,10 @@ def test_ingest_rolls_back_output_when_manifest_publish_fails(
     assert result == 1
     assert output.read_text(encoding="utf-8") == "old-output\n"
     assert manifest.read_text(encoding="utf-8") == "old-manifest\n"
+    # Backups stay owner-only: copying the old file's mode could leave a
+    # readable copy of human data in a shared output directory.
+    assert stat.S_IMODE(output.stat().st_mode) == 0o600
+    assert stat.S_IMODE(manifest.stat().st_mode) == 0o600
 
 
 def test_ingest_rolls_back_when_interrupted_between_publish_steps(

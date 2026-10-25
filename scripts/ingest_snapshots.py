@@ -147,8 +147,9 @@ def write_outputs(
             raise ValueError(
                 f"refusing to write inside a repository checkout: {destination}"
             )
-        if destination.is_dir():
-            raise ValueError(f"destination is a directory: {destination}")
+        # Backing up an existing pipe or device could block or never finish.
+        if destination.exists() and not destination.is_file():
+            raise ValueError(f"destination is not a regular file: {destination}")
     if str(output_path.resolve()).casefold() == str(manifest_path.resolve()).casefold():
         raise ValueError("output and manifest paths must be different")
     if not snapshots:
@@ -238,19 +239,26 @@ def _write_temporary(destination: Path, content: str) -> Path:
 def _backup_existing(destination: Path) -> Path | None:
     if not destination.exists():
         return None
-    with tempfile.NamedTemporaryFile(
-        dir=destination.parent,
-        prefix=f".{destination.name}.",
-        suffix=".backup",
-        delete=False,
-    ) as backup_file:
-        backup_path = Path(backup_file.name)
+    backup_path: Path | None = None
     try:
-        shutil.copy2(destination, backup_path)
+        with (
+            destination.open("rb") as existing_file,
+            tempfile.NamedTemporaryFile(
+                dir=destination.parent,
+                prefix=f".{destination.name}.",
+                suffix=".backup",
+                delete=False,
+            ) as backup_file,
+        ):
+            backup_path = Path(backup_file.name)
+            # Copy through the exclusively created handle; reopening the name
+            # would let a symlink swapped in meanwhile capture the old output.
+            shutil.copyfileobj(existing_file, backup_file)
+        return backup_path
     except BaseException:
-        backup_path.unlink(missing_ok=True)
+        if backup_path is not None:
+            backup_path.unlink(missing_ok=True)
         raise
-    return backup_path
 
 
 def _restore_destination(destination: Path, backup: Path | None) -> None:

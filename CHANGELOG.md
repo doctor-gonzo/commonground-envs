@@ -33,8 +33,14 @@ All notable changes to this project are documented in this file.
   human snapshot's `source_commit` names the Context Engine exporter commit.
 - Resolve the release check's `--output-dir`, so a relative path no longer
   breaks the fresh-install step.
-- Refuse a directory as a human-intake destination, and remove the
-  temporary backup file whenever backing up an existing output fails.
+- Refuse a directory, pipe, or other special file as a human-intake
+  destination, and remove the temporary backup file whenever backing up an
+  existing output fails.
+- Write intake's backup of a previous output through the open file it was
+  created with, instead of reopening it by name, so another user who can
+  rename files in the output directory cannot redirect the copy. Backups no
+  longer copy the old file's permissions, so after a failed publish the
+  previous output and manifest come back owner-only, like new ones.
 - Accept exactly one Markdown code fence around a Predict or Elicit JSON
   reply. Prompts still ask for bare JSON, raw replies score exactly as
   before, and prose or a second fence still fails.
